@@ -98,6 +98,8 @@ fn candidate_kind(name: &str) -> Option<&'static str> {
         Some("before-schema-2")
     } else if uuid_suffix(name, "sidetask-before-schema-3-") {
         Some("before-schema-3")
+    } else if uuid_suffix(name, "sidetask-before-schema-4-") {
+        Some("before-schema-4")
     } else if uuid_suffix(name, "sidetask-safety-backup-") {
         Some("safety-backup")
     } else {
@@ -787,7 +789,7 @@ mod tests {
         assert_eq!(candidates.len(), 1);
         let candidate = &candidates[0];
         assert_eq!(candidate.file_name, candidate_name);
-        assert_eq!(candidate.schema_version, 3);
+        assert_eq!(candidate.schema_version, super::super::SCHEMA_VERSION);
         assert_eq!(candidate.kind, "safety-backup");
         assert_eq!(candidate.task_count, snapshot.tasks.len());
         assert_eq!(candidate.plan_count, snapshot.plans.len());
@@ -1177,7 +1179,11 @@ mod tests {
     }
     #[test]
     fn legacy_backup_is_not_upgraded_during_scan_or_recovery_copy() {
-        for (version, kind) in [(1, "before-schema-2"), (2, "before-schema-3")] {
+        for (version, kind) in [
+            (1, "before-schema-2"),
+            (2, "before-schema-3"),
+            (3, "before-schema-4"),
+        ] {
             let temp = Temp::new();
             let (original_backup, _) = temp.valid_backup();
             let backup = temp
@@ -1210,7 +1216,10 @@ mod tests {
             assert_eq!(fs::read(&backup).unwrap(), bytes);
             assert_eq!(fs::read(temp.root.join(DATABASE)).unwrap(), bytes);
             let repo = SqliteRepository::open(&temp.root.join(DATABASE)).unwrap();
-            assert_eq!(super::super::verify_database(&repo.connection).unwrap(), 3);
+            assert_eq!(
+                super::super::verify_database(&repo.connection).unwrap(),
+                super::super::SCHEMA_VERSION
+            );
             assert_eq!(fs::read(&backup).unwrap(), bytes);
         }
     }

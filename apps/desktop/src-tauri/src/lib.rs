@@ -14,6 +14,7 @@ use tauri::{Emitter, Manager};
 pub struct AppState {
     pub service: Mutex<TaskService>,
     pub dock: Mutex<platform::DockRuntime>,
+    pub console: platform::console_window::ConsoleRuntime,
     pub exit: Mutex<platform::exit::ExitRuntime>,
 }
 
@@ -26,13 +27,15 @@ fn initialize_task_state(data_dir: &std::path::Path) -> Result<AppState, String>
     std::fs::create_dir_all(data_dir).map_err(|e| format!("无法访问本地数据目录：{e}"))?;
     let repository = SqliteRepository::open(&data_dir.join("sidetask.sqlite3"))?;
     let service = TaskService::new(Box::new(repository))?;
-    let placement = service
-        .repository
-        .load_placement()?
-        .and_then(|p| serde_json::from_str(&p).ok())
+    let raw_placement = service.repository.load_placement()?;
+    let placement = raw_placement
+        .as_deref()
+        .and_then(|p| serde_json::from_str(p).ok())
         .unwrap_or_default();
+    let console = platform::console_window::ConsoleRuntime::new(raw_placement.as_deref());
     Ok(AppState {
         service: Mutex::new(service),
+        console,
         dock: Mutex::new(platform::DockRuntime::new(placement)),
         exit: Mutex::new(platform::exit::ExitRuntime::default()),
     })
@@ -132,6 +135,15 @@ async fn get_window_status(
 ) -> Result<platform::WindowStatus, String> {
     require_window(window.label(), &["console"])?;
     platform::get_window_status(&app)
+}
+
+#[tauri::command]
+fn get_console_position_status(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<platform::console_window::PositionStatus, String> {
+    require_window(window.label(), &["console"])?;
+    platform::console_window::status(&app)
 }
 
 #[tauri::command]
@@ -275,6 +287,7 @@ pub fn run() {
             window_action,
             get_monitors,
             get_window_status,
+            get_console_position_status,
             get_pending_exit,
             resolve_exit,
             export_backup,
@@ -520,6 +533,7 @@ mod security_tests {
             "allow-restore-backup",
             "allow-resolve-exit",
             "allow-get-startup-recovery",
+            "allow-get-console-position-status",
             "allow-recover-startup-backup",
             "allow-restart-after-recovery",
         ] {
@@ -530,6 +544,7 @@ mod security_tests {
         }
         for command in [
             "allow-get-startup-recovery",
+            "allow-get-console-position-status",
             "allow-recover-startup-backup",
             "allow-restart-after-recovery",
         ] {

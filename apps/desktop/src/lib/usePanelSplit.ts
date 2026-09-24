@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, PointerEvent } from 'react';
 import { setInteractionLock } from './native';
 
@@ -15,6 +15,8 @@ export function usePanelSplit(saved: number, busy: boolean, commit: (value: numb
   const latest = useRef({ saved, busy, commit, onWindowError });
   latest.current = { saved, busy, commit, onWindowError };
   const divider = useRef<HTMLDivElement>(null);
+  const focusAfterRemoval = useRef<Element | null>(null);
+  const focusAfterFailure = useRef<Element | null>(null);
   const draft = useRef<Draft | null>(null);
   const gesture = useRef<Gesture | null>(null);
   const inFlight = useRef(false);
@@ -34,35 +36,50 @@ export function usePanelSplit(saved: number, busy: boolean, commit: (value: numb
     else if (failure) {
       if (saved === current.value) {
         const previousFocus = document.activeElement;
+        focusAfterControlsDisappear(previousFocus);
         draft.current = null;
         setValue(saved);
         setFailure(null);
-        focusAfterControlsDisappear(previousFocus);
       } else setFailure(saved !== current.base ? 'conflict' : 'write');
     }
   }, [saved, saving, failure]);
+  useLayoutEffect(() => {
+    if (failure) return;
+    const previous = focusAfterRemoval.current;
+    focusAfterRemoval.current = null;
+    // A RAF may precede React's next commit. Restore only after the failure
+    // controls have actually been removed, without taking another focus target.
+    if (alive.current && document.hasFocus() && previous && !previous.isConnected && (document.activeElement === document.body || !document.activeElement?.isConnected)) divider.current?.focus({ preventScroll: true });
+  }, [failure]);
+  useLayoutEffect(() => {
+    if (saving) return;
+    const previous = focusAfterFailure.current;
+    focusAfterFailure.current = null;
+    // A failed retry can retain its button while React re-enables it.
+    if (alive.current && document.hasFocus() && previous instanceof HTMLElement && previous.isConnected && !previous.matches(':disabled') && (document.activeElement === document.body || !document.activeElement?.isConnected)) previous.focus({ preventScroll: true });
+  }, [saving, failure]);
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
+      focusAfterRemoval.current = null;
+      focusAfterFailure.current = null;
       gesture.current = null;
       if (ownsLock.current) lock(false);
     };
   }, []);
 
   function focusAfterControlsDisappear(previous: Element | null) {
-    requestAnimationFrame(() => {
-      if (alive.current && document.hasFocus() && previous && !previous.isConnected && (document.activeElement === document.body || !document.activeElement?.isConnected)) divider.current?.focus({ preventScroll: true });
-    });
+    if (failure) focusAfterRemoval.current = previous;
   }
   function discard() {
     if (inFlight.current) return;
     const previousFocus = document.activeElement;
+    focusAfterControlsDisappear(previousFocus);
     draft.current = null;
     gesture.current = null;
     setValue(latest.current.saved);
     setFailure(null);
-    focusAfterControlsDisappear(previousFocus);
     if (ownsLock.current) lock(false);
   }
   async function save(rebase = false) {
@@ -89,15 +106,13 @@ export function usePanelSplit(saved: number, busy: boolean, commit: (value: numb
       await latest.current.commit(current.value);
       draft.current = null;
       if (alive.current) {
-        setFailure(null);
         focusAfterControlsDisappear(previousFocus);
+        setFailure(null);
       }
     } catch {
       if (alive.current) {
+        focusAfterFailure.current = previousFocus;
         setFailure(current.base !== latest.current.saved ? 'conflict' : 'write');
-        requestAnimationFrame(() => {
-          if (previousFocus instanceof HTMLElement && previousFocus.isConnected && !previousFocus.matches(':disabled') && (document.activeElement === document.body || !document.activeElement?.isConnected)) previousFocus.focus({ preventScroll: true });
-        });
       }
     } finally {
       inFlight.current = false;

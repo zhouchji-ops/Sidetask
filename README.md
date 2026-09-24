@@ -33,7 +33,7 @@ Todobar 的窗口隐藏、悬停和数据模型与需求有明显差距，因此
 
 「加入今日」是给同一任务建立今日计划引用，不是复制一条任务。任意位置完成或撤销完成，都更新同一个任务状态。
 
-任务可移入回收站并恢复，保留原 ID、DDL、完成状态与所有日期的计划。正常搜索排除回收站，回收站有独立搜索；删除与恢复入口保留编辑草稿和冲突处理。当前 SQLite 为 schema3，便携任务备份为 v2，包含回收站记录；没有自动清空或永久删除。分区比例已支持操作结束后保存、取消和失败恢复；下一段补控制台窗口位置与首次说明，见[窗口偏好计划](docs/research/WINDOW_PREFERENCES.md)。
+任务可移入回收站并恢复，保留原 ID、DDL、完成状态与所有日期的计划。正常搜索排除回收站，回收站有独立搜索；删除与恢复入口保留编辑草稿和冲突处理。当前 SQLite 为 schema4，便携任务备份为 v2，包含回收站记录；没有自动清空或永久删除。分区比例已支持操作结束后保存、取消和失败恢复；控制台位置/尺寸记忆已接入并在集成验收，首次说明待补，见[窗口偏好计划](docs/research/WINDOW_PREFERENCES.md)。
 
 ## 目录
 
@@ -64,7 +64,7 @@ Todobar 的窗口隐藏、悬停和数据模型与需求有明显差距，因此
 
 运行入口在 [apps/desktop/README.md](apps/desktop/README.md)：进入该目录后 `npm ci`、`npm run dev` 可启动浏览器原型；原生开发使用 `npm run tauri -- dev`（需要 Rust 和平台构建环境）。浏览器只能验证布局和任务交互，不能证明真实多屏窗口能力。生成物与个人任务数据库不提交仓库。
 
-本地分支为 `main`，`origin` 已连接用户指定仓库。旧基线 48e5d4f 的 Mac App / Windows NSIS 构建通过；后续 b781899 的 Windows Clippy 因条件编译中的多余 `mut` 失败，已由 fc182cf 修复。[该修复的 CI](https://github.com/changjin-cpu/SideTask/actions/runs/36042694723)正在运行，Windows Clippy 步骤已通过，不能据此宣称本轮回收站已获双平台验收。GitHub artifact 配额仍阻塞产物保留。最新可运行包与验证结果见 STATUS。
+本地分支为 `main`，`origin` 已连接用户指定仓库，用户已授权推送和 CI。[092cfa9 的 CI](https://github.com/changjin-cpu/SideTask/actions/runs/36046961175)中 Mac 99TS/93Rust/67UI 和 App 构建通过；Windows 99TS/91Rust 通过，午夜 UI 测试因加载跨过预置的一秒边界失败，测试时钟已修正并待新 CI。GitHub artifact 配额仍阻塞产物保留。最新可运行包与验证结果见 STATUS。
 
 文档索引见 [docs/README.md](docs/README.md)。调研记录日期：2026-09-24。
 

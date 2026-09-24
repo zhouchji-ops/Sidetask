@@ -1,3 +1,7 @@
+#[cfg(any(target_os = "macos", test))]
+mod console_coordinates;
+mod console_geometry;
+pub mod console_window;
 pub mod exit;
 mod geometry;
 #[cfg(target_os = "macos")]
@@ -130,6 +134,8 @@ fn authorize_window_action(label: &str, action: &str) -> Result<(), String> {
             "togglePanel",
             "interaction",
             "retryWindowSettings",
+            "retryConsolePosition",
+            "discardConsolePosition",
         ]
         .contains(&action),
         "edge-panel" => [
@@ -374,6 +380,9 @@ fn hide_panel(
     Ok(())
 }
 pub fn open_console(app: &tauri::AppHandle, payload: Value) -> Result<(), String> {
+    if app.try_state::<AppState>().is_some() {
+        return console_window::open(app, payload);
+    }
     let console = window(app, "console")?;
     console.unminimize().map_err(error)?;
     console.show().map_err(error)?;
@@ -458,8 +467,13 @@ fn setup_console(app: &mut tauri::App, recovery: bool) -> Result<(), Box<dyn std
     .inner_size(1180., 790.)
     .min_inner_size(880., 620.)
     .center()
+    .visible(recovery)
+    .focused(recovery)
     .on_navigation(local_navigation)
     .build()?;
+    if !recovery {
+        console_window::start(app.handle(), &console)?;
+    }
     let console_copy = console.clone();
     console.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -469,7 +483,19 @@ fn setup_console(app: &mut tauri::App, recovery: bool) -> Result<(), Box<dyn std
                     eprintln!("recovery close request: {error}");
                 }
             } else {
-                let _ = console_copy.hide();
+                let _ = console_window::hide(console_copy.app_handle());
+            }
+        }
+        if !recovery
+            && matches!(
+                event,
+                tauri::WindowEvent::Moved(_)
+                    | tauri::WindowEvent::Resized(_)
+                    | tauri::WindowEvent::ScaleFactorChanged { .. }
+            )
+        {
+            if let Some(state) = console_copy.app_handle().try_state::<AppState>() {
+                state.console.changed();
             }
         }
     });
@@ -932,6 +958,12 @@ pub fn window_action(
         return open_console(app, payload);
     }
     crate::task_state(app)?;
+    if action == "retryConsolePosition" {
+        return console_window::retry(app);
+    }
+    if action == "discardConsolePosition" {
+        return console_window::discard(app);
+    }
     if action == "startDrag" {
         if !["edge-handle", "edge-panel"].contains(&caller.label()) {
             return Err("此窗口不能停靠。".into());
@@ -1104,6 +1136,11 @@ mod tests {
         assert!(authorize_window_action("edge-handle", "resizePanel").is_err());
         assert!(authorize_window_action("edge-handle", "interaction").is_err());
         assert!(authorize_window_action("console", "startDrag").is_err());
+        for action in ["retryConsolePosition", "discardConsolePosition"] {
+            assert!(authorize_window_action("console", action).is_ok());
+            assert!(authorize_window_action("edge-panel", action).is_err());
+            assert!(authorize_window_action("edge-handle", action).is_err());
+        }
         assert!(authorize_window_action("edge-panel", "cancelDrag").is_ok());
     }
 

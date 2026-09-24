@@ -80,7 +80,12 @@ test('键盘重试失败保留按钮焦点，重试成功及恢复后可继续�
   await expect.poll(() => storedSplit(page)).toBe(69);
 });
 
-test('保存等待时不抢走已移动的焦点，外部相同比例提交后恢复键盘入口', async ({ page }) => {
+test('保存等待时不抢走已移动的焦点，外部相同比例提交后恢复键盘入口', async ({ page, browserName }) => {
+  if (browserName === 'chromium') {
+    // Slow rendering can let a RAF run before React removes the error controls.
+    const renderer = await page.context().newCDPSession(page);
+    await renderer.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+  }
   await preview(page);
   await failedAdjustment(page);
   await failWrites(page, false);
@@ -107,6 +112,8 @@ test('保存等待时不抢走已移动的焦点，外部相同比例提交后�
   await failedAdjustment(page);
   await expect(separator(page)).toHaveAttribute('aria-valuenow', '64');
   await retry(page).focus();
+  await expect(retry(page)).toBeFocused();
+  expect(await page.evaluate(() => document.hasFocus())).toBe(true);
   // A committed snapshot notification models another window saving this draft.
   // This is a browser focus regression, not native application-focus evidence.
   await page.evaluate(async key => {
@@ -120,6 +127,7 @@ test('保存等待时不抢走已移动的焦点，外部相同比例提交后�
   }, key);
   await expect(retry(page)).toHaveCount(0);
   await expect(separator(page)).toHaveAttribute('aria-disabled', 'false');
+  expect(await page.evaluate(() => document.hasFocus())).toBe(true);
   await expect(separator(page)).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect.poll(() => storedSplit(page)).toBe(69);

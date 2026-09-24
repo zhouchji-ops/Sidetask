@@ -33,7 +33,7 @@ async function setup(page: Page) {
           if (command === 'plugin:event|unlisten') { listeners.delete(args.eventId); return; }
           if (command === 'get_startup_recovery' || command === 'get_pending_exit') return null;
           if (command === 'get_snapshot') return structuredClone(snapshot);
-          if (command === 'get_window_status') return { pending: false, error: null };
+          if (command === 'get_window_status' || command === 'get_console_position_status') return { pending: false, error: null };
           if (command === 'window_action' || command === 'resolve_exit') return;
           if (command === 'mutate') {
             if (harness.delayAction === args.action.type) await new Promise<void>(resolve => { harness.release = resolve; });

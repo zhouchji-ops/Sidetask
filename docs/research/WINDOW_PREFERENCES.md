@@ -1,6 +1,6 @@
 # 窗口偏好与首次说明：最小实施计划
 
-2026-09-25，方案及分阶段实现记录。**阶段一分区比例已实现，99TS/93Rust/67UI与Mac构建通过，原生待验；控制台几何与首次说明尚未实现，未安装插件、未完成本阶段系统窗口操作**。接续 B09（分区/尺寸）、B19/B21（控制台恢复）、B25（首次使用）；当前生命周期验收与交付状态仍以 STATUS 为准。
+2026-09-25，方案及分阶段实现记录。**分区比例与控制台几何已实现；最新集成检查见STATUS，原生待验，首次说明未实现。未安装插件、未完成本阶段系统窗口操作**。接续 B09（分区/尺寸）、B19/B21（控制台恢复）、B25（首次使用）；当前生命周期验收与交付状态仍以 STATUS 为准。
 
 ## 结论与现状
 
@@ -37,7 +37,7 @@
 
 在现有 placement JSON 增加可缺省的 `console` 子对象：普通窗口逻辑 inner width/height、屏幕名称及原位置辅助匹配、相对该屏工作区的逻辑 outer x/y 偏移、最大化偏好。偏移允许负值以表达正常横跨屏幕；不把物理桌面原点截为零。保存的是正常矩形，最小化、全屏和最大化过程的临时矩形不能覆盖它；首轮不恢复全屏、隐藏或焦点状态。
 
-设备记录由一个运行态持有；小窗拖动/缩放与控制台保存均合并最新字段。尤其当前 `finish_drag` 会构造完整 Placement，扩展后必须保留 console，控制台保存也不能覆盖刚更新的小窗位置。Repository 为仅设备几何更新提供事务合并方法：不改 Task、Plan、snapshot revision，不重编码 snapshot；不新增第二份文件存储。便携任务恢复继续保留这些本机配置。若最终选择新 app_state key，则必须同步现有严格 key 白名单和版本迁移，不能直接插入一个旧程序拒绝读取的记录。
+设备记录分开持有 edge 与 console 运行态；在 SQLite 同一个 placement key 中按各自拥有的字段合并。`finish_drag` 及失败回滚只管理 edge，不能用内存整份对象覆盖数据库中更新的 console。Repository 为仅设备几何更新提供事务合并方法：不改 Task、Plan、snapshot revision，不重编码 snapshot；不新增第二份文件存储。便携任务恢复继续保留这些本机配置。若最终选择新 app_state key，则必须同步现有严格 key 白名单和版本迁移，不能直接插入一个旧程序拒绝读取的记录。
 
 恢复次序：
 
@@ -78,10 +78,26 @@
 
 定向证据：99/99 TS、93/93 Rust（含临时SQLite保存重开与完整任务/计划对比），fmt/clippy通过；5/5 panel-split UI覆盖拖动单次写入、重载/跨窗同步、取消与真实捕获丢失、非主指针、键盘合并、慢保存、失败回退和冲突。另有368×380失败态标题/首项与footer可达检查。最后焦点补丁后完整67UI（1.4分钟、无重试）与Mac构建通过，资源index-B-9KMQ89.js / index-BN07M5pO.css；原生缺口以[STATUS](../delivery/STATUS.md)为准，浏览器IPC协议不代表真实系统窗口验证。
 
-## 下一阶段几何落点复核（尚未实现）
+## 几何实施前复核（历史计划，当前实现见下节）
 
 独立只读复审确认，不能仅给Placement追加字段后直接保存：finish_drag重建整个Placement，resize及多处失败/解锁回退也会整份覆盖，必须让edge与console字段各自合并。为console元数据提供IMMEDIATE事务patch：只读取/更新placement现有key，不重编码snapshot或改变Task/Plan/revision，也不发任务变更事件；成功/错误状态单独保存，不能复用被tick清除的window_error。
 
 建议console记录普通窗口的逻辑inner尺寸、屏幕名称及物理原点辅助匹配、相对工作区的逻辑outer偏移和maximized。运行态存正常矩形、候选、稳定时间、generation、restoring与错误；最小化/全屏/最大化过渡不能覆盖普通矩形。事件只投递重采样，不在native回调持锁读SQLite；在锁外采样和应用原生调用，过期generation丢弃。关闭前排最终采样/flush；已确认退出时在authorized标志前落盘，释放锁后退出，几何失败不能卡住草稿退出。
 
-几何扩展阶段建议统一schema4迁移：旧schema3 Placement会忽略未知console字段并在小窗整份保存时静默丢弃，和当前panelSplit被旧Settings明确拒绝不同。用原有先备份/保原snapshot和placement字节方式建立版本边界，同时更新恢复版本/候选；不搬任务表。字段坏时只回退对应console偏好，不因整个placement反序列化失败丢掉有效edge数据。当前未作这些改动，schema仍3。
+几何扩展阶段建议统一schema4迁移：旧schema3 Placement会忽略未知console字段并在小窗整份保存时静默丢弃，和当前panelSplit被旧Settings明确拒绝不同。用原有先备份/保原snapshot和placement字节方式建立版本边界，同时更新恢复版本/候选；不搬任务表。字段坏时只回退对应console偏好，不因整个placement反序列化失败丢掉有效edge数据。复核时尚未作这些改动，当时schema仍3；随后实现见下节。
+
+## 阶段二实际实现与复盘
+
+采用 [ADR-0006](../decisions/0006-console-window-preferences.md)。schema4升级前一致性备份，原snapshot/placement字节保留。Repository `save_console_placement`只在IMMEDIATE事务中patch console，不读取、校验或重编码任务快照、不改revision/baseline；edge保存只patch monitorName/monitorPosition/offset，保留其他字段。两个连接交错写、CAS旧任务、写失败回滚、损坏/超限元数据和schema3升级失败均有合成SQLite回归。新增设备状态不进入便携v2任务备份。
+
+`console_geometry`负责显示器匹配、逻辑客户区大小、真实边框、工作区与可达标题栏；恢复失败的应急位置按**当前真实外框宽度**保留关闭端和拖动段，不能假设失败的set_size已经生效。大窗仍可正常跨屏。极小工作区优先于880×620常规最小值；UI在640×480与800×560的极简/暖刊新建、详情、设置链路均可操作，证据见手工记录。这是浏览器布局验证，不是系统窗口验收。
+
+锁定 Tao 0.35.3 与 tauri-runtime-wry 2.11.4 本地依赖源码复查发现，Mac窗口origin按窗口自身scale换算，而每屏origin/workArea按各屏scale换算，混合DPI不能直接相交。`console_coordinates`把各自坐标除以来源scale，统一为全局AppKit逻辑DIP；算法scale=1，原物理屏原点仅作身份提示，原生设置使用LogicalPosition/LogicalSize。Windows保留物理桌面平面及目标scale。整数逻辑转换有至多0.5DIP的单项取整误差，边框与客户区分别取整后外框至多1DIP；恢复确认容忍2单位。不复制上游代码、不增依赖。**同类差异仍存在于旧edge路径，另列[B33](EDGE_COORDINATES.md)，不能因控制台修复宣称整个小窗多屏通过。**
+
+控制台隐藏创建，先恢复并核对普通矩形，再核对最大化，然后由明确启动意图显示；隐藏恢复本身不抢焦点。事件回调只增加代次/投递意图，worker在锁外采样和原生应用，main-thread应用前复核代次。移动稳定400ms后保存，平时每5秒及显式重开检查可达性；不逐帧重写任务。首次恢复有3秒退路，错误保留旧记录并尝试保守显示；关闭取消待显示意图，不在初始化末尾又弹回。关闭隐藏和确认退出补采样/flush，几何失败不阻塞已明确处理草稿的退出。
+
+复审修复了：读取失败后错误解除保存阻断；未采样新位置在“丢弃”后又保存；部分set_position/set_size失败污染旧偏好；最大化失败被当成普通状态保存；flush把未保存误报成功。失败后自动采样不能改旧saved；“重试保存位置”明确保存当前可用位置，“不保存本次位置”记住当前候选并忽略直到下一次移动，均先成功采集再提交运行态切换。反馈独立于edge窗口错误和任务草稿，按钮等待时允许继续编辑，失败焦点归还只在用户没有主动转移焦点时发生。
+
+Windows 092cfa9 CI的午夜断言失败来自运行中的测试时钟跨过初始一秒，产品正确显示到期；按[Playwright官方Clock](https://playwright.dev/docs/api/class-clock#clock-pause-at)改成加载就绪后暂停到指定时刻，再显式推进，注入1.5秒慢加载重复3次通过。新CI仍须验证。
+
+本阶段检查、失败尝试、包和原生限制见 [控制台验收记录](../../tests/manual/2026-09-25-console-geometry.md) / [STATUS](../delivery/STATUS.md)。纯状态/故障回归不能当作原生故障注入成功，Mac锁屏及Windows/混DPI真机矩阵仍未闭合。

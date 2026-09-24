@@ -2,23 +2,28 @@ pub mod recovery;
 
 use crate::domain::Snapshot;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
+use serde_json::{Map, Value};
 use std::{
     cell::RefCell,
     fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
 };
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 const APPLICATION_ID: i64 = 0x5344544b;
 const MAX_SNAPSHOT_BYTES: i64 = 16 * 1024 * 1024;
+const MAX_PLACEMENT_BYTES: usize = 64 * 1024;
 
 /// One shared database and one transaction per command. Older schemas are
-/// retained in a verified SQLite backup before the schema 3 marker upgrade.
+/// retained in a verified SQLite backup before the schema 4 marker upgrade.
 pub trait Repository: Send {
     fn load(&self) -> Result<Option<Snapshot>, String>;
     fn save(&mut self, snapshot: &Snapshot) -> Result<(), String>;
     fn load_placement(&self) -> Result<Option<String>, String>;
     fn save_placement(&mut self, snapshot: &Snapshot, placement: &str) -> Result<(), String>;
+    fn save_console_placement(&mut self, _console_json: &str) -> Result<(), String> {
+        Err("此存储不支持保存控制台位置。".into())
+    }
     fn backup(&self) -> Result<PathBuf, String> {
         Err("此存储不支持安全备份；未恢复数据。".into())
     }
@@ -61,7 +66,7 @@ fn verify_schema(connection: &Connection) -> Result<i64, String> {
     let application: i64 = connection
         .query_row("PRAGMA application_id", [], |r| r.get(0))
         .map_err(storage_error)?;
-    if ![1, 2, SCHEMA_VERSION].contains(&version) {
+    if ![1, 2, 3, SCHEMA_VERSION].contains(&version) {
         return Err(format!(
             "数据库版本 {version} 不受此版本支持。原数据未覆盖。"
         ));
@@ -152,6 +157,54 @@ fn verify_database(connection: &Connection) -> Result<i64, String> {
     read_snapshot(connection)?;
     Ok(version)
 }
+fn placement_object(json: &str) -> Result<Map<String, Value>, String> {
+    if json.len() > MAX_PLACEMENT_BYTES {
+        return Err("窗口位置数据过大，未保存。".into());
+    }
+    serde_json::from_str(json)
+        .map_err(|error| format!("窗口位置必须是有效的 JSON 对象，未保存：{error}"))
+}
+fn read_placement_object(connection: &Connection) -> Result<Map<String, Value>, String> {
+    let length: Option<i64> = connection
+        .query_row(
+            "SELECT length(CAST(value AS BLOB)) FROM app_state WHERE key='placement'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(storage_error)?;
+    match length {
+        None => return Ok(Map::new()),
+        Some(length) if length > MAX_PLACEMENT_BYTES as i64 => {
+            return Err("已有窗口位置数据过大，未覆盖。".into());
+        }
+        _ => {}
+    }
+    let json: String = connection
+        .query_row(
+            "SELECT value FROM app_state WHERE key='placement'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    placement_object(&json)
+}
+fn write_placement_object(
+    connection: &Connection,
+    placement: &Map<String, Value>,
+) -> Result<(), String> {
+    let json = serde_json::to_string(placement).map_err(|error| error.to_string())?;
+    if json.len() > MAX_PLACEMENT_BYTES {
+        return Err("合并后的窗口位置数据过大，未保存。".into());
+    }
+    connection
+        .execute(
+            "INSERT INTO app_state(key,value) VALUES('placement',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            params![json],
+        )
+        .map_err(|error| format!("无法保存窗口位置：{error}"))?;
+    Ok(())
+}
 fn parent_directory(path: &Path) -> &Path {
     path.parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -212,7 +265,7 @@ fn migrate_schema(
 ) -> Result<(), String> {
     // The backup is checked and flushed before the transaction. Migration SQL
     // is compiled into the app; neither backup files nor IPC can supply it.
-    let backup = consistent_backup(connection, path, "before-schema-3")?;
+    let backup = consistent_backup(connection, path, &format!("before-schema-{SCHEMA_VERSION}"))?;
     let result = (|| {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -293,7 +346,11 @@ impl SqliteRepository {
                         &mut connection,
                         path,
                         version,
-                        "PRAGMA application_id=1396986955; PRAGMA user_version=3;",
+                        if version == 1 {
+                            "PRAGMA application_id=1396986955; PRAGMA user_version=4;"
+                        } else {
+                            "PRAGMA user_version=4;"
+                        },
                     )?;
                 }
             }
@@ -311,6 +368,7 @@ impl SqliteRepository {
         result
     }
     fn persist(&mut self, snapshot: &Snapshot, placement: Option<&str>) -> Result<(), String> {
+        let edge_patch = placement.map(placement_object).transpose()?;
         snapshot.validate()?;
         let json = serde_json::to_string(snapshot).map_err(|e| e.to_string())?;
         if json.len() > MAX_SNAPSHOT_BYTES as usize {
@@ -330,8 +388,16 @@ impl SqliteRepository {
                 params![json],
             )
             .map_err(|e| format!("无法保存任务：{e}"))?;
-        if let Some(placement) = placement {
-            transaction.execute("INSERT INTO app_state(key,value) VALUES('placement',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![placement]).map_err(|e|format!("无法保存停靠位置：{e}"))?;
+        if let Some(edge_patch) = edge_patch {
+            let mut merged = read_placement_object(&transaction)?;
+            // A dock caller may still hold an older complete placement object.
+            // Only its edge-owned fields may patch the latest device metadata.
+            for field in ["monitorName", "monitorPosition", "offset"] {
+                if let Some(value) = edge_patch.get(field) {
+                    merged.insert(field.into(), value.clone());
+                }
+            }
+            write_placement_object(&transaction, &merged)?;
         }
         transaction
             .commit()
@@ -361,6 +427,21 @@ impl Repository for SqliteRepository {
     }
     fn save_placement(&mut self, snapshot: &Snapshot, placement: &str) -> Result<(), String> {
         self.persist(snapshot, Some(placement))
+    }
+    fn save_console_placement(&mut self, console_json: &str) -> Result<(), String> {
+        let console = placement_object(console_json)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| format!("无法保存控制台位置：{error}"))?;
+        let mut merged = read_placement_object(&transaction)?;
+        merged.insert("console".into(), Value::Object(console));
+        write_placement_object(&transaction, &merged)?;
+        transaction
+            .commit()
+            .map_err(|error| format!("无法保存控制台位置：{error}"))
+        // Console-only metadata never reads or rewrites the task snapshot and
+        // must not advance this repository's task compare-and-swap baseline.
     }
     fn backup(&self) -> Result<PathBuf, String> {
         consistent_backup(
@@ -475,7 +556,7 @@ mod tests {
             connection
                 .pragma_update(None, "user_version", version)
                 .unwrap();
-            if version == 2 {
+            if version >= 2 {
                 connection
                     .pragma_update(None, "application_id", APPLICATION_ID)
                     .unwrap();
@@ -537,7 +618,7 @@ mod tests {
             .file_name()
             .unwrap()
             .to_string_lossy()
-            .starts_with("sidetask-before-schema-3-"));
+            .starts_with("sidetask-before-schema-4-"));
         let backup =
             Connection::open_with_flags(&backups[0], OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         assert_eq!(verify_database(&backup).unwrap(), 1);
@@ -564,7 +645,7 @@ mod tests {
             .unwrap();
         drop(connection);
         let repo = SqliteRepository::open(&temp.path).unwrap();
-        assert_eq!(verify_database(&repo.connection).unwrap(), 3);
+        assert_eq!(verify_database(&repo.connection).unwrap(), SCHEMA_VERSION);
         assert_eq!(read_snapshot(&repo.connection).unwrap().0, raw);
         assert!(repo
             .load()
@@ -576,7 +657,7 @@ mod tests {
         assert_eq!(repo.load_placement().unwrap().as_deref(), Some(placement));
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].kind, "before-schema-3");
+        assert_eq!(candidates[0].kind, "before-schema-4");
         assert_eq!(candidates[0].schema_version, 2);
         let backup = Connection::open_with_flags(
             temp.directory.join(&candidates[0].file_name),
@@ -608,7 +689,7 @@ mod tests {
             &mut connection,
             &temp.path,
             2,
-            "PRAGMA user_version=3; SELECT missing_column FROM app_state;",
+            "PRAGMA user_version=4; SELECT missing_column FROM app_state;",
         )
         .unwrap_err();
         assert!(error.contains("安全备份"));
@@ -617,6 +698,100 @@ mod tests {
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].schema_version, 2);
+    }
+    #[test]
+    fn schema_three_upgrade_preserves_raw_metadata_and_trash_with_verified_backup() {
+        let temp = TempDatabase::new();
+        temp.legacy_version(3);
+        let mut snapshot = Snapshot::demo("2026-09-24");
+        snapshot.revision = 47;
+        snapshot.tasks[0].deleted_at = Some("2026-09-25T01:02:03.123456789Z".into());
+        let raw = format!("\n{}\n", serde_json::to_string_pretty(&snapshot).unwrap());
+        let placement = "{\n  \"offset\": 0.35, \"monitorName\": \"synthetic monitor\",\n  \"console\": {\"width\": 1100}, \"futurePreference\": [1,2]\n}";
+        let connection = Connection::open(&temp.path).unwrap();
+        connection
+            .execute("UPDATE app_state SET value=?1 WHERE key='snapshot'", [&raw])
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO app_state(key,value) VALUES('placement',?1)",
+                [placement],
+            )
+            .unwrap();
+        drop(connection);
+
+        let repo = SqliteRepository::open(&temp.path).unwrap();
+        assert_eq!(verify_database(&repo.connection).unwrap(), 4);
+        assert_eq!(read_snapshot(&repo.connection).unwrap().0, raw);
+        assert_eq!(repo.load_placement().unwrap().as_deref(), Some(placement));
+        let candidates = recovery::list_candidates(&temp.directory).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].kind, "before-schema-4");
+        assert_eq!(candidates[0].schema_version, 3);
+        let backup = Connection::open_with_flags(
+            temp.directory.join(&candidates[0].file_name),
+            OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        assert_eq!(verify_database(&backup).unwrap(), 3);
+        assert_eq!(read_snapshot(&backup).unwrap().0, raw);
+        let original_placement: String = backup
+            .query_row(
+                "SELECT value FROM app_state WHERE key='placement'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(original_placement, placement);
+        drop(backup);
+        drop(repo);
+        let _restarted = SqliteRepository::open(&temp.path).unwrap();
+        assert_eq!(temp.backups().len(), 1);
+    }
+    #[test]
+    fn failed_schema_three_upgrade_rolls_back_all_rows_and_keeps_restorable_backup() {
+        let temp = TempDatabase::new();
+        let raw = temp.legacy_version(3);
+        let placement = "{ \"offset\": 0.4, \"console\": { \"width\": 1000 } }";
+        let mut connection = Connection::open(&temp.path).unwrap();
+        configure(&connection).unwrap();
+        connection
+            .execute(
+                "INSERT INTO app_state(key,value) VALUES('placement',?1)",
+                [placement],
+            )
+            .unwrap();
+        let error = migrate_schema(&mut connection, &temp.path, 3,
+            "PRAGMA user_version=4; UPDATE app_state SET value='injected failed change'; SELECT missing_column FROM app_state;").unwrap_err();
+        assert!(error.contains("安全备份"));
+        assert_eq!(verify_database(&connection).unwrap(), 3);
+        assert_eq!(read_snapshot(&connection).unwrap().0, raw);
+        let remaining: String = connection
+            .query_row(
+                "SELECT value FROM app_state WHERE key='placement'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, placement);
+        let candidates = recovery::list_candidates(&temp.directory).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].kind, "before-schema-4");
+        assert_eq!(candidates[0].schema_version, 3);
+        let backup = Connection::open_with_flags(
+            temp.directory.join(&candidates[0].file_name),
+            OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        assert_eq!(read_snapshot(&backup).unwrap().0, raw);
+        let preserved: String = backup
+            .query_row(
+                "SELECT value FROM app_state WHERE key='placement'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(preserved, placement);
     }
     #[test]
     fn trash_survives_portable_backup_restore_and_sqlite_restart_with_all_plans() {
@@ -630,7 +805,7 @@ mod tests {
             sort_order: 99,
         });
         original.settings.theme = "dark".into();
-        repo.save_placement(&original, "retained-placement")
+        repo.save_placement(&original, r#"{"monitorName":"retained-placement"}"#)
             .unwrap();
         let mut service = TaskService::new(Box::new(repo)).unwrap();
         let content = service.export_backup().unwrap();
@@ -666,7 +841,7 @@ mod tests {
         );
         assert_eq!(
             restarted.load_placement().unwrap().as_deref(),
-            Some("retained-placement")
+            Some(r#"{"monitorName":"retained-placement"}"#)
         );
     }
     #[test]
@@ -724,7 +899,7 @@ mod tests {
         let mut connection = Connection::open(&temp.path).unwrap();
         configure(&connection).unwrap();
         let error = migrate_schema(&mut connection,&temp.path,1,
-            "PRAGMA application_id=1396986955; PRAGMA user_version=3; SELECT missing_column FROM app_state;").unwrap_err();
+            "PRAGMA application_id=1396986955; PRAGMA user_version=4; SELECT missing_column FROM app_state;").unwrap_err();
         assert!(error.contains("安全备份"));
         assert_eq!(verify_database(&connection).unwrap(), 1);
         assert_eq!(read_snapshot(&connection).unwrap().0, raw);
@@ -786,7 +961,8 @@ mod tests {
     fn failed_placement_transaction_rolls_back_snapshot_and_remains_retryable() {
         let mut repo = SqliteRepository::open(Path::new(":memory:")).unwrap();
         let original = Snapshot::demo("2026-09-24");
-        repo.save_placement(&original, "original").unwrap();
+        repo.save_placement(&original, r#"{"monitorName":"original"}"#)
+            .unwrap();
         repo.connection.execute_batch("CREATE TRIGGER reject_placement BEFORE UPDATE ON app_state WHEN OLD.key='placement' BEGIN SELECT RAISE(ABORT,'injected storage failure'); END;").unwrap();
         let next = original
             .apply(
@@ -796,18 +972,218 @@ mod tests {
                 original.revision,
             )
             .unwrap();
-        assert!(repo.save_placement(&next, "changed").is_err());
+        assert!(repo
+            .save_placement(&next, r#"{"monitorName":"changed"}"#)
+            .is_err());
         assert_eq!(
             read_snapshot(&repo.connection).unwrap().1.revision,
             original.revision
         );
-        assert_eq!(repo.load_placement().unwrap().unwrap(), "original");
+        assert_eq!(
+            repo.load_placement().unwrap().unwrap(),
+            r#"{"monitorName":"original"}"#
+        );
         repo.connection
             .execute_batch("DROP TRIGGER reject_placement")
             .unwrap();
-        repo.save_placement(&next, "changed").unwrap();
+        repo.save_placement(&next, r#"{"monitorName":"changed"}"#)
+            .unwrap();
         assert_eq!(repo.load().unwrap().unwrap().revision, next.revision);
-        assert_eq!(repo.load_placement().unwrap().unwrap(), "changed");
+        assert_eq!(
+            repo.load_placement().unwrap().unwrap(),
+            r#"{"monitorName":"changed"}"#
+        );
+    }
+    fn placement_value(repo: &SqliteRepository) -> Value {
+        serde_json::from_str(&repo.load_placement().unwrap().unwrap()).unwrap()
+    }
+    #[test]
+    fn console_metadata_does_not_touch_snapshot_bytes_revision_or_task_baseline() {
+        let mut repo = SqliteRepository::open(Path::new(":memory:")).unwrap();
+        let baseline = repo.baseline.borrow().clone();
+        let mut snapshot = Snapshot::demo("2026-09-24");
+        snapshot.revision = 43;
+        let raw = format!("\n{}\n", serde_json::to_string_pretty(&snapshot).unwrap());
+        repo.connection
+            .execute("UPDATE app_state SET value=?1 WHERE key='snapshot'", [&raw])
+            .unwrap();
+        repo.connection.execute("INSERT INTO app_state(key,value) VALUES('placement',?1)",
+            [r#"{"monitorName":"left","monitorPosition":{"x":-1440,"y":0},"offset":0.25,"futurePreference":{"keep":true}}"#]).unwrap();
+        // A metadata save must succeed without using snapshot UPDATE or its
+        // optimistic task baseline, which intentionally predates these bytes.
+        repo.connection.execute_batch("CREATE TRIGGER reject_snapshot_update BEFORE UPDATE ON app_state WHEN OLD.key='snapshot' BEGIN SELECT RAISE(ABORT,'snapshot must not be updated'); END;").unwrap();
+        repo.save_console_placement(r#"{"width":1100,"height":700,"x":-20,"maximized":false}"#)
+            .unwrap();
+        let stored = read_snapshot(&repo.connection).unwrap();
+        assert_eq!(stored.0, raw);
+        assert_eq!(stored.1.revision, 43);
+        assert_eq!(*repo.baseline.borrow(), baseline);
+        assert_eq!(
+            placement_value(&repo),
+            serde_json::json!({
+                "monitorName":"left", "monitorPosition":{"x":-1440,"y":0}, "offset":0.25,
+                "futurePreference":{"keep":true}, "console":{"width":1100,"height":700,"x":-20,"maximized":false}
+            })
+        );
+        repo.connection
+            .execute_batch("DROP TRIGGER reject_snapshot_update")
+            .unwrap();
+        assert!(
+            repo.save(&snapshot).unwrap_err().contains("另一实例"),
+            "metadata must not silently refresh the task baseline"
+        );
+    }
+    #[test]
+    fn two_repositories_merge_edge_and_console_patches_without_stale_replacement() {
+        let temp = TempDatabase::new();
+        let mut console = SqliteRepository::open(&temp.path).unwrap();
+        let snapshot = Snapshot::demo("2026-09-24");
+        console.save(&snapshot).unwrap();
+        console.connection.execute("INSERT INTO app_state(key,value) VALUES('placement',?1)",
+            [r#"{"monitorName":"initial","monitorPosition":{"x":-1440,"y":0},"offset":0.1,"futurePreference":{"keep":true}}"#]).unwrap();
+        let mut edge = SqliteRepository::open(&temp.path).unwrap();
+        console
+            .save_console_placement(r#"{"width":1000,"height":700}"#)
+            .unwrap();
+        edge.save_placement(
+            &snapshot,
+            r#"{"offset":0.7,"console":{"width":2},"futurePreference":"stale"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            placement_value(&edge),
+            serde_json::json!({
+                "monitorName":"initial", "monitorPosition":{"x":-1440,"y":0}, "offset":0.7,
+                "futurePreference":{"keep":true}, "console":{"width":1000,"height":700}
+            })
+        );
+        console
+            .save_console_placement(r#"{"width":1200,"height":800}"#)
+            .unwrap();
+        let next = snapshot
+            .apply(
+                Action::UpdateSettings {
+                    changes: serde_json::json!({"theme":"dark"}),
+                },
+                snapshot.revision,
+            )
+            .unwrap();
+        edge.save_placement(
+            &next,
+            r#"{"monitorName":"new","monitorPosition":{"x":0,"y":120},"offset":0.5}"#,
+        )
+        .unwrap();
+        let latest_raw = read_snapshot(&edge.connection).unwrap().0;
+        // Console-only writes can merge current metadata even when their task
+        // baseline is stale. They do not mask that conflict for a later task save.
+        console
+            .save_console_placement(r#"{"width":1300,"height":900}"#)
+            .unwrap();
+        let merged = placement_value(&console);
+        assert_eq!(
+            merged,
+            serde_json::json!({
+                "monitorName":"new", "monitorPosition":{"x":0,"y":120}, "offset":0.5,
+                "futurePreference":{"keep":true}, "console":{"width":1300,"height":900}
+            })
+        );
+        assert_eq!(read_snapshot(&console.connection).unwrap().0, latest_raw);
+        assert_eq!(
+            read_snapshot(&console.connection).unwrap().1.revision,
+            next.revision
+        );
+        assert!(console
+            .save_placement(&snapshot, r#"{"offset":0.01}"#)
+            .is_err());
+        assert_eq!(placement_value(&edge), merged);
+        assert_eq!(read_snapshot(&edge.connection).unwrap().0, latest_raw);
+    }
+    #[test]
+    fn failed_console_and_edge_writes_are_atomic_and_retryable() {
+        let mut repo = SqliteRepository::open(Path::new(":memory:")).unwrap();
+        let snapshot = Snapshot::demo("2026-09-24");
+        repo.save_placement(&snapshot, r#"{"monitorName":"original","offset":0.2}"#)
+            .unwrap();
+        repo.save_console_placement(r#"{"width":1000}"#).unwrap();
+        let raw = read_snapshot(&repo.connection).unwrap().0;
+        let placement = repo.load_placement().unwrap().unwrap();
+        let baseline = repo.baseline.borrow().clone();
+        let next = snapshot
+            .apply(
+                Action::UpdateSettings {
+                    changes: serde_json::json!({"theme":"dark"}),
+                },
+                snapshot.revision,
+            )
+            .unwrap();
+        repo.connection.execute_batch("CREATE TRIGGER reject_placement_update BEFORE UPDATE ON app_state WHEN OLD.key='placement' BEGIN SELECT RAISE(ABORT,'injected metadata failure'); END;").unwrap();
+        assert!(repo.save_console_placement(r#"{"width":1200}"#).is_err());
+        assert!(repo.save_placement(&next, r#"{"offset":0.8}"#).is_err());
+        assert_eq!(read_snapshot(&repo.connection).unwrap().0, raw);
+        assert_eq!(repo.load_placement().unwrap().unwrap(), placement);
+        assert_eq!(*repo.baseline.borrow(), baseline);
+        repo.connection
+            .execute_batch("DROP TRIGGER reject_placement_update")
+            .unwrap();
+        repo.save_console_placement(r#"{"width":1200}"#).unwrap();
+        assert_eq!(read_snapshot(&repo.connection).unwrap().0, raw);
+        repo.save_placement(&next, r#"{"offset":0.8}"#).unwrap();
+        assert_eq!(repo.load().unwrap().unwrap().revision, next.revision);
+        assert_eq!(
+            placement_value(&repo),
+            serde_json::json!({"monitorName":"original","offset":0.8,"console":{"width":1200}})
+        );
+    }
+    #[test]
+    fn invalid_or_oversized_metadata_preserves_existing_rows() {
+        let mut repo = SqliteRepository::open(Path::new(":memory:")).unwrap();
+        let snapshot = Snapshot::demo("2026-09-24");
+        repo.save_placement(&snapshot, r#"{"offset":0.2}"#).unwrap();
+        repo.save_console_placement(r#"{"width":1000}"#).unwrap();
+        let raw = read_snapshot(&repo.connection).unwrap().0;
+        let placement = repo.load_placement().unwrap().unwrap();
+        for invalid in [
+            "[]".into(),
+            "null".into(),
+            "\"bad\"".into(),
+            "{broken".into(),
+            serde_json::json!({"padding":"x".repeat(MAX_PLACEMENT_BYTES)}).to_string(),
+        ] {
+            assert!(repo.save_console_placement(&invalid).is_err());
+            assert!(repo.save_placement(&snapshot, &invalid).is_err());
+            assert_eq!(repo.load_placement().unwrap().unwrap(), placement);
+            assert_eq!(read_snapshot(&repo.connection).unwrap().0, raw);
+        }
+        let next = snapshot
+            .apply(
+                Action::UpdateSettings {
+                    changes: serde_json::json!({"theme":"dark"}),
+                },
+                snapshot.revision,
+            )
+            .unwrap();
+        let near_limit =
+            serde_json::json!({"futurePreference":"x".repeat(MAX_PLACEMENT_BYTES - 200)})
+                .to_string();
+        for existing in [
+            "[]".into(),
+            "{broken".into(),
+            serde_json::json!({"padding":"x".repeat(MAX_PLACEMENT_BYTES)}).to_string(),
+            near_limit,
+        ] {
+            repo.connection
+                .execute(
+                    "UPDATE app_state SET value=?1 WHERE key='placement'",
+                    [&existing],
+                )
+                .unwrap();
+            let console = serde_json::json!({"monitor":"x".repeat(512)}).to_string();
+            let edge = serde_json::json!({"monitorName":"x".repeat(512)}).to_string();
+            assert!(repo.save_console_placement(&console).is_err());
+            assert!(repo.save_placement(&next, &edge).is_err());
+            assert_eq!(repo.load_placement().unwrap().unwrap(), existing);
+            assert_eq!(read_snapshot(&repo.connection).unwrap().0, raw);
+        }
     }
     #[test]
     fn a_second_repository_cannot_overwrite_an_unseen_commit() {
@@ -849,7 +1225,7 @@ mod tests {
         let mut repo = SqliteRepository::open(&temp.path).unwrap();
         let mut original = Snapshot::demo("2026-09-24");
         original.settings.theme = "dark".into();
-        repo.save_placement(&original, "retained-screen-placement")
+        repo.save_placement(&original, r#"{"monitorName":"retained-screen-placement"}"#)
             .unwrap();
         let mut service = TaskService::new(Box::new(repo)).unwrap();
         let content = service.export_backup().unwrap();
@@ -864,7 +1240,7 @@ mod tests {
         assert_eq!(restored.snapshot.settings, original.settings);
         assert_eq!(
             service.repository.load_placement().unwrap().unwrap(),
-            "retained-screen-placement"
+            r#"{"monitorName":"retained-screen-placement"}"#
         );
         assert!(restored.snapshot.revision > original.revision);
         assert!(restored

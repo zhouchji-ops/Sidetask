@@ -6,6 +6,7 @@ fn main() {
             "window_action",
             "get_monitors",
             "get_window_status",
+            "get_console_position_status",
             "get_pending_exit",
             "resolve_exit",
             "export_backup",

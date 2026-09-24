@@ -1,6 +1,6 @@
 # 数据模型与业务一致性
 
-状态：当前实现继续使用 SQLite 的 app_state JSON snapshot，本阶段契约升级为 schema3 并加入 Task.deletedAt；类型见 `apps/desktop/src/lib/types.ts`，具体协议见本文末尾。下方独立表、DailyPlanRevision、设备设置 revision 及 dataset_epoch/change_seq 是目标模型，**没有因 schema3 升级而完成规范化**。控制台与边缘小窗共享 Rust 服务和数据库。架构取舍见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md)，实际完成度、测试数字与双平台验收见 [STATUS](../delivery/STATUS.md)。
+状态：当前实现继续使用 SQLite 的 app_state JSON snapshot。schema 3 加入 Task.deletedAt；本轮 schema 4 为 placement.console 及字段合并建立新兼容边界，任务协议保持不变。类型见 `apps/desktop/src/lib/types.ts` 与 Rust 平台几何类型，实际协议见本文末尾各扩展小节。下方独立表、DailyPlanRevision、设备设置 revision 及 dataset_epoch/change_seq 是目标模型，**没有因 schema 3 / 4 升级而完成规范化**。控制台与边缘小窗共享 Rust 服务和数据库。架构取舍见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md) 与 [ADR-0006](../decisions/0006-console-window-preferences.md)，实际完成度、测试数字与双平台验收见 [STATUS](../delivery/STATUS.md)。
 
 首版仅有独立的大任务。模型中不设 `parent_id`、子任务表、任务依赖、步骤清单、百分比进度或父子完成聚合；备注是普通文本，不支持可独立勾选的步骤。一次勾选表示整项任务完成，加入今日也不会创建一天的小任务或进度记录。见 [ADR-0002](../decisions/0002-console-and-edge-panel.md)。
 
@@ -42,7 +42,7 @@
 
 每个 `plan_date` 保存一个 `revision`，用于检查同一天计划引用与排序的并发修改。添加、移出或重排计划在同一事务更新引用及该日 revision；一天尚无安排时按初始 revision 处理。任务内容修改不必递增计划 revision，任务完成状态依然只在 Task 内存一份。
 
-当前 schema3 仍用 Snapshot.revision 保护全部计划操作，不新增每日 revision 字段。软删除/恢复另校验 Task.revision；同一服务内先验证版本，再保存并发布提交结果。
+当前 schema 4 延续 schema 3 的 Snapshot.revision，保护全部计划操作，不新增每日 revision 字段。软删除/恢复另校验 Task.revision；同一服务内先验证版本，再保存并发布提交结果。
 
 ### DevicePreferences / PreferenceApplyState（目标）
 
@@ -99,7 +99,7 @@ MVP 历史计划仅记录「安排过」，不提供按历史日期统计完成�
 
 每次真实变更同时更新 `change_seq`；业务数据、完成时间、实体/计划 revision 和全局序号在同一事务提交。命令返回已提交结果及版本标记，然后发布小型失效通知（数据集代次、变更序号、受影响类型/ID），界面通过返回值或重查获取已提交数据。通知发送失败不回滚已经提交的事务，也不能让用户因误报失败重复创建任务。
 
-此处 change_seq、每日和设置 revision 描述目标协议；当前实际使用 Snapshot.revision 与 Task.revision，schema3 的精确动作规则见末节，不将这些目标字段当成已存在的数据列。
+此处 change_seq、每日和设置 revision 描述目标协议；当前实际使用 Snapshot.revision 与 Task.revision，任务动作仍遵循下方 schema 3 生命周期契约，不将这些目标字段当成已存在的数据列。schema 4 的控制台位置写入独立于这些任务版本。
 
 用 `setCompleted(true/false)` 表达意图，比没有目标状态的 toggle 更容易处理重复请求。重复完成已完成任务保持原 completed_at；如果携带的是过期 revision，返回冲突及当前值，前端判断目标是否已达到，否则请用户重新确认，不静默覆盖。计划操作同时校验引用的任务存在且未删除。
 
@@ -162,18 +162,49 @@ schema1 原型时期已在 JSON Settings 增加 `uiStyle`。Rust serde 及浏览
 
 ## schema 3 实际兼容与生命周期契约
 
+本节保留生命周期阶段引入的规则和迁移历史；当前数据库已升为 schema 4，新增设备元数据边界见末节，下面的 Task / Plan 规则继续适用。
+
 当前 Task 用 `completed`/`completedAt` 和 `dueDate`/`dueTime` 表示完成与 DDL；新截止日期可带 `dueTimezone`，精确时刻带 `dueAtUtc`。旧记录缺时区字段时保留原截止语义，普通标题/备注编辑不能重新固定时区。新增 `deletedAt` 对应 Rust `deleted_at: Option<String>`，serde default/skip_none，旧记录缺失或 null 均为未删除；非空值必须通过既有严格 UTC RFC3339 校验。该字段只能由生命周期动作修改，普通字段编辑不能注入它。
 
 `trashTask {id, expectedRevision}` / `restoreTask {id, expectedRevision}` 通过原有 mutate 入口提交，外层另携带 Snapshot expectedRevision。先校验版本，再判断是否已达目标状态；同状态不重写删除时间或 Task revision，全局 revision 沿用现有提交递增规则。真正删除/恢复只改 deletedAt 与 Task revision；写入失败不发布新快照。删除状态下拒绝 updateTask、setCompleted 和 planTask 的加入/移出两种方向。
 
 reorderToday 的精确集合只包括当天未删除、未完成任务；已删除及已完成计划的排序值不参与重排。追加今日计划仅稳定压缩当日未删除任务的计划，保留删除项原值。恢复不调整任何 Plan；排序值相同时沿用 Plan 数组的稳定顺序，因此其他任务重排后不保证恢复到删除前的绝对行号。跨日按原计划重新投影，不创建今天的新引用。
 
-SQLite schema1/2→3 先对完整数据库做保留 WAL 的副本预检，再创建校验可读、已同步的一致性 `before-schema-3` 备份；迁移事务只更新版本/身份标记，保留 snapshot 与 placement 原字节，不重编码任务。旧 schema1/2 和当前 schema3 都可识别；坏库恢复候选保留 `before-schema-2`、`before-schema-3` 与 `safety-backup` 三种来源。迁移失败不以空库或演示数据替代，旧版应用应明确拒绝 schema3。首次新库写入空快照。
+生命周期阶段的 SQLite schema1/2→3 先对完整数据库做保留 WAL 的副本预检，再创建校验可读、已同步的一致性 `before-schema-3` 备份；迁移事务只更新版本/身份标记，保留 snapshot 与 placement 原字节，不重编码任务。当时识别 schema1/2/3，候选保留 `before-schema-2`、`before-schema-3` 与 `safety-backup`。本轮直接升级到 schema 4 的版本及备份规则见末节。迁移失败不以空库或演示数据替代，首次新库仍写入空快照。
 
 便携 JSON 的 schemaVersion 与 SQLite 版本独立：新导出 v2，导入接受 v1/v2，均包含完整 tasks/plans；v1 缺失或 null 的 deletedAt 作为未删除，v1 携带非空删除状态则拒绝。预览提供 taskCount、trashedTaskCount、planCount 和 exportedAt。整份恢复先备份当前库，再替换任务及回收站、保留设备设置，并将全局及所有导入任务 revision 提高到已见值以上；当前没有 dataset_epoch 字段。旧备份按备份时的完整集合恢复，不与现有回收站合并。回收站仍计入现有容量限制，元数据增长超限时保持原已提交状态并提示失败。
 
-本节是本阶段代码与产品必须遵守的契约，不将自动化测试、文档同步或 Mac 证据写成双平台验收完成。来源与分阶段检查见 [TASK_LIFECYCLE](../research/TASK_LIFECYCLE.md)，最终证据统一见 [STATUS](../delivery/STATUS.md)。
+本节任务规则在 schema 4 继续有效，不将自动化测试、文档同步或 Mac 证据写成双平台验收完成。来源与分阶段检查见 [TASK_LIFECYCLE](../research/TASK_LIFECYCLE.md)，最终证据统一见 [STATUS](../delivery/STATUS.md)。
 
 ## 分区偏好的当前扩展
 
-Settings新增panelSplit（Rust panel_split:u8），缺省54，只接受30–70整数；属于本机偏好，便携任务备份不携带，整份任务恢复保留本机值。比例修改沿用统一设置事务，不改Task/Plan字段；同一设置冲突由版本及前端的初始比例核对处理。旧快照缺字段只读补默认，不重编码原文；正常提交后保存。当前schema3保持不变，与uiStyle一样只支持新程序读旧库；旧schema3程序会因未知设置字段拒绝读取，不支持降级继续编辑当前库。后续控制台placement扩展需统一评估schema4备份迁移，见[窗口偏好计划](../research/WINDOW_PREFERENCES.md)。
+Settings新增panelSplit（Rust panel_split:u8），缺省54，只接受30–70整数；属于本机偏好，便携任务备份不携带，整份任务恢复保留本机值。比例修改沿用统一设置事务，不改Task/Plan字段；同一设置冲突由版本及前端的初始比例核对处理。旧快照缺字段只读补默认，不重编码原文；正常提交后保存。分区比例单独落地时保持schema3，与uiStyle一样只支持新程序读旧库；旧schema3程序可能因未知设置字段拒绝读取。本轮控制台placement扩展已统一采用下述schema4备份迁移，不支持降级继续编辑。分阶段记录见[窗口偏好计划](../research/WINDOW_PREFERENCES.md)。
+
+## schema 4 控制台设备元数据契约
+
+SQLite 当前 `PRAGMA user_version=4`，仍只有 `app_state` 的 snapshot / placement 记录，不添加 Task 字段、独立偏好 revision 或第二份存储。读取识别 schema 1 / 2 / 3 / 4；旧版本在保持原主库及日志不变的完整副本上通过预检后，先创建经过校验和同步的 `sidetask-before-schema-4-<UUID>.sqlite3`，再事务升到 4。schema 1 同时设置既有 application_id，schema 2 / 3 只更新版本。迁移保留 snapshot / placement 原文，备份内版本仍为迁移前版本；失败回滚并保留安全副本。schema 4 让旧程序明确拒绝继续写库，避免旧 placement 写法丢弃 console 子对象。
+
+placement 中的 console 可缺省，结构由 `ConsolePlacement` / `ConsoleNormal` 表达：
+
+| JSON 字段 | 当前含义 |
+| --- | --- |
+| console.normal.innerWidth / innerHeight | 正常窗口客户区的逻辑宽高，有限正数；不含标题栏/边框 |
+| console.normal.monitorName | 可空的显示器名称；匹配失败回退有效屏幕 |
+| console.normal.monitorPosition | 可空原生原点 `{x,y}`，只作同名显示器匹配提示；不是工作区偏移 |
+| console.normal.outerOffsetX / outerOffsetY | 相对工作区的逻辑外框偏移，有限数，可为负以表达跨屏 |
+| console.maximized | 最大化偏好；正常矩形单独保留，不用最大化尺寸覆盖 |
+
+Mac 先把窗口和各工作区按各自来源 scale 转到统一 AppKit 逻辑平面，计算时 scale 为 1；Windows 在物理桌面坐标中计算，持久化与恢复时转换逻辑尺寸/偏移。原点和单位的转换只在平台层进行；不保存隐藏、焦点、最小化或全屏状态。无效 console 子对象作为独立位置错误处理，不丢弃可读取的小窗字段；不可解析的整个 placement 仍不能被合并写入静默覆盖。
+
+两种写入方法在同一个 SQLite 库内各自读取最新 placement：
+
+| Repository 方法 | 同一 IMMEDIATE 事务内的行为 | 版本边界 |
+| --- | --- | --- |
+| save_console_placement(console_json) | 校验对象和大小，只替换 console；保留 edge 及其他字段值 | 不读取/重编码 snapshot，不改 Snapshot / Task revision，也不推进任务比较基线 |
+| save_placement(snapshot, edge_json) | 按既有任务比较基线验证并保存 snapshot，再只合并 monitorName / monitorPosition / offset；保留 console 和未提供字段 | 保留原任务保存协议，元数据错误使 snapshot 与 placement 一起回滚 |
+
+输入、已存 placement 与合并结果均限 64 KiB，且须为 JSON 对象。数据库层不依赖平台几何类型；平台负责 console 字段和坐标语义。合并会重新编码 placement，因此承诺字段值互保；只有升级事务及 console-only 写入的 snapshot 承诺原文保持。两连接依次写入时仍合并最新元数据，控制台写入不能使过期任务基线变成有效。
+
+位置候选/恢复错误/忽略状态只在 ConsoleRuntime 内，不加入任务草稿或 portable JSON。恢复失败阻止自动采样覆盖旧保存值；显式重试保存当前位置，丢弃先采样当前值后取消这次保存。便携任务格式继续为 v2，读取 v1/v2，任务恢复保留 Settings 与全部 placement；完整 SQLite 恢复包含备份时设备配置。启动候选扩展为 before-schema-2 / before-schema-3 / before-schema-4 / safety-backup。
+
+实现决策及固定许可参考见 [ADR-0006](../decisions/0006-console-window-preferences.md)。本轮 Mac 原生因锁屏未验，Windows 本轮 CI / 原生未执行；合成数据、几何与状态测试不能替代系统窗口或断电恢复证据。结果统一引用最新 STATUS。

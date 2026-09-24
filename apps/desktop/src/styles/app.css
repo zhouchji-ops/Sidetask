@@ -377,3 +377,7 @@ h1 { font-size: 27px; line-height: 1.3; font-weight: 600; letter-spacing: -.5px;
 .edge-split-error > div { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 5px; }
 .edge-split-error button { padding: 0; color: var(--ink); font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
 .edge-resize-divider[aria-disabled="true"] { cursor: default; }
+
+.console-position-status { flex-wrap: wrap; }
+.console-position-message { display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.console-position-actions { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }

@@ -16,3 +16,7 @@ PRD 是产品行为的依据；ADR 是技术取舍的依据；BACKLOG 是事项�
 本轮稳定化记录：[总复查](research/RELEASE_HARDENING.md)、[存储](research/STORAGE_HARDENING.md)、[时间](research/TIME_SEMANTICS.md)、[原生安全](research/NATIVE_SECURITY_REVIEW.md)、[安全恢复说明](engineering/DATA_RECOVERY.md)、[ADR-0004](decisions/0004-data-safety-and-fixed-deadlines.md)。
 
 功能与体验接续：[前端性能](research/FRONTEND_PERFORMANCE.md)、[今日整理](research/TODAY_ORDERING.md)、[任务生命周期](research/TASK_LIFECYCLE.md)、[生命周期取舍](decisions/0005-task-lifecycle-and-backup-schema.md)、[窗口偏好计划](research/WINDOW_PREFERENCES.md)。
+
+- [控制台设备偏好与schema4决策](decisions/0006-console-window-preferences.md)
+- [控制台几何集成验收](../tests/manual/2026-09-25-console-geometry.md)
+- [小窗混合DPI复查与修复计划](research/EDGE_COORDINATES.md)

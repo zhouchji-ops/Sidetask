@@ -109,6 +109,23 @@ pub fn request(app: &tauri::AppHandle) -> Result<(), String> {
 
 pub fn resolve(app: &tauri::AppHandle, request_id: u64, allow: bool) -> Result<(), String> {
     let state = crate::task_state(app)?;
+    if allow {
+        if state
+            .exit
+            .lock()
+            .map_err(|_| "退出服务暂不可用。")?
+            .pending
+            .map(|p| p.request_id)
+            != Some(request_id)
+        {
+            return Err("退出请求已失效，请重新选择退出。".into());
+        }
+        // Best effort metadata flush precedes authorization. A failed position
+        // save must never trap a user who already resolved the draft handshake.
+        if let Err(reason) = super::console_window::flush(app) {
+            eprintln!("console position on exit: {reason}");
+        }
+    }
     {
         // Same order as geometry writes: dock -> service -> exit. Never wait
         // for the native main thread while any of these guards is held.

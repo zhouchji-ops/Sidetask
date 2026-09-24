@@ -32,7 +32,7 @@ async function nativeHarness(page: Page) {
           if (command === 'get_snapshot') return structuredClone(snapshot);
           if (command === 'get_startup_recovery') return null;
           if (command === 'get_pending_exit') return null;
-          if (command === 'get_window_status') return { pending: false, error: null };
+          if (command === 'get_window_status' || command === 'get_console_position_status') return { pending: false, error: null };
           if (command === 'resolve_exit' || command === 'window_action') return;
           if (command === 'mutate') {
             if (harness.failMutation) throw new Error('模拟磁盘写入失败');
@@ -188,9 +188,19 @@ test('午夜与精确 DDL 到达后无需持久化事件即刷新列表和逾期
   const seed = createSeed('2026-09-25');
   seed.tasks[0].dueDate = '2026-09-26'; seed.tasks[0].dueTime = '00:00';
   await page.addInitScript(value => localStorage.setItem('sidetask-browser-preview-v1', JSON.stringify(value)), seed);
-  await page.clock.install({ time: new Date('2026-09-25T15:59:59.000Z') });
+  // Let startup timers run before pausing at the exact boundary under test.
+  // https://playwright.dev/docs/api/class-clock#clock-pause-at
+  await page.clock.install({ time: new Date('2026-09-25T15:00:00.000Z') });
+  await page.route('**/src/main.tsx*', async route => {
+    // Slow CI must not consume the old fixture's one-second pre-DDL window.
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    await route.continue();
+  }, { times: 1 });
   await page.goto('/?surface=console&page=deadlines');
   const row = page.locator('.main-content .task-row').filter({ has: page.getByRole('button', { name: '编辑任务：完成交互设计课程作业', exact: true }) });
+  await expect(row).toBeVisible();
+  await page.clock.pauseAt(new Date('2026-09-25T15:59:59.000Z'));
+  expect(await page.evaluate(() => Date.now())).toBe(Date.parse('2026-09-25T15:59:59.000Z'));
   await expect(row).not.toContainText('已逾期');
   await page.clock.fastForward(1100);
   await expect(row).toContainText('已逾期');
