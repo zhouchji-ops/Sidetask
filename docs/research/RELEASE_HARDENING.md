@@ -31,3 +31,7 @@ CI补前端业务/类型/生产构建/Playwright、Rust格式/clippy/测试、Ma
 ## 验证边界
 
 IPC模拟测试验证前端协议与失败流程，不验证Tauri ACL、系统焦点或SQLite。Mac隔离验证使用独立identifier和合成数据；Windows、多屏/混合DPI/热插拔/睡眠与长期资源验收另列路线门槛。最终集成命令和数字见STATUS，不将中途构建/测试结果混作最终结果。
+
+## 推送后交叉复审
+
+main基线2b04c6f已按用户明确授权推送。独立复审发现新增macOS专属依赖段误把chrono-tz/iana-time-zone包含其中；已移回通用依赖，以cargo tree --target x86_64-pc-windows-msvc --depth 1确认Windows可达，待实际CI完成。此错误说明单平台clippy/test不能替代双平台构建。
