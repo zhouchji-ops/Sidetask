@@ -59,8 +59,28 @@ IPC、导出文件落盘、窗口权限与控制台 UI 由本轮其他工作包�
 
 ## 阶段反思与后续门槛
 
-- **启动损坏时的图形恢复入口尚缺**：目前 setup 会明确报错退出，不能声称用户已可在损坏状态内点按钮恢复。离线恢复指引已提供，仍需恢复向导与可执行真机演练。
+- **启动恢复已进入后续实现阶段**：本轮新增恢复底层与独立启动恢复接线；具体见下节。原生完整演练与 Windows 验收由交付状态汇总，不由纯单元测试代替。
 - **还需 Windows 和真实故障证据**：当前合成 SQLite 测试验证事务错误路径，不等于真实断电、磁盘满、系统强杀与不同文件系统全通过。
 - **阶段复审发现并修复容量差异**：SQLite读取上限16MiB、便携备份10MiB可能导致新写入增长到不能导出的大小。已在TaskService每次mutation与恢复前检查同一便携备份容量，超出即拒绝提交且保留旧状态；新增10,000任务边界测试。现有较大旧库不会为了满足新限制被截断或覆盖，长期分批/流式备份仍待产品策略。schema2仍为快照表，规范化模型未完成。
 - **恢复需要有持续有效的备份**：没有周期备份、保留策略或跨设备副本。用户可导出，自动安全副本仅在迁移/恢复前创建。
 - **安全目标不是绝对保证**：严格解析和事务减少已识别失败路径；同一用户权限下外部篡改文件、硬件损坏与未知漏洞仍不能用单轮测试排除。B06 / B11 父项保持 In progress，B25 原生空库能力具备，完整首次使用/Windows验收由主agent汇总。
+
+## 后续阶段：坏库启动恢复与 WAL 证据修复
+
+新增 `infrastructure/recovery.rs`，向原生接线提供 `list_candidates(&Path)` 与 `recover_from_backup(&Path, &str)`；调用方保证没有正常任务服务/写连接，并串行化恢复与退出。恢复成功后要求重启，避免任一窗口持有恢复前状态。它不改变正常 JSON 任务恢复协议。
+
+只读候选扫描限制同数据目录、受控 UUID 名称的完整 SQLite 备份。元数据包含类型、版本、任务/计划计数、修订号、长度和 RFC3339 时间，不含正文。候选无日志时用 URI `mode=ro&immutable=1` 检查，避免扫描创建 SHM；SHA-256 绑定选择后源文件身份，实际恢复前再次验证。受控路径和大小限制见 [恢复说明附录](../engineering/DATA_RECOVERY.md)。
+
+显式确认后先复制原库和 WAL / SHM / rollback journal 到唯一证据目录，逐项校验与同步，再复制备份到同目录 staging。完整 pending 标记在任何移动前持久发布。日志移到证据子目录后原子替换主库；可恢复 I/O 错误按原始 manifest 回滚；中断后 pending 阻止正常打开和空库创建，重试沿用最初证据。源备份一直保留。仅新增固定 `sha2 = "=0.10.9"` 直接依赖（锁文件此前已有其传递版本；许可 MIT / Apache-2.0），没有复制第三方实现。
+
+**原生验收发现并闭合的数据丢失缺口**：最初正常启动路径先 READ_WRITE 打开 live 库才校验，SQLite 会在失败返回前 checkpoint WAL、改主库和删除日志，因此仅在恢复按钮后保留证据已经太晚。改为打开任何已有 live SQLite 前完整复制四文件到 private 检查目录，使用普通 SQLite 连接在副本执行 schema、完整性和业务验证（包含 WAL 已提交内容）；复制及验证前后校验原始文件未变化，通过才打开 live。主库缺失但任何 sidecar 存在时拒绝新建空库。这里特意不用 immutable 检查 live 主库，因为它会忽略 WAL。
+
+启动完整副本检查只发生在已有库打开时；保留了常规写入路径。它需要同目录可写和足够复制空间，超过 1 GiB 会暂停启动检查并保留原文件。未增加周期备份、轮转框架或继续扩展本轮安全范围，后续按用户新优先级推进功能完整性与使用体验。
+
+本阶段 GitHub 一手参考均先阅读许可，再核对实现，未复制源代码：
+
+1. [Rust 标准库 fs.rs 固定提交](https://github.com/rust-lang/rust/blob/88d9e12ae178fab0fb5cc050a94da85685d449ea/library/std/src/fs.rs)：核对 `rename` 同文件系统替换及 Windows `MoveFileExW` / `SetFileInformationByHandle` 行为，也核对 `hard_link` 不覆盖既有目标。提交由 `git ls-remote` 的 Rust `1.98.0` tag 解引用核对。许可已读 [MIT](https://github.com/rust-lang/rust/blob/88d9e12ae178fab0fb5cc050a94da85685d449ea/LICENSE-MIT)；仓库同时提供 Apache-2.0。采用标准库 API，没有复制示例或加入替换库。
+2. [rust-atomicwrites 固定提交](https://github.com/untitaker/rust-atomicwrites/blob/a15afcb6b73b2543f0c12959fa874c1c4d2fd1d1/src/lib.rs) 与 [MIT 许可](https://github.com/untitaker/rust-atomicwrites/blob/a15afcb6b73b2543f0c12959fa874c1c4d2fd1d1/LICENSE)：对照同目录临时文件、同步、Windows 替换模式；没有加入依赖或复制其代码。
+3. [SQLite WAL](https://sqlite.org/wal.html) / [WAL 文件格式](https://sqlite.org/walformat.html)：WAL 包含已提交状态、readonly 连接可能需要 SHM、immutable 忽略 WAL 等边界用于区分“独立安全备份扫描”和“完整已有库启动预检”。SQLite 文档为一手行为依据。
+
+本机最终冻结前执行：`cargo test --locked` **67/67 通过**（1.65 秒），其中 `infrastructure::recovery::tests` **18/18**；`cargo clippy --all-targets --locked -- -D warnings` 通过。所有数据来自临时合成文件。新测试包括四文件原始字节不变、主库缺失三种日志逐项拒绝初始化、真实未 checkpoint WAL 中非法快照拒绝且三文件原样保留、合法 WAL revision 73 完整加载。失败/进程中断注入覆盖 marker 后、日志分离后和主库替换后，另外覆盖回滚本身 I/O 失败后保留证据和重试。这些结果不能证明真实物理断电、Windows 文件系统或磁盘硬件故障全部通过。

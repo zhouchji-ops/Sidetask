@@ -1,0 +1,32 @@
+.recovery-shell { height: 100%; overflow: auto; background: var(--paper); }
+.recovery-content { width: min(100%, 780px); margin-inline: auto; padding: 40px 36px 56px; display: flex; flex-direction: column; align-items: stretch; gap: 18px; }
+.recovery-content > .brand { align-self: flex-start; margin-bottom: 20px; }
+.recovery-content h1 { font-size: 27px; line-height: 1.3; font-weight: 600; }
+.recovery-content h2 { font-size: 16px; font-weight: 600; }
+.recovery-content p { max-width: 70ch; overflow-wrap: anywhere; }
+.recovery-details { color: var(--secondary); }
+.recovery-details summary { cursor: pointer; width: fit-content; }
+.recovery-details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.recovery-details p { padding-block: 10px; white-space: pre-wrap; }
+.recovery-backups { margin-top: 10px; }
+.recovery-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.recovery-options { padding: 0; margin: 0; border: 0; border-top: 1px solid var(--line-strong); }
+.recovery-option { display: flex; align-items: flex-start; gap: 14px; padding: 16px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.recovery-option.is-selected { background: var(--accent-wash); }
+.recovery-option:hover { background: var(--hover); }
+.recovery-option > input { width: 17px; height: 17px; margin: 3px 0 0; flex-shrink: 0; }
+.recovery-option > input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.recovery-option > span { display: grid; min-width: 0; gap: 4px; overflow-wrap: anywhere; }
+.recovery-option strong { font-weight: 550; font-variant-numeric: tabular-nums; }
+.recovery-option small { color: var(--secondary); font-size: 12px; }
+.recovery-options:disabled .recovery-option { cursor: default; }
+.recovery-empty { padding-block: 12px; color: var(--secondary); display: grid; gap: 14px; }
+.recovery-error { color: var(--danger); }
+.recovery-path { background: var(--subtle); border: 1px solid var(--line); padding: 14px; user-select: text; }
+.recovery-confirm { border-top: 1px solid var(--line-strong); padding-top: 20px; display: grid; gap: 14px; }
+.recovery-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
+@media (max-width: 560px) {
+  .recovery-content { padding: 24px 20px 40px; }
+  .recovery-content h1 { font-size: 24px; }
+  .recovery-section-heading { flex-wrap: wrap; }
+}

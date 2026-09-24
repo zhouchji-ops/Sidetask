@@ -8,7 +8,7 @@
 
 项目仓库：[changjin-cpu/SideTask](https://github.com/changjin-cpu/SideTask)。后续代码与文档均在该仓库的本地工作目录中维护；当前本地目录名称仍为 `任务弹窗`。
 
-**当前阶段：内部试用准备与可靠性验收。** 用户已确认第一版同时支持 macOS 和 Windows；当前使用 Tauri 2 + React/TypeScript + Rust + SQLite 自建精简核心，未复制候选项目源码。已补数据安全备份/恢复、固定DDL、退出草稿与IPC权限保护。双平台、多屏和发布验收尚未完成。实际测试及构建结果见 [STATUS](docs/delivery/STATUS.md)。
+**当前阶段：内部试用准备与可靠性验收。** 用户已确认第一版同时支持 macOS 和 Windows；当前使用 Tauri 2 + React/TypeScript + Rust + SQLite 自建精简核心，未复制候选项目源码。已补数据备份与坏库启动恢复、固定DDL、退出草稿保护；正在完成全局搜索、大列表和今日整理。双平台、多屏和发布验收尚未完成。实际测试及构建结果见 [STATUS](docs/delivery/STATUS.md)。
 
 ## 从这里开始
 
@@ -62,7 +62,7 @@ Todobar 的窗口隐藏、悬停和数据模型与需求有明显差距，因此
 
 运行入口在 [apps/desktop/README.md](apps/desktop/README.md)：进入该目录后 `npm ci`、`npm run dev` 可启动浏览器原型；原生开发使用 `npm run tauri -- dev`（需要 Rust 和平台构建环境）。浏览器只能验证布局和任务交互，不能证明真实多屏窗口能力。生成物与个人任务数据库不提交仓库。
 
-本地分支为 `main`，`origin` 已连接 `https://github.com/changjin-cpu/SideTask.git`。2026-09-25只读核对远端仍为空；本轮已建立本地可追溯基线，远端推送及CI执行按授权继续。实际Git状态和最新构建见STATUS。
+本地分支为 `main`，`origin` 已连接 `https://github.com/changjin-cpu/SideTask.git`。2026-09-25已按用户授权推送基线并执行双平台CI：Mac App与Windows NSIS构建通过，产物上传受GitHub账户配额阻塞。实际Git状态和最新构建见STATUS。
 
 文档索引见 [docs/README.md](docs/README.md)。调研记录日期：2026-09-24。
 

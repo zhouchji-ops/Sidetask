@@ -146,6 +146,10 @@ h1 { font-size: 27px; line-height: 1.3; font-weight: 600; letter-spacing: -.5px;
 .is-completed .task-title { text-decoration: line-through; text-decoration-thickness: 1px; text-decoration-color: var(--muted); color: var(--muted); }
 .is-completed .task-meta { color: var(--muted); }
 .row-chevron { opacity: 0; color: var(--muted); }
+.task-quick-actions { display: flex; gap: 1px; flex-shrink: 0; opacity: 0; }
+.task-row:hover .task-quick-actions, .task-row:focus-within .task-quick-actions { opacity: 1; }
+.task-quick-actions .icon-button { width: 26px; height: 28px; }
+@media (hover: none) { .task-quick-actions { opacity: 1; } }
 .task-row:hover .row-chevron, .task-row.is-selected .row-chevron { opacity: 1; }
 .row-plan { opacity: .35; }
 .task-row:hover .row-plan, .row-plan:focus-visible { opacity: 1; }

@@ -1,5 +1,5 @@
 import type { Action, Priority, Settings, Snapshot, Task, UIStyle } from './types';
-import { compareUtcInstants, dateOffset, deadlineDisplay, effectiveDeadline, fixDeadline, localDate, validDate, validateDeadline, validUtcInstant } from './deadline';
+import { currentTimeZone, dateOffset, deadlineDisplay, effectiveDeadline, fixDeadline, localDate, utcInstantNanoseconds, validDate, validateDeadline, validUtcInstant } from './deadline';
 export { currentTimeZone, dateOffset, deadlineTimeZoneHint, effectiveDeadline, localDate, nextTimeBoundary } from './deadline';
 
 const uiStyles: readonly UIStyle[] = ['paper', 'studio', 'editorial', 'mono'];
@@ -15,18 +15,46 @@ export function normalizePreviewSnapshot(value: unknown): Snapshot {
 }
 export const priorityLabel: Record<Priority, string> = { high: '高优先级', normal: '普通', low: '低优先级' };
 export function isPlannedToday(snapshot: Snapshot, taskId: string): boolean {
-  return snapshot.plans.some(plan => plan.taskId === taskId && plan.date === localDate());
+  const today = localDate();
+  return snapshot.plans.some(plan => plan.taskId === taskId && plan.date === today);
+}
+/** Read-only projections of a committed snapshot. Memoize by snapshot and local day at the view boundary. */
+export function indexSnapshot(snapshot: Snapshot, date = localDate()) {
+  const byId = new Map<string, Task>();
+  const active: Task[] = [];
+  const completed: Task[] = [];
+  let deadlineCount = 0;
+  for (const task of snapshot.tasks) {
+    byId.set(task.id, task);
+    (task.completed ? completed : active).push(task);
+    if (task.dueDate && !task.completed) deadlineCount++;
+  }
+  const todayPlans = [];
+  const todayIds = new Set<string>();
+  const latest = new Map<string, string>();
+  for (const plan of snapshot.plans) {
+    if (plan.date === date) { todayPlans.push(plan); todayIds.add(plan.taskId); }
+    if (!latest.has(plan.taskId) || latest.get(plan.taskId)! < plan.date) latest.set(plan.taskId, plan.date);
+  }
+  const today = todayPlans.sort((a, b) => a.sortOrder - b.sortOrder)
+    .map(plan => byId.get(plan.taskId)).filter((task): task is Task => !!task);
+  const earlier = active.filter(task => latest.has(task.id) && latest.get(task.id)! < date)
+    .sort((a, b) => latest.get(b.id)!.localeCompare(latest.get(a.id)!) || a.id.localeCompare(b.id));
+  return { byId, active, completed, today, todayIds, activeToday: today.filter(task => !task.completed), completedToday: today.filter(task => task.completed), earlier, deadlineCount };
 }
 export function selectToday(snapshot: Snapshot): Task[] {
-  const plans = snapshot.plans.filter(plan => plan.date === localDate()).sort((a, b) => a.sortOrder - b.sortOrder);
-  return plans.map(plan => snapshot.tasks.find(task => task.id === plan.taskId)).filter((task): task is Task => !!task);
+  return indexSnapshot(snapshot).today;
 }
-export function selectDeadlines(snapshot: Snapshot): Task[] {
+export function selectDeadlines(snapshot: Snapshot, localZone = currentTimeZone()): Task[] {
   const ranks = { high: 0, normal: 1, low: 2 };
-  return snapshot.tasks.filter(task => !!task.dueDate && !task.completed).sort((a, b) => {
-    if (snapshot.settings.ddlSort === 'priority' && a.priority !== b.priority) return ranks[a.priority] - ranks[b.priority];
-    return effectiveDeadline(a) - effectiveDeadline(b) || compareUtcInstants(a.createdAt, b.createdAt) || a.id.localeCompare(b.id);
-  });
+  // Temporal/IANA conversion belongs outside the O(n log n) comparator. The
+  // original task objects are retained, including imported nanosecond timestamps.
+  return snapshot.tasks.filter(task => !!task.dueDate && !task.completed)
+    .map(task => ({ task, deadline: effectiveDeadline(task, localZone), created: utcInstantNanoseconds(task.createdAt) }))
+    .sort((a, b) => {
+      if (snapshot.settings.ddlSort === 'priority' && a.task.priority !== b.task.priority) return ranks[a.task.priority] - ranks[b.task.priority];
+      return a.deadline - b.deadline || (a.created < b.created ? -1 : a.created > b.created ? 1 : 0) || a.task.id.localeCompare(b.task.id);
+    }).map(item => item.task);
 }
 export function isOverdue(task: Task, now = Date.now()): boolean {
   return !task.completed && effectiveDeadline(task) <= now;
@@ -113,12 +141,16 @@ export function createEmptySnapshot(): Snapshot {
   return { ...seed, tasks: [], plans: [] };
 }
 export function selectEarlierIncomplete(snapshot: Snapshot, today = localDate()): Task[] {
-  const latest = new Map<string, string>();
-  const plannedToday = new Set(snapshot.plans.filter(plan => plan.date === today).map(plan => plan.taskId));
-  for (const plan of snapshot.plans) if (!latest.has(plan.taskId) || latest.get(plan.taskId)! < plan.date) latest.set(plan.taskId, plan.date);
-  return snapshot.tasks.filter(task => !task.completed && latest.has(task.id) && latest.get(task.id)! < today && !plannedToday.has(task.id))
-    .sort((a, b) => latest.get(b.id)!.localeCompare(latest.get(a.id)!) || a.id.localeCompare(b.id));
+  return indexSnapshot(snapshot, today).earlier;
 }
+function appendPlan(snapshot: Snapshot, taskId: string, date: string) {
+  // Match Rust's stable same-day compaction: preserve visible order, including
+  // ties, then append without max+1 overflow. Other dates remain untouched.
+  const existing = snapshot.plans.filter(plan => plan.date === date).sort((a, b) => a.sortOrder - b.sortOrder);
+  existing.forEach((plan, index) => { plan.sortOrder = index; });
+  snapshot.plans.push({ taskId, date, sortOrder: existing.length });
+}
+
 /** Browser preview adapter only. The desktop application executes these rules in Rust. */
 export function applyPreviewAction(current: Snapshot, action: Action, expectedRevision: number): Snapshot {
   if (!validRevision(expectedRevision) || current.revision !== expectedRevision) throw new Error('内容已在另一窗口更新，请检查最新内容后重试。你的输入仍然保留。');
@@ -138,18 +170,24 @@ export function applyPreviewAction(current: Snapshot, action: Action, expectedRe
     fixDeadline(created);
     validateTask(created);
     next.tasks.push(created);
-    if (addToToday) next.plans.push({ taskId: created.id, date: action.date, sortOrder: next.plans.length });
+    if (addToToday) appendPlan(next, created.id, action.date);
   } else if (action.type === 'updateSettings') {
     assertKnown(action.changes, settingsFields);
     next.settings = { ...next.settings, ...action.changes };
     validateSettings(next.settings);
+  } else if (action.type === 'reorderToday') {
+    if (!validDate(action.date)) throw new Error('计划日期无效');
+    const expected = new Set(indexSnapshot(next, action.date).activeToday.map(task => task.id));
+    if (!Array.isArray(action.taskIds) || action.taskIds.length !== expected.size || new Set(action.taskIds).size !== expected.size || action.taskIds.some(id => !expected.has(id))) throw new Error('今日计划已更新，请刷新后重新排序');
+    const order = new Map(action.taskIds.map((id, index) => [id, index]));
+    for (const plan of next.plans) if (plan.date === action.date && order.has(plan.taskId)) plan.sortOrder = order.get(plan.taskId)!;
   } else {
     const task = next.tasks.find(item => item.id === action.id);
     if (!task) throw new Error('这个任务已不存在，请刷新后重试');
     if (action.type === 'planTask') {
       if (!validDate(action.date) || typeof action.planned !== 'boolean') throw new Error('计划日期或选项无效');
       const exists = next.plans.some(plan => plan.taskId === task.id && plan.date === action.date);
-      if (action.planned && !exists) next.plans.push({ taskId: task.id, date: action.date, sortOrder: next.plans.length });
+      if (action.planned && !exists) appendPlan(next, task.id, action.date);
       if (!action.planned) next.plans = next.plans.filter(plan => !(plan.taskId === task.id && plan.date === action.date));
     } else {
       if (!validRevision(action.expectedRevision) || task.revision !== action.expectedRevision) throw new Error('任务已更新，请检查最新内容后重试');

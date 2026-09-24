@@ -1,5 +1,5 @@
 use chrono::{Duration, Local, NaiveDate, Utc};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 pub mod deadline;
 use deadline::valid_date;
 pub const MAX_SAFE_REVISION: u64 = 9_007_199_254_740_991;
@@ -96,6 +96,8 @@ pub enum Action {
         planned: bool,
         date: String,
     },
+    #[serde(rename = "reorderToday", rename_all = "camelCase")]
+    ReorderToday { date: String, task_ids: Vec<String> },
     #[serde(rename = "updateSettings")]
     UpdateSettings { changes: Value },
     #[serde(rename = "resetDemo")]
@@ -287,6 +289,26 @@ impl Snapshot {
         }
         Ok(task)
     }
+    fn append_plan(&mut self, task_id: String, date: String) {
+        // Removal leaves gaps and older snapshots may contain equal or very
+        // large orders. Stable compaction preserves the displayed order while
+        // making append unambiguous, without incrementing an unsafe maximum.
+        let mut indices: Vec<_> = self
+            .plans
+            .iter()
+            .enumerate()
+            .filter_map(|(index, plan)| (plan.date == date).then_some(index))
+            .collect();
+        indices.sort_by_key(|index| self.plans[*index].sort_order);
+        for (order, index) in indices.iter().enumerate() {
+            self.plans[*index].sort_order = order;
+        }
+        self.plans.push(Plan {
+            task_id,
+            date,
+            sort_order: indices.len(),
+        });
+    }
     pub fn apply(&self, action: Action, expected: u64) -> Result<Self, String> {
         if expected != self.revision {
             return Err("数据已在另一个窗口更新。已刷新最新状态，请重试；编辑草稿仍保留。".into());
@@ -339,11 +361,7 @@ impl Snapshot {
                 deadline::fix(&mut item, None)?;
                 validate_task(&item)?;
                 if planned {
-                    next.plans.push(Plan {
-                        task_id: item.id.clone(),
-                        date,
-                        sort_order: next.plans.len(),
-                    });
+                    next.append_plan(item.id.clone(), date);
                 }
                 next.tasks.push(item);
             }
@@ -396,13 +414,38 @@ impl Snapshot {
                 }
                 let exists = next.plans.iter().any(|p| p.task_id == id && p.date == date);
                 if planned && !exists {
-                    next.plans.push(Plan {
-                        task_id: id,
-                        date,
-                        sort_order: next.plans.len(),
-                    });
+                    next.append_plan(id, date);
                 } else if !planned {
                     next.plans.retain(|p| p.task_id != id || p.date != date);
+                }
+            }
+            Action::ReorderToday { date, task_ids } => {
+                valid_date(&date)?;
+                let incomplete: HashSet<_> = self
+                    .tasks
+                    .iter()
+                    .filter(|task| !task.completed)
+                    .map(|task| task.id.as_str())
+                    .collect();
+                let planned: HashSet<_> = self
+                    .plans
+                    .iter()
+                    .filter(|plan| plan.date == date && incomplete.contains(plan.task_id.as_str()))
+                    .map(|plan| plan.task_id.as_str())
+                    .collect();
+                let requested: HashSet<_> = task_ids.iter().map(String::as_str).collect();
+                if requested.len() != task_ids.len() || requested != planned {
+                    return Err("今日计划已变化，排序需要包含全部未完成的今日任务且不能重复。请刷新后重试。".into());
+                }
+                let positions: HashMap<_, _> = task_ids
+                    .iter()
+                    .enumerate()
+                    .map(|(position, id)| (id.as_str(), position))
+                    .collect();
+                for plan in next.plans.iter_mut().filter(|plan| plan.date == date) {
+                    if let Some(position) = positions.get(plan.task_id.as_str()) {
+                        plan.sort_order = *position;
+                    }
                 }
             }
             Action::UpdateSettings { changes } => {
@@ -442,6 +485,393 @@ impl Snapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn active_plan_ids(snapshot: &Snapshot, date: &str) -> Vec<String> {
+        let active: HashSet<_> = snapshot
+            .tasks
+            .iter()
+            .filter(|task| !task.completed)
+            .map(|task| task.id.as_str())
+            .collect();
+        let mut plans: Vec<_> = snapshot
+            .plans
+            .iter()
+            .filter(|plan| plan.date == date && active.contains(plan.task_id.as_str()))
+            .collect();
+        plans.sort_by_key(|plan| plan.sort_order);
+        plans.iter().map(|plan| plan.task_id.clone()).collect()
+    }
+
+    #[test]
+    fn rejoining_after_reorder_and_removal_appends_after_remaining_plans() {
+        let date = "2026-09-24";
+        let mut initial = Snapshot::demo(date);
+        initial.plans.push(Plan {
+            task_id: initial.tasks[0].id.clone(),
+            date: "2026-09-23".into(),
+            sort_order: 99,
+        });
+        let order: Vec<_> = active_plan_ids(&initial, date).into_iter().rev().collect();
+        let reordered = initial
+            .apply(
+                Action::ReorderToday {
+                    date: date.into(),
+                    task_ids: order.clone(),
+                },
+                initial.revision,
+            )
+            .unwrap();
+        let removed_id = order[0].clone();
+        let removed = reordered
+            .apply(
+                Action::PlanTask {
+                    id: removed_id.clone(),
+                    date: date.into(),
+                    planned: false,
+                },
+                reordered.revision,
+            )
+            .unwrap();
+        let joined = removed
+            .apply(
+                Action::PlanTask {
+                    id: removed_id.clone(),
+                    date: date.into(),
+                    planned: true,
+                },
+                removed.revision,
+            )
+            .unwrap();
+        let expected: Vec<_> = order
+            .into_iter()
+            .filter(|id| id != &removed_id)
+            .chain([removed_id.clone()])
+            .collect();
+        assert_eq!(active_plan_ids(&joined, date), expected);
+        assert_eq!(joined.tasks, initial.tasks);
+        assert_eq!(
+            serde_json::to_value(joined.plans.iter().find(|plan| plan.date != date)).unwrap(),
+            serde_json::to_value(initial.plans.iter().find(|plan| plan.date != date)).unwrap()
+        );
+        let orders: HashSet<_> = joined
+            .plans
+            .iter()
+            .filter(|plan| plan.date == date)
+            .map(|plan| plan.sort_order)
+            .collect();
+        assert_eq!(
+            orders.len(),
+            joined.plans.iter().filter(|plan| plan.date == date).count()
+        );
+    }
+
+    #[test]
+    fn new_and_existing_tasks_append_after_gaps_ties_and_maximum_safe_order() {
+        let date = "2026-09-24";
+        let maximum = MAX_SAFE_REVISION as usize;
+        for values in [
+            [0, 2, 4, 9],
+            [7, 7, 7, 7],
+            [maximum - 3, maximum, maximum - 1, maximum],
+        ] {
+            for create in [false, true] {
+                let mut initial = Snapshot::demo(date);
+                for (plan, order) in initial.plans.iter_mut().zip(values) {
+                    plan.sort_order = order;
+                }
+                let unplanned = initial
+                    .tasks
+                    .iter()
+                    .find(|task| !initial.plans.iter().any(|plan| plan.task_id == task.id))
+                    .unwrap()
+                    .id
+                    .clone();
+                initial.plans.push(Plan {
+                    task_id: unplanned.clone(),
+                    date: "2026-09-23".into(),
+                    sort_order: maximum,
+                });
+                initial.plans.push(Plan {
+                    task_id: initial.tasks[0].id.clone(),
+                    date: "2026-09-25".into(),
+                    sort_order: 77,
+                });
+                let history: Vec<_> = initial
+                    .plans
+                    .iter()
+                    .filter(|plan| plan.date != date)
+                    .cloned()
+                    .collect();
+                let mut before: Vec<_> = initial
+                    .plans
+                    .iter()
+                    .filter(|plan| plan.date == date)
+                    .collect();
+                before.sort_by_key(|plan| plan.sort_order);
+                let mut expected: Vec<_> = before.iter().map(|plan| plan.task_id.clone()).collect();
+                let action = if create {
+                    Action::CreateTask {
+                        date: date.into(),
+                        task: serde_json::json!({"title":"Synthetic appended task", "addToToday":true}),
+                    }
+                } else {
+                    Action::PlanTask {
+                        id: unplanned.clone(),
+                        date: date.into(),
+                        planned: true,
+                    }
+                };
+                let next = initial.apply(action, initial.revision).unwrap();
+                let appended = if create {
+                    next.tasks.last().unwrap().id.clone()
+                } else {
+                    unplanned
+                };
+                expected.push(appended.clone());
+                let mut actual: Vec<_> =
+                    next.plans.iter().filter(|plan| plan.date == date).collect();
+                actual.sort_by_key(|plan| plan.sort_order);
+                assert_eq!(
+                    actual
+                        .iter()
+                        .map(|plan| plan.task_id.clone())
+                        .collect::<Vec<_>>(),
+                    expected,
+                    "{values:?}, create={create}"
+                );
+                assert_eq!(
+                    actual
+                        .iter()
+                        .map(|plan| plan.sort_order)
+                        .collect::<Vec<_>>(),
+                    (0..actual.len()).collect::<Vec<_>>()
+                );
+                assert_eq!(next.tasks[..initial.tasks.len()], initial.tasks);
+                assert_eq!(
+                    serde_json::to_value(
+                        next.plans
+                            .iter()
+                            .filter(|plan| plan.date != date)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    )
+                    .unwrap(),
+                    serde_json::to_value(history).unwrap()
+                );
+                // A second join is a no-op for all plan data, not a reorder.
+                let twice = next
+                    .apply(
+                        Action::PlanTask {
+                            id: appended,
+                            date: date.into(),
+                            planned: true,
+                        },
+                        next.revision,
+                    )
+                    .unwrap();
+                assert_eq!(
+                    serde_json::to_value(twice.plans).unwrap(),
+                    serde_json::to_value(next.plans).unwrap()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn today_reorder_preserves_tasks_completed_plans_and_other_dates() {
+        let date = "2026-09-24";
+        let mut initial = Snapshot::demo(date);
+        initial.tasks[1].completed = true;
+        initial.tasks[1].completed_at = Some(initial.tasks[1].created_at.clone());
+        let completed_ids: HashSet<_> = initial
+            .tasks
+            .iter()
+            .filter(|task| task.completed)
+            .map(|task| task.id.clone())
+            .collect();
+        for (index, plan) in initial.plans.iter_mut().enumerate() {
+            if completed_ids.contains(&plan.task_id) {
+                plan.sort_order = 41 + index;
+            }
+        }
+        initial.plans.push(Plan {
+            task_id: initial.tasks[0].id.clone(),
+            date: "2026-09-23".into(),
+            sort_order: 19,
+        });
+        initial.plans.push(Plan {
+            task_id: initial.tasks[1].id.clone(),
+            date: "2026-09-25".into(),
+            sort_order: 27,
+        });
+        let order: Vec<_> = active_plan_ids(&initial, date).into_iter().rev().collect();
+        // Exercise the actual camelCase command payload as well as the rule.
+        let action = serde_json::from_value(serde_json::json!({
+            "type":"reorderToday", "date":date, "taskIds":order
+        }))
+        .unwrap();
+        let next = initial.apply(action, initial.revision).unwrap();
+        assert_eq!(active_plan_ids(&next, date), order);
+        assert_eq!(next.tasks, initial.tasks);
+        assert_eq!(next.settings, initial.settings);
+        assert_eq!(next.revision, initial.revision + 1);
+        assert_eq!(next.plans.len(), initial.plans.len());
+        for (before, after) in initial.plans.iter().zip(&next.plans) {
+            assert_eq!(before.task_id, after.task_id);
+            assert_eq!(before.date, after.date);
+            if before.date != date || completed_ids.contains(&before.task_id) {
+                assert_eq!(
+                    serde_json::to_value(before).unwrap(),
+                    serde_json::to_value(after).unwrap()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn today_reorder_rejects_missing_duplicate_unknown_completed_or_unplanned_ids() {
+        let date = "2026-09-24";
+        let initial = Snapshot::demo(date);
+        let ids = active_plan_ids(&initial, date);
+        let completed = initial
+            .tasks
+            .iter()
+            .find(|task| task.completed)
+            .unwrap()
+            .id
+            .clone();
+        let unplanned = initial
+            .tasks
+            .iter()
+            .find(|task| !initial.plans.iter().any(|plan| plan.task_id == task.id))
+            .unwrap()
+            .id
+            .clone();
+        let mut duplicate = ids.clone();
+        duplicate[1] = duplicate[0].clone();
+        let mut cases = vec![vec![], ids[..ids.len() - 1].to_vec(), duplicate];
+        for additional in [completed, unplanned, "unknown task".into()] {
+            let mut invalid = ids.clone();
+            invalid.push(additional);
+            cases.push(invalid);
+        }
+        let before = serde_json::to_value(&initial).unwrap();
+        for task_ids in cases {
+            assert!(initial
+                .apply(
+                    Action::ReorderToday {
+                        date: date.into(),
+                        task_ids
+                    },
+                    initial.revision
+                )
+                .is_err());
+            assert_eq!(serde_json::to_value(&initial).unwrap(), before);
+        }
+        for date in ["2026-9-24", "2026-02-30", "not a date"] {
+            assert!(initial
+                .apply(
+                    Action::ReorderToday {
+                        date: date.into(),
+                        task_ids: ids.clone()
+                    },
+                    initial.revision
+                )
+                .is_err());
+        }
+    }
+
+    #[test]
+    fn completion_and_reordering_reject_stale_snapshots_in_both_orders() {
+        let date = "2026-09-24";
+        let initial = Snapshot::demo(date);
+        let order: Vec<_> = active_plan_ids(&initial, date).into_iter().rev().collect();
+        let task = initial.tasks[0].clone();
+        let complete = || Action::SetCompleted {
+            id: task.id.clone(),
+            completed: true,
+            expected_revision: task.revision,
+        };
+        let reorder = || Action::ReorderToday {
+            date: date.into(),
+            task_ids: order.clone(),
+        };
+        let completed = initial.apply(complete(), initial.revision).unwrap();
+        assert!(completed.apply(reorder(), initial.revision).is_err());
+        assert!(
+            completed.apply(reorder(), completed.revision).is_err(),
+            "completed tasks are no longer in the reorderable set"
+        );
+        let current_order = order.iter().filter(|id| **id != task.id).cloned().collect();
+        let after = completed
+            .apply(
+                Action::ReorderToday {
+                    date: date.into(),
+                    task_ids: current_order,
+                },
+                completed.revision,
+            )
+            .unwrap();
+        let before_completed_plan = completed
+            .plans
+            .iter()
+            .find(|plan| plan.task_id == task.id)
+            .unwrap();
+        let after_completed_plan = after
+            .plans
+            .iter()
+            .find(|plan| plan.task_id == task.id)
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(before_completed_plan).unwrap(),
+            serde_json::to_value(after_completed_plan).unwrap()
+        );
+        assert_eq!(after.tasks, completed.tasks);
+
+        let reordered = initial.apply(reorder(), initial.revision).unwrap();
+        assert!(reordered.apply(complete(), initial.revision).is_err());
+        let done = reordered.apply(complete(), reordered.revision).unwrap();
+        assert!(done.tasks[0].completed);
+        assert_eq!(
+            serde_json::to_value(&done.plans).unwrap(),
+            serde_json::to_value(&reordered.plans).unwrap()
+        );
+    }
+
+    #[test]
+    fn empty_and_single_task_days_can_reorder_without_touching_other_plans() {
+        let initial = Snapshot::demo("2026-09-24");
+        let empty = initial
+            .apply(
+                Action::ReorderToday {
+                    date: "2026-09-25".into(),
+                    task_ids: vec![],
+                },
+                initial.revision,
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&empty.plans).unwrap(),
+            serde_json::to_value(&initial.plans).unwrap()
+        );
+        let mut single = initial.clone();
+        single
+            .plans
+            .retain(|plan| plan.task_id == single.tasks[0].id);
+        single.plans[0].sort_order = 9;
+        let next = single
+            .apply(
+                Action::ReorderToday {
+                    date: "2026-09-24".into(),
+                    task_ids: vec![single.tasks[0].id.clone()],
+                },
+                single.revision,
+            )
+            .unwrap();
+        assert_eq!(next.plans[0].sort_order, 0);
+        assert_eq!(next.tasks, single.tasks);
+    }
+
     #[test]
     fn same_task_completion_and_reopen_keeps_plan_and_deadline() {
         let initial = Snapshot::demo("2026-09-24");

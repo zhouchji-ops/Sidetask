@@ -7,6 +7,7 @@ import {
   formatDue,
   isOverdue,
   isPlannedToday,
+  indexSnapshot,
   localDate,
   normalizePreviewSnapshot,
   selectDeadlines,
@@ -35,9 +36,122 @@ beforeEach(() => {
   // Local noon keeps the browser adapter's local-calendar behavior deterministic in any host zone.
   vi.setSystemTime(new Date(`${today}T12:00:00`));
 });
+
+describe('indexed task projections and daily ordering', () => {
+  it('keeps every task and stable plan order at 10k, without changing persisted objects', () => {
+    const snapshot = createSeed(today);
+    snapshot.tasks = Array.from({ length: 10000 }, (_, index) => task(`indexed-${index}`, { dueDate: index % 2 ? null : today }));
+    snapshot.plans = snapshot.tasks.map((item, index) => ({ taskId: item.id, date: today, sortOrder: 9999 - index }));
+    const before = structuredClone(snapshot);
+    const view = indexSnapshot(snapshot);
+    expect(view.active).toHaveLength(10000);
+    expect(view.today).toHaveLength(10000);
+    expect(view.todayIds.size).toBe(10000);
+    expect(view.deadlineCount).toBe(5000);
+    expect(view.today[0]).toBe(snapshot.tasks[9999]);
+    expect(view.byId.get('indexed-0')).toBe(snapshot.tasks[0]);
+    expect(snapshot).toEqual(before);
+  });
+
+  it('recomputes the same snapshot when the local day moves forward and backward', () => {
+    const snapshot = createSeed(today);
+    const before = structuredClone(snapshot);
+    expect(indexSnapshot(snapshot).activeToday).toHaveLength(3);
+    vi.setSystemTime(new Date('2026-09-25T00:00:00'));
+    expect(indexSnapshot(snapshot).today).toHaveLength(0);
+    expect(indexSnapshot(snapshot).earlier).toHaveLength(3);
+    vi.setSystemTime(new Date(`${today}T12:00:00`));
+    expect(indexSnapshot(snapshot).activeToday).toHaveLength(3);
+    expect(indexSnapshot(snapshot).earlier).toHaveLength(0);
+    expect(snapshot).toEqual(before);
+  });
+
+  it('rebuilds floating date-only ordering for a different local zone without changing fixed deadlines', () => {
+    const snapshot = createSeed(today);
+    snapshot.tasks = [task('fixed', { dueTimezone: 'UTC' }), task('floating')];
+    snapshot.plans = [];
+    expect(selectDeadlines(snapshot, 'Asia/Shanghai').map(item => item.id)).toEqual(['floating', 'fixed']);
+    expect(selectDeadlines(snapshot, 'America/New_York').map(item => item.id)).toEqual(['fixed', 'floating']);
+    expect(snapshot.tasks[1].dueTimezone).toBeUndefined();
+    expect(snapshot.tasks[0].dueTimezone).toBe('UTC');
+  });
+
+  it('reorders only active plans on the requested day and preserves task records, DDL and history', () => {
+    const snapshot = createSeed(today);
+    snapshot.plans.push({ taskId: 'demo-design', date: '2026-09-23', sortOrder: 99 });
+    const before = structuredClone(snapshot);
+    const taskIds = ['demo-paper', 'demo-read', 'demo-design'];
+    const changed = apply(snapshot, { type: 'reorderToday', date: today, taskIds });
+    expect(indexSnapshot(changed).activeToday.map(item => item.id)).toEqual(taskIds);
+    expect(changed.tasks).toEqual(before.tasks);
+    expect(changed.plans.find(plan => plan.taskId === 'demo-review')).toEqual(before.plans.find(plan => plan.taskId === 'demo-review'));
+    expect(changed.plans.at(-1)).toEqual(before.plans.at(-1));
+    expect(changed.revision).toBe(before.revision + 1);
+    expect(selectDeadlines(changed)).toEqual(selectDeadlines(before));
+    expect(snapshot).toEqual(before);
+  });
+
+  it.each([
+    ['demo-paper', 'demo-read'],
+    ['demo-paper', 'demo-read', 'demo-read'],
+    ['demo-paper', 'demo-read', 'demo-review'],
+    ['demo-paper', 'demo-read', 'demo-lab'],
+  ])('rejects incomplete, duplicate, completed or unplanned reorder IDs atomically: %j', (...taskIds) => {
+    const snapshot = createSeed(today);
+    const before = structuredClone(snapshot);
+    expect(() => apply(snapshot, { type: 'reorderToday', date: today, taskIds })).toThrow('重新排序');
+    expect(snapshot).toEqual(before);
+  });
+
+  it('rejects stale reorder requests and invalid dates before updating the order', () => {
+    const snapshot = createSeed(today);
+    const taskIds = indexSnapshot(snapshot).activeToday.map(item => item.id);
+    const changed = apply(snapshot, { type: 'setCompleted', id: taskIds[0], completed: true, expectedRevision: 1 });
+    expect(() => applyPreviewAction(changed, { type: 'reorderToday', date: today, taskIds }, snapshot.revision)).toThrow('另一窗口');
+    expect(() => apply(snapshot, { type: 'reorderToday', date: '2026-02-30', taskIds })).toThrow('计划日期');
+  });
+});
 afterEach(() => vi.useRealTimers());
 
 describe('single task identity across daily plans and deadlines', () => {
+  it('appends a rejoined task after reordering and removing a plan, keeping history and task data', () => {
+    const initial = createSeed(today);
+    initial.plans.push({ taskId: 'demo-design', date: '2026-09-23', sortOrder: 99 });
+    const reordered = apply(initial, { type: 'reorderToday', date: today, taskIds: ['demo-paper', 'demo-read', 'demo-design'] });
+    const removed = apply(reordered, { type: 'planTask', id: 'demo-paper', date: today, planned: false });
+    const joined = apply(removed, { type: 'planTask', id: 'demo-paper', date: today, planned: true });
+    expect(indexSnapshot(joined).activeToday.map(item => item.id)).toEqual(['demo-read', 'demo-design', 'demo-paper']);
+    expect(joined.tasks).toEqual(initial.tasks);
+    expect(joined.plans.filter(plan => plan.date !== today)).toEqual(initial.plans.filter(plan => plan.date !== today));
+    const plans = joined.plans.filter(plan => plan.date === today);
+    expect(new Set(plans.map(plan => plan.sortOrder)).size).toBe(plans.length);
+  });
+
+  it.each([
+    [0, 2, 4, 9],
+    [7, 7, 7, 7],
+    [Number.MAX_SAFE_INTEGER - 3, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1, Number.MAX_SAFE_INTEGER],
+  ])('new and existing tasks append after gaps/ties/extreme orders %j %j %j %j', (...orders) => {
+    for (const create of [false, true]) {
+      const initial = createSeed(today);
+      initial.plans.forEach((plan, index) => { plan.sortOrder = orders[index]; });
+      initial.plans.push({ taskId: 'demo-lab', date: '2026-09-23', sortOrder: Number.MAX_SAFE_INTEGER });
+      initial.plans.push({ taskId: 'demo-design', date: '2026-09-25', sortOrder: 77 });
+      const before = structuredClone(initial);
+      const expected = selectToday(initial).map(item => item.id);
+      const changed = apply(initial, create
+        ? { type: 'createTask', date: today, task: { title: '追加合成任务', notes: '', priority: 'normal', dueDate: null, dueTime: null, addToToday: true } }
+        : { type: 'planTask', id: 'demo-lab', date: today, planned: true });
+      const appended = create ? changed.tasks.at(-1)!.id : 'demo-lab';
+      expect(selectToday(changed).map(item => item.id)).toEqual([...expected, appended]);
+      expect(changed.plans.filter(plan => plan.date === today).map(plan => plan.sortOrder).sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4]);
+      expect(changed.tasks.slice(0, initial.tasks.length)).toEqual(initial.tasks);
+      expect(changed.plans.filter(plan => plan.date !== today)).toEqual(initial.plans.filter(plan => plan.date !== today));
+      expect(apply(changed, { type: 'planTask', id: appended, date: today, planned: true }).plans).toEqual(changed.plans);
+      expect(initial).toEqual(before);
+    }
+  });
+
   it('joining today twice creates only one reference and preserves the task and deadline', () => {
     const initial = createSeed(today);
     const existing = structuredClone(initial.tasks.find(item => item.id === 'demo-lab')!);

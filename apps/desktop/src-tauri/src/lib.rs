@@ -17,6 +17,27 @@ pub struct AppState {
     pub exit: Mutex<platform::exit::ExitRuntime>,
 }
 
+pub(crate) fn task_state(app: &tauri::AppHandle) -> Result<tauri::State<'_, AppState>, String> {
+    app.try_state::<AppState>()
+        .ok_or_else(|| "数据库需要恢复，尚未加载任务；请在恢复控制台选择经过验证的备份。".into())
+}
+
+fn initialize_task_state(data_dir: &std::path::Path) -> Result<AppState, String> {
+    std::fs::create_dir_all(data_dir).map_err(|e| format!("无法访问本地数据目录：{e}"))?;
+    let repository = SqliteRepository::open(&data_dir.join("sidetask.sqlite3"))?;
+    let service = TaskService::new(Box::new(repository))?;
+    let placement = service
+        .repository
+        .load_placement()?
+        .and_then(|p| serde_json::from_str(&p).ok())
+        .unwrap_or_default();
+    Ok(AppState {
+        service: Mutex::new(service),
+        dock: Mutex::new(platform::DockRuntime::new(placement)),
+        exit: Mutex::new(platform::exit::ExitRuntime::default()),
+    })
+}
+
 fn require_window(label: &str, allowed: &[&str]) -> Result<(), String> {
     if allowed.contains(&label) {
         Ok(())
@@ -50,12 +71,9 @@ fn authorize_mutation(label: &str, action: &Action) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_snapshot(
-    window: tauri::WebviewWindow,
-    state: tauri::State<'_, AppState>,
-) -> Result<Snapshot, String> {
+fn get_snapshot(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<Snapshot, String> {
     require_window(window.label(), &["console", "edge-panel", "edge-handle"])?;
-    let mut snapshot = state
+    let mut snapshot = task_state(&app)?
         .service
         .lock()
         .map(|s| s.snapshot.clone())
@@ -70,13 +88,13 @@ fn get_snapshot(
 fn mutate(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
-    state: tauri::State<'_, AppState>,
     action: Value,
     expected_revision: u64,
 ) -> Result<Snapshot, String> {
     let action: Action =
         serde_json::from_value(action).map_err(|e| format!("操作格式无效：{e}"))?;
     authorize_mutation(window.label(), &action)?;
+    let state = task_state(&app)?;
     let snapshot = {
         let mut service = state.service.lock().map_err(|_| "本地任务服务暂不可用。")?;
         platform::exit::ensure_running(&state)?;
@@ -103,6 +121,7 @@ async fn window_action(
 #[tauri::command]
 fn get_monitors(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<Value, String> {
     require_window(window.label(), &["console"])?;
+    task_state(&app)?;
     platform::get_monitors(&app)
 }
 
@@ -141,8 +160,7 @@ async fn export_backup(
     window: tauri::WebviewWindow,
 ) -> Result<Value, String> {
     require_window(window.label(), &["console"])?;
-    let content = app
-        .state::<AppState>()
+    let content = task_state(&app)?
         .service
         .lock()
         .map_err(|_| "任务服务暂不可用。")?
@@ -187,7 +205,7 @@ async fn preview_restore(
     content: String,
 ) -> Result<application::RestorePreview, String> {
     require_window(window.label(), &["console"])?;
-    app.state::<AppState>()
+    task_state(&app)?
         .service
         .lock()
         .map_err(|_| "任务服务暂不可用。")?
@@ -202,7 +220,7 @@ async fn restore_backup(
     expected_revision: u64,
 ) -> Result<application::RestoreResult, String> {
     require_window(window.label(), &["console"])?;
-    let state = app.state::<AppState>();
+    let state = task_state(&app)?;
     let result = {
         let mut service = state.service.lock().map_err(|_| "任务服务暂不可用。")?;
         platform::exit::ensure_running(&state)?;
@@ -215,6 +233,34 @@ async fn restore_backup(
         eprintln!("restore notification: {error}");
     }
     Ok(result)
+}
+
+#[tauri::command]
+async fn get_startup_recovery(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<platform::startup_recovery::RecoveryStatus>, String> {
+    require_window(window.label(), &["console"])?;
+    platform::startup_recovery::status(&app)
+}
+
+#[tauri::command]
+async fn recover_startup_backup(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    candidate_id: String,
+) -> Result<infrastructure::recovery::RecoveryOutcome, String> {
+    require_window(window.label(), &["console"])?;
+    platform::startup_recovery::recover(&app, &candidate_id)
+}
+
+#[tauri::command]
+async fn restart_after_recovery(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<(), String> {
+    require_window(window.label(), &["console"])?;
+    platform::startup_recovery::restart(&app)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -233,24 +279,27 @@ pub fn run() {
             resolve_exit,
             export_backup,
             preview_restore,
-            restore_backup
+            restore_backup,
+            get_startup_recovery,
+            recover_startup_backup,
+            restart_after_recovery
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&data_dir)?;
-            let repo = SqliteRepository::open(&data_dir.join("sidetask.sqlite3"))?;
-            let service = TaskService::new(Box::new(repo))?;
-            let placement = service
-                .repository
-                .load_placement()?
-                .and_then(|p| serde_json::from_str(&p).ok())
-                .unwrap_or_default();
-            app.manage(AppState {
-                service: Mutex::new(service),
-                dock: Mutex::new(platform::DockRuntime::new(placement)),
-                exit: Mutex::new(platform::exit::ExitRuntime::default()),
-            });
-            platform::setup(app)?;
+            match initialize_task_state(&data_dir) {
+                Ok(state) => {
+                    app.manage(state);
+                    platform::setup(app)?;
+                }
+                Err(error) => {
+                    // The failed repository/service was dropped before entering
+                    // offline recovery: there is no writable task connection.
+                    app.manage(platform::startup_recovery::RecoveryState::new(
+                        data_dir, error,
+                    ));
+                    platform::setup_recovery(app)?;
+                }
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -359,11 +408,41 @@ mod security_tests {
             "allow-preview-restore",
             "allow-restore-backup",
             "allow-resolve-exit",
+            "allow-get-startup-recovery",
+            "allow-recover-startup-backup",
+            "allow-restart-after-recovery",
         ] {
             assert!(!shared["permissions"]
                 .as_array()
                 .unwrap()
                 .contains(&serde_json::json!(command)));
         }
+        for command in [
+            "allow-get-startup-recovery",
+            "allow-recover-startup-backup",
+            "allow-restart-after-recovery",
+        ] {
+            assert!(!tasks["permissions"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!(command)));
+            assert!(console["permissions"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!(command)));
+        }
+    }
+
+    #[test]
+    fn failed_startup_does_not_return_an_empty_task_service_or_replace_corrupt_bytes() {
+        let directory =
+            std::env::temp_dir().join(format!("sidetask-startup-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("sidetask.sqlite3");
+        let bytes = b"synthetic damaged database - preserve this evidence";
+        std::fs::write(&path, bytes).unwrap();
+        assert!(initialize_task_state(&directory).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

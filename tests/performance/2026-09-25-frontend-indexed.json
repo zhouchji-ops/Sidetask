@@ -1,0 +1,798 @@
+[
+  {
+    "event": "environment",
+    "browser": "153.0.8010.12",
+    "node": "v24.14.1",
+    "bundle": "index-BgoGPTsq.js",
+    "time": "2026-09-24T17:54:45.097Z"
+  },
+  {
+    "event": "pure_operations",
+    "count": 1000,
+    "samples": {
+      "indexSnapshot": [
+        0.29999999701976776,
+        0.29999999701976776,
+        0.10000000894069672
+      ],
+      "indexedRowPlannedLookups": [
+        0.29999999701976776,
+        0.20000000298023224,
+        0.09999999403953552
+      ],
+      "selectToday": [
+        0.09999999403953552,
+        0.20000000298023224,
+        0.09999999403953552
+      ],
+      "selectDeadlines": [
+        9.5,
+        8.099999994039536,
+        8.400000005960464
+      ],
+      "selectEarlier": [
+        0.20000000298023224,
+        0.09999999403953552,
+        0.10000000894069672
+      ],
+      "rowPlannedLookups": [
+        1.7999999970197678,
+        2,
+        1.9000000059604645
+      ],
+      "formatAllRows": [
+        39.3999999910593,
+        40.5,
+        42.20000000298023
+      ],
+      "nextTimeBoundary": [
+        6,
+        5.700000002980232,
+        6
+      ],
+      "normalizePreview": [
+        11,
+        10.799999997019768,
+        11.099999994039536
+      ]
+    }
+  },
+  {
+    "event": "mounted",
+    "count": 1000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "jsonBytes": 441335,
+    "wallMs": 255.347625,
+    "errors": [],
+    "stats": {
+      "heapMiB": 12.566020965576172,
+      "heapTotalMiB": 13.3125,
+      "documents": 1,
+      "nodes": 29814,
+      "listeners": 2191,
+      "taskSeconds": 0.217037,
+      "scriptSeconds": 0.092872,
+      "layoutSeconds": 0.029198,
+      "rows": 1000,
+      "mutationMs": [],
+      "errors": []
+    }
+  },
+  {
+    "event": "action",
+    "count": 1000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "rep": 0,
+    "label": "filter-one",
+    "wallMs": 66.47220800000002,
+    "eventToPaintMs": 45.79999999701977
+  },
+  {
+    "event": "action",
+    "count": 1000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "rep": 0,
+    "label": "clear-filter",
+    "wallMs": 150.03849999999989,
+    "eventToPaintMs": 145.90000000596046
+  },
+  {
+    "event": "action",
+    "count": 1000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "rep": 1,
+    "label": "filter-one",
+    "wallMs": 47.61895800000002,
+    "eventToPaintMs": 32.8999999910593
+  },
+  {
+    "event": "action",
+    "count": 1000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "rep": 1,
+    "label": "clear-filter",
+    "wallMs": 132.02266699999996,
+    "eventToPaintMs": 129.09999999403954
+  },
+  {
+    "event": "action",
+    "count": 1000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "label": "complete-first",
+    "wallMs": 233.02587499999981,
+    "eventToPaintMs": 194.79999999701977
+  },
+  {
+    "event": "after_complete",
+    "count": 1000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "idleTaskSeconds": 0.042663999999999924,
+    "idleLongTasks": [],
+    "errors": [],
+    "stats": {
+      "heapMiB": 20.838153839111328,
+      "heapTotalMiB": 22.953125,
+      "documents": 1,
+      "nodes": 29805,
+      "listeners": 2191,
+      "taskSeconds": 0.748557,
+      "scriptSeconds": 0.375265,
+      "layoutSeconds": 0.06008,
+      "rows": 999,
+      "mutationMs": [
+        1.5999999940395355
+      ],
+      "errors": []
+    }
+  },
+  {
+    "event": "mounted",
+    "count": 1000,
+    "archive": false,
+    "mode": "preview",
+    "surface": "console",
+    "noDue": false,
+    "jsonBytes": 441335,
+    "wallMs": 236.35808400000042,
+    "errors": [],
+    "stats": {
+      "heapMiB": 12.445240020751953,
+      "heapTotalMiB": 13.0625,
+      "documents": 1,
+      "nodes": 29819,
+      "listeners": 2202,
+      "taskSeconds": 0.218752,
+      "scriptSeconds": 0.102198,
+      "layoutSeconds": 0.028667,
+      "rows": 1000,
+      "mutationMs": [],
+      "errors": []
+    }
+  },
+  {
+    "event": "action",
+    "count": 1000,
+    "archive": false,
+    "mode": "preview",
+    "surface": "console",
+    "noDue": false,
+    "rep": 0,
+    "label": "filter-one",
+    "wallMs": 53.01837499999965,
+    "eventToPaintMs": 40.19999998807907
+  },
+  {
+    "event": "action",
+    "count": 1000,
+    "archive": false,
+    "mode": "preview",
+    "surface": "console",
+    "noDue": false,
+    "rep": 0,
+    "label": "clear-filter",
+    "wallMs": 150.30925000000025,
+    "eventToPaintMs": 147.3999999910593
+  },
+  {
+    "event": "action",
+    "count": 1000,
+    "archive": false,
+    "mode": "preview",
+    "surface": "console",
+    "noDue": false,
+    "rep": 1,
+    "label": "filter-one",
+    "wallMs": 48.568084000000454,
+    "eventToPaintMs": 35.400000005960464
+  },
+  {
+    "event": "action",
+    "count": 1000,
+    "archive": false,
+    "mode": "preview",
+    "surface": "console",
+    "noDue": false,
+    "rep": 1,
+    "label": "clear-filter",
+    "wallMs": 133.09912499999973,
+    "eventToPaintMs": 130.40000000596046
+  },
+  {
+    "event": "action",
+    "count": 1000,
+    "archive": false,
+    "mode": "preview",
+    "surface": "console",
+    "noDue": false,
+    "label": "complete-first",
+    "wallMs": 232.83850000000075,
+    "eventToPaintMs": 195
+  },
+  {
+    "event": "after_complete",
+    "count": 1000,
+    "archive": false,
+    "mode": "preview",
+    "surface": "console",
+    "noDue": false,
+    "idleTaskSeconds": 0.05456700000000003,
+    "idleLongTasks": [],
+    "errors": [],
+    "stats": {
+      "heapMiB": 20.40475845336914,
+      "heapTotalMiB": 21.828125,
+      "documents": 1,
+      "nodes": 29810,
+      "listeners": 2202,
+      "taskSeconds": 0.727811,
+      "scriptSeconds": 0.367859,
+      "layoutSeconds": 0.060903,
+      "rows": 999,
+      "mutationMs": [],
+      "errors": []
+    }
+  },
+  {
+    "event": "mounted",
+    "count": 10000,
+    "archive": true,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "jsonBytes": 4590035,
+    "wallMs": 141.2974579999991,
+    "errors": [],
+    "stats": {
+      "heapMiB": 14.857868194580078,
+      "heapTotalMiB": 15.5,
+      "documents": 1,
+      "nodes": 2262,
+      "listeners": 481,
+      "taskSeconds": 0.098739,
+      "scriptSeconds": 0.03457,
+      "layoutSeconds": 0.015151,
+      "rows": 100,
+      "mutationMs": [],
+      "errors": []
+    }
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": true,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "rep": 0,
+    "label": "filter-one",
+    "wallMs": 37.84287500000028,
+    "eventToPaintMs": 32.400000005960464
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": true,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "rep": 0,
+    "label": "clear-filter",
+    "wallMs": 31.77533299999959,
+    "eventToPaintMs": 29
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": true,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "rep": 1,
+    "label": "filter-one",
+    "wallMs": 33.30070799999885,
+    "eventToPaintMs": 30.30000001192093
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": true,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "rep": 1,
+    "label": "clear-filter",
+    "wallMs": 32.50812500000029,
+    "eventToPaintMs": 30
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": true,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "label": "complete-first",
+    "wallMs": 115.66737499999908,
+    "eventToPaintMs": 82.09999999403954
+  },
+  {
+    "event": "after_complete",
+    "count": 10000,
+    "archive": true,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "idleTaskSeconds": 0.016016000000000002,
+    "idleLongTasks": [],
+    "errors": [],
+    "stats": {
+      "heapMiB": 25.57061767578125,
+      "heapTotalMiB": 26.984375,
+      "documents": 1,
+      "nodes": 2253,
+      "listeners": 481,
+      "taskSeconds": 0.216858,
+      "scriptSeconds": 0.093493,
+      "layoutSeconds": 0.018694,
+      "rows": 99,
+      "mutationMs": [
+        18.900000005960464
+      ],
+      "errors": []
+    }
+  },
+  {
+    "event": "pure_operations",
+    "count": 10000,
+    "samples": {
+      "indexSnapshot": [
+        1.5,
+        1.5,
+        2
+      ],
+      "indexedRowPlannedLookups": [
+        1.5,
+        1.5,
+        1.300000011920929
+      ],
+      "selectToday": [
+        1.2000000029802322,
+        1.0999999940395355,
+        1.1000000089406967
+      ],
+      "selectDeadlines": [
+        78.30000001192093,
+        73.5,
+        71.79999999701977
+      ],
+      "selectEarlier": [
+        0.8999999910593033,
+        0.9000000059604645,
+        1
+      ],
+      "rowPlannedLookups": [
+        178.59999999403954,
+        110.59999999403954,
+        45.5
+      ],
+      "formatAllRows": [
+        384.09999999403954,
+        382.40000000596046,
+        382.20000000298023
+      ],
+      "nextTimeBoundary": [
+        53.5,
+        53.29999999701977,
+        53.599999994039536
+      ],
+      "normalizePreview": [
+        106.20000000298023,
+        103.70000000298023,
+        105
+      ]
+    }
+  },
+  {
+    "event": "mounted",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "jsonBytes": 4421735,
+    "wallMs": 1475.7197500000002,
+    "errors": [],
+    "stats": {
+      "heapMiB": 92.89508438110352,
+      "heapTotalMiB": 95.03125,
+      "documents": 1,
+      "nodes": 296814,
+      "listeners": 20191,
+      "taskSeconds": 1.460325,
+      "scriptSeconds": 0.638221,
+      "layoutSeconds": 0.158882,
+      "rows": 10000,
+      "mutationMs": [],
+      "errors": []
+    }
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "rep": 0,
+    "label": "filter-one",
+    "wallMs": 267.8517079999983,
+    "eventToPaintMs": 112.79999999701977
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "rep": 0,
+    "label": "clear-filter",
+    "wallMs": 1049.1332919999986,
+    "eventToPaintMs": 1046.5999999940395
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "rep": 1,
+    "label": "filter-one",
+    "wallMs": 232.76670899999954,
+    "eventToPaintMs": 120.5
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "rep": 1,
+    "label": "clear-filter",
+    "wallMs": 1082.376791999999,
+    "eventToPaintMs": 1079.7999999970198
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "label": "complete-first",
+    "wallMs": 1982.0239589999983,
+    "eventToPaintMs": 1517.199999988079
+  },
+  {
+    "event": "after_complete",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "idleTaskSeconds": 0.763992,
+    "idleLongTasks": [
+      {
+        "start": 11365.09999999404,
+        "ms": 444
+      }
+    ],
+    "errors": [],
+    "stats": {
+      "heapMiB": 169.7771339416504,
+      "heapTotalMiB": 184.6875,
+      "documents": 1,
+      "nodes": 296805,
+      "listeners": 20191,
+      "taskSeconds": 6.783057,
+      "scriptSeconds": 3.317067,
+      "layoutSeconds": 0.473628,
+      "rows": 9999,
+      "mutationMs": [
+        14.799999997019768
+      ],
+      "errors": []
+    }
+  },
+  {
+    "event": "mounted",
+    "count": 10000,
+    "archive": false,
+    "mode": "preview",
+    "surface": "console",
+    "noDue": false,
+    "jsonBytes": 4421735,
+    "wallMs": 1649.4790839999987,
+    "errors": [],
+    "stats": {
+      "heapMiB": 91.77755355834961,
+      "heapTotalMiB": 93.53125,
+      "documents": 1,
+      "nodes": 296819,
+      "listeners": 20202,
+      "taskSeconds": 1.628011,
+      "scriptSeconds": 0.739768,
+      "layoutSeconds": 0.157594,
+      "rows": 10000,
+      "mutationMs": [],
+      "errors": []
+    }
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "preview",
+    "surface": "console",
+    "noDue": false,
+    "rep": 0,
+    "label": "filter-one",
+    "wallMs": 248.14791700000205,
+    "eventToPaintMs": 120.3999999910593
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "preview",
+    "surface": "console",
+    "noDue": false,
+    "rep": 0,
+    "label": "clear-filter",
+    "wallMs": 1033.3188749999972,
+    "eventToPaintMs": 1030.7000000029802
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "preview",
+    "surface": "console",
+    "noDue": false,
+    "rep": 1,
+    "label": "filter-one",
+    "wallMs": 216.18712500000402,
+    "eventToPaintMs": 105.70000000298023
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "preview",
+    "surface": "console",
+    "noDue": false,
+    "rep": 1,
+    "label": "clear-filter",
+    "wallMs": 1031.903124999997,
+    "eventToPaintMs": 1029.3999999910593
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "preview",
+    "surface": "console",
+    "noDue": false,
+    "label": "complete-first",
+    "wallMs": 1850.6290829999998,
+    "eventToPaintMs": 1575.2999999970198
+  },
+  {
+    "event": "after_complete",
+    "count": 10000,
+    "archive": false,
+    "mode": "preview",
+    "surface": "console",
+    "noDue": false,
+    "idleTaskSeconds": 0.7782100000000005,
+    "idleLongTasks": [
+      {
+        "start": 11437.39999999106,
+        "ms": 468
+      }
+    ],
+    "errors": [],
+    "stats": {
+      "heapMiB": 164.53169631958008,
+      "heapTotalMiB": 173.9375,
+      "documents": 1,
+      "nodes": 296810,
+      "listeners": 20202,
+      "taskSeconds": 6.450658,
+      "scriptSeconds": 3.352215,
+      "layoutSeconds": 0.477728,
+      "rows": 9999,
+      "mutationMs": [],
+      "errors": []
+    }
+  },
+  {
+    "event": "mounted",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "edge-panel",
+    "noDue": false,
+    "jsonBytes": 4421735,
+    "wallMs": 2892.6330830000006,
+    "errors": [],
+    "stats": {
+      "heapMiB": 118.06852722167969,
+      "heapTotalMiB": 119.78125,
+      "documents": 1,
+      "nodes": 408732,
+      "listeners": 33515,
+      "taskSeconds": 2.420473,
+      "scriptSeconds": 1.032202,
+      "layoutSeconds": 0.277812,
+      "rows": 16666,
+      "mutationMs": [],
+      "errors": []
+    }
+  },
+  {
+    "event": "mounted",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": true,
+    "jsonBytes": 4045106,
+    "wallMs": 820.4170419999937,
+    "errors": [],
+    "stats": {
+      "heapMiB": 67.18962860107422,
+      "heapTotalMiB": 68.65625,
+      "documents": 1,
+      "nodes": 210156,
+      "listeners": 20191,
+      "taskSeconds": 0.79279,
+      "scriptSeconds": 0.206441,
+      "layoutSeconds": 0.116,
+      "rows": 10000,
+      "mutationMs": [],
+      "errors": []
+    }
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": true,
+    "rep": 0,
+    "label": "filter-one",
+    "wallMs": 190.68379199999617,
+    "eventToPaintMs": 93.40000000596046
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": true,
+    "rep": 0,
+    "label": "clear-filter",
+    "wallMs": 615.1038750000007,
+    "eventToPaintMs": 612.7000000029802
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": true,
+    "rep": 1,
+    "label": "filter-one",
+    "wallMs": 167.1660830000037,
+    "eventToPaintMs": 91.70000000298023
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": true,
+    "rep": 1,
+    "label": "clear-filter",
+    "wallMs": 565.5877920000057,
+    "eventToPaintMs": 563.2999999970198
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": true,
+    "label": "complete-first",
+    "wallMs": 862.6719169999997,
+    "eventToPaintMs": 601.4000000059605
+  },
+  {
+    "event": "after_complete",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": true,
+    "idleTaskSeconds": 0.2042360000000003,
+    "idleLongTasks": [],
+    "errors": [],
+    "stats": {
+      "heapMiB": 128.10731506347656,
+      "heapTotalMiB": 135.5625,
+      "documents": 1,
+      "nodes": 210147,
+      "listeners": 20191,
+      "taskSeconds": 3.347777,
+      "scriptSeconds": 1.232624,
+      "layoutSeconds": 0.344915,
+      "rows": 9999,
+      "mutationMs": [
+        13.099999994039536
+      ],
+      "errors": []
+    }
+  },
+  {
+    "event": "done"
+  }
+]

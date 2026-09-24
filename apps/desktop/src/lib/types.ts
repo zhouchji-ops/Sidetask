@@ -42,6 +42,7 @@ export type Action =
   | { type: 'updateTask'; id: string; changes: TaskChanges; expectedRevision: number }
   | { type: 'setCompleted'; id: string; completed: boolean; expectedRevision: number }
   | { type: 'planTask'; id: string; planned: boolean; date: string }
+  | { type: 'reorderToday'; date: string; taskIds: string[] }
   | { type: 'updateSettings'; changes: Partial<Settings> }
   | { type: 'resetDemo'; date: string };
 export interface MonitorInfo { name: string; width: number; height: number; scaleFactor: number; current: boolean }

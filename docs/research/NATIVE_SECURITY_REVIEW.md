@@ -30,7 +30,7 @@ console 注册监听后可用 `get_pending_exit` 补取冷加载时遗漏的请�
 
 GitHub 参考：[Tauri 2.11.6 退出 API/事件](https://github.com/tauri-apps/tauri/blob/9452ddee5ebefd9b678a94ff003521379df6c9ae/crates/tauri/src/app.rs)。隔离原生验收包可使用不同 identifier：已核对 [single-instance 2.4.5 macOS 实现](https://github.com/tauri-apps/plugins-workspace/blob/5baf71a47292d8490f0ba3d53f15224e55c48327/plugins/single-instance/src/platform_impl/macos.rs)，socket 由 config.identifier 派生；Windows 的 mutex/window class 亦如此。因此 `com.changjin.sidetask.validation` 不与正式 identifier 共享单实例入口或应用数据目录。
 
-阶段复盘：损坏数据库仍按存储层要求拒绝启动，现有恢复 UI 只在正常启动后可达。坏库/迁移失败时的独立恢复界面尚未完成；不能把本轮备份按钮说成已经解决全部灾难恢复场景。
+该阶段复盘发现：损坏数据库按存储层要求拒绝启动，正常设置里的备份按钮无法覆盖坏库/迁移失败。该缺口成为下面“阶段四：独立启动恢复”的输入；原来的 JSON 恢复按钮本身不能解决坏库启动。
 
 ### macOS 原生复验发现与追加修复
 
@@ -74,6 +74,32 @@ Cmd+Q、应用菜单、保存/取消/放弃及备份恢复已经有本机原生�
 
 阶段复盘：窗口 status 目前是运行态成功配置对比与错误信息，尚非架构文档中完整的 desiredRevision/appliedRevision 状态模型。定位成功缓存不等于合成器没有瞬态越界。后续先做 TEST_PLAN 的 W01/W05/W08–W10、M02–M11/C10 真机矩阵，再决定事件驱动替代采样、失败重试退避与长期资源目标。
 
+## 阶段四：独立启动恢复
+
+正常库无法打开、迁移或加载时，启动流程销毁失败的 Repository / TaskService，改为只管理 `RecoveryState` 并创建恢复控制台。此分支没有 `AppState`、空任务占位数据、托盘、边缘窗口或任务轮询；恢复后必须重启并重新打开真实数据库，不能把恢复前后两个服务同时留在进程中。普通任务、设置、导入导出和窗口状态命令通过 `try_state` 返回明确的恢复错误，避免缺少状态时 panic。
+
+新增三个命令同时经过 console capability 和真实窗口 label 校验：
+
+| 命令 | 行为与边界 |
+| --- | --- |
+| `get_startup_recovery` | 正常模式返回 null；恢复模式返回启动/操作错误、受控数据目录文本、候选摘要、扫描错误、busy 及成功结果；不泄漏候选中的任务正文 |
+| `recover_startup_backup` | 只接受本次已列出的不透明候选 ID；不接受用户路径；正常任务服务存在时拒绝；存储层再次核对文件名、SHA-256 和数据库结构 |
+| `restart_after_recovery` | 只有本进程恢复成功后可调用；释放所有锁后使用 `request_restart()`，重启仍经过 Tauri 退出事件 |
+
+生命周期门控只在状态转换时持有短互斥锁，磁盘扫描/替换在锁外执行。恢复只允许一次执行；替换中关闭窗口、菜单/Cmd+Q 或 AppKit 终止请求都会先取消立即退出、记录退出意图，等恢复成功或失败返回后再退出。空闲恢复页可以直接关闭。AppKit 回调的授权判断和 RunEvent 分支均用 `try_state` 区分两种模式，不假设任务服务必然存在。未预期的恢复 panic 在协调器边界转为可见错误，避免永久 busy；断电/强制结束的文件一致性由存储层恢复标记及证据副本承担，见 [存储复核](STORAGE_HARDENING.md)。
+
+GitHub 参考：[锁定 Tauri 2.11.6 的状态管理](https://github.com/tauri-apps/tauri/blob/9452ddee5ebefd9b678a94ff003521379df6c9ae/crates/tauri/src/lib.rs)确认 `state` 在未注册时 panic，`try_state` 返回 Option；[同版重启实现](https://github.com/tauri-apps/tauri/blob/9452ddee5ebefd9b678a94ff003521379df6c9ae/crates/tauri/src/app.rs)确认 `request_restart` 触发退出事件，适合完成离线替换后的显式重启。许可仍为前述 Apache-2.0 OR MIT，本轮没有复制其实现或新增原生平台依赖。
+
+新增自动化覆盖合成坏库初始化失败时不返回空服务、不改原始字节，恢复成功/失败都等待已请求退出，失败允许重试、成功才能重启，以及未列出 ID 不能进入恢复或改文件。与存储层集成后 Rust 全库 61/61、clippy -D warnings、fmt --check 通过，生成 capability 确认三个恢复命令只授予 console。实际坏库启动、恢复控制台权限拒绝、恢复成功重启和忙时退出仍需隔离原生验收；Windows 路径继续标为未验证。
+
+### 独立复核与原生验收追加发现
+
+原始 61 项测试未覆盖进入恢复页面之前的 SQLite 副作用。主工作包的隔离原生验收发现，`SqliteRepository::open` 以读写模式打开故障主库后，SQLite 已经更改/删除日志，之后生成的恢复证据无法代表启动前原件。本工作包在独立临时合成库复现同类问题：结构合法但任务快照无效的 WAL 库，仅执行打开、读取、关闭，主文件由 4096 字节变成 12288 字节，原 WAL / SHM 被删除。另确认主库缺失而 WAL / SHM 尚在时，原初始化逻辑会创建空库并删除原 WAL。这两项按数据丢失缺陷交由存储工作包修复，不能把此前 61/61 当作其通过证据。
+
+修复边界：首次让 SQLite 接触真实库之前保护完整四文件；不能简单改成只读模式或用 immutable 忽略真实 WAL。[SQLite 官方 WAL 说明](https://www.sqlite.org/wal.html)明确 WAL 属于持久状态，最后一个连接关闭可 checkpoint 并删除日志；只读 WAL 访问也涉及共享内存。[immutable 契约](https://www.sqlite.org/uri.html)适用于已经独立且不再变化的备份/验证副本。恢复模块自身的候选校验使用 immutable 并拒绝候选 sidecars，当前没有发现这部分 SQL 读取会修改备份原件；持久 pending 标记在多文件替换/回滚结束前阻止正常启动。Windows 的目录持久性、ACL、实际文件替换和系统恢复继续留待验证。
+
+存储工作包已追加 `verify_before_open`：先把真实主库及三日志复制到私有临时目录，在副本上用普通 SQLite 连接校验完整内容，再核对源文件指纹；验证副本会处理其自身 WAL，原件不交给 SQLite。主库不存在时，`ensure_no_orphan_sidecars` 先拒绝任何残留日志，避免误建空库。本工作包只读复核确认入口顺序与正常/异常 WAL 回归匹配所报缺陷；真实有效 WAL 的 revision 73 被加载，无效 WAL 的三文件保持原字节。最终隔离 App 复验由主工作包留档。
+
 ## 依赖安全扫描与目标可达性
 
 本次主工作包运行 cargo-audit 0.22.2，对 489 项锁文件依赖报告 `vulnerabilities.count = 0`，同时有 7 项 informational 告警，必须保留：
@@ -88,11 +114,13 @@ Cmd+Q、应用菜单、保存/取消/放弃及备份恢复已经有本机原生�
 
 glib 问题已有 [上游修复 PR](https://github.com/gtk-rs/gtk-rs-core/pull/1343)；UNIC 维护情况见 [RustSec 一手跟踪](https://github.com/rustsec/advisory-db/issues/2414)。当前没有擅自跨大版本替换框架内部依赖、也没有添加 audit ignore 来掩盖警告。发布路线需继续跟踪 urlpattern/Tauri 上游替代 UNIC，更新后重跑目标扫描与双平台构建。扫描未发现已知漏洞不代表“零漏洞”，也不消除已到达两目标的维护风险。
 
+后续依赖项（按用户最新优先级保留记录，不继续扩展为本阶段阻塞）：本机 `libsqlite3-sys 0.35.0` 的 sqlite3.h 确认实际 bundled SQLite 为 3.50.2。[SQLite 官方 WAL-reset 缺陷说明](https://www.sqlite.org/wal.html)列出 3.51.3+ 及回移 3.50.7 已修复；触发需要同文件多连接同时写入/checkpoint，本应用单共享连接和单实例降低触发面，但 cargo-audit 的 Rust 公告扫描不能替代 bundled C 库版本检查。后续正常依赖升级时评估受支持 rusqlite/bundled 版本并重跑存储回归。
+
 ## 验证证据与边界
 
-- `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml` 完成。
-- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib`：加入 AppKit 退出保护后全库 45/45 通过；包含调用方越权、capability事件隔离、导航源混淆、退出旧回复、原生状态待应用/失败、交互锁、同名屏兼容、导出唯一性/权限与退出 ABI 测试。
-- `cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings`：通过。首次仅有一个导出函数多余引用提示，已修复后重跑通过。
+- `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check` 与 `git diff --check`：独立启动恢复接线后通过。
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --locked`：独立启动恢复集成后全库 **61/61** 通过；包含调用方越权、capability事件隔离、导航源混淆、退出旧回复、原生状态待应用/失败、交互锁、同名屏兼容、导出唯一性/权限、退出 ABI、恢复状态门控与存储恢复故障注入。此前 AppKit 阶段为 45/45，此处不把新增自动化计作新增真机验收。
+- `cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --locked -- -D warnings`：独立启动恢复接线后通过。
 - cargo 构建过程成功生成受权限约束的应用命令清单；这一点不能单独代替打包后 IPC 测试。
 - 本子工作包没有运行 Windows 可执行文件，也没有在用户原生 App 上执行本轮操作。主工作包已提供上述隔离 Mac 验收结果；具体操作留档由主工作包维护，Dock 获取超时项保持未验收。
 

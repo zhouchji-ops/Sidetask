@@ -30,6 +30,7 @@ async function nativeHarness(page: Page) {
           if (command === 'plugin:event|listen') { const id = ++sequence; listeners.set(id, args as { event: string; handler: number }); return id; }
           if (command === 'plugin:event|unlisten') { listeners.delete(args.eventId); return; }
           if (command === 'get_snapshot') return structuredClone(snapshot);
+          if (command === 'get_startup_recovery') return null;
           if (command === 'get_pending_exit') return null;
           if (command === 'get_window_status') return { pending: false, error: null };
           if (command === 'resolve_exit' || command === 'window_action') return;

@@ -1,14 +1,15 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { FormEvent, ReactNode } from 'react';
 import { ArrowDownWideNarrow, CalendarDays, Check, CheckCheck, ChevronDown, Clock3, Inbox, LoaderCircle, Monitor, Moon, PanelRight, Plus, Search, Settings2, Sun, X } from 'lucide-react';
 import { useAppStore } from '../../lib/store';
 import type { Action, Page, Priority, Settings, Task, TaskChanges } from '../../lib/types';
-import { currentTimeZone, isPlannedToday, localDate, selectDeadlines, selectEarlierIncomplete, selectToday } from '../../lib/domain';
+import { currentTimeZone, indexSnapshot, localDate, selectDeadlines } from '../../lib/domain';
 import { attachExitRequests, isDesktop, resolveExit, setInteractionLock, windowAction } from '../../lib/native';
 import { Brand, EmptyState, TaskRow, Toggle } from '../../components/TaskUI';
 import { StylePicker } from '../../components/StylePicker';
+import { VirtualTaskList } from '../../components/VirtualTaskList';
 import { DraftProvider, useDraft, useDrafts } from '../../lib/drafts';
 
 const pageTitles: Record<Page, string> = { today: '今日', all: '全部任务', deadlines: '截止日期', completed: '已完成', settings: '设置' };
@@ -23,7 +24,7 @@ function ConsoleContent() {
   const [query, setQuery] = useState('');
   const [newTask, setNewTask] = useState(new URLSearchParams(location.search).get('newTask') === '1');
   const [showCompleted, setShowCompleted] = useState(true);
-  const [toast, setToast] = useState<{ message: string; undo?: () => Promise<void> } | null>(null);
+  const [toast, setToast] = useState<{ message: string; undo?: () => Promise<void>; actionLabel?: string } | null>(null);
   const { dirty: draftDirty, saveAll, discardAll } = useDrafts();
   const [exitRequest, setExitRequest] = useState<number | null>(null);
   const [resolving, setResolving] = useState(false);
@@ -55,7 +56,24 @@ function ConsoleContent() {
   }
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const selected = snapshot?.tasks.find(task => task.id === selectedId);
+  const listScroll = useRef<HTMLElement>(null);
+  const day = localDate();
+  const zone = currentTimeZone();
+  const searching = !!query.trim();
+  // Snapshot identity changes on commits and clock boundaries; local day/zone
+  // also invalidate projections when another UI event observes a clock change.
+  const view = useMemo(() => snapshot ? indexSnapshot(snapshot, day) : null, [snapshot, day]);
+  const todayPositions = useMemo(() => new Map(view?.activeToday.map((task, index) => [task.id, index]) ?? []), [view]);
+  const deadlines = useMemo(() => snapshot && page === 'deadlines' ? selectDeadlines(snapshot, zone) : [], [snapshot, page, zone]);
+  const tasks = useMemo(() => {
+    if (!view) return [];
+    const term = query.toLowerCase().trim();
+    if (term) return snapshot!.tasks.filter(task => `${task.title} ${task.notes}`.toLowerCase().includes(term));
+    const source = page === 'today' ? view.activeToday : page === 'deadlines' ? deadlines : page === 'completed'
+      ? [...view.completed].sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || '')) : view.active;
+    return source;
+  }, [snapshot, view, page, deadlines, query]);
+  const selected = selectedId ? view?.byId.get(selectedId) : undefined;
   const dateText = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }).format(new Date());
   const navigate = (callback: () => void) => { if (busy || resolving) return; if (draftDirty) setPendingNavigation(() => callback); else callback(); };
   useEffect(() => { const handler = (event: Event) => { const detail = (event as CustomEvent<{ page?: Page; taskId?: string }>).detail; if (!detail || typeof detail !== 'object') return; navigate(() => { if (detail.page && Object.hasOwn(pageTitles, detail.page)) setPage(detail.page); setSelectedId(detail.taskId || null); setQuery(''); if ((detail as { newTask?: boolean }).newTask) setNewTask(true); }); }; window.addEventListener('sidetask:navigate', handler); return () => window.removeEventListener('sidetask:navigate', handler); }, [draftDirty, busy, resolving]);
@@ -66,36 +84,55 @@ function ConsoleContent() {
   async function run(action: Action, message?: string) { try { await mutate(action); if (message) setToast({ message }); } catch { /* Store exposes the recoverable error. */ } }
   async function toggleTask(task: Task) { try { await mutate({ type: 'setCompleted', id: task.id, completed: !task.completed, expectedRevision: task.revision }); setToast({ message: task.completed ? '已恢复为未完成' : '任务已完成', undo: async () => { await mutate({ type: 'setCompleted', id: task.id, completed: task.completed, expectedRevision: task.revision + 1 }); } }); } catch { /* Display store error. */ } }
   async function showPanel() { try { await windowAction('showPanel'); } catch (reason) { setToast({ message: reason instanceof Error ? reason.message : '小窗暂时无法打开，请重试' }); } }
-  if (loading || !snapshot) return <div className="app-loading"><Brand/><LoaderCircle className="spin" size={20}/><p>{error || '正在加载任务…'}</p>{error && <button className="primary-button" onClick={() => location.reload()}>重新加载</button>}</div>;
-  const today = selectToday(snapshot);
-  const activeToday = today.filter(task => !task.completed);
-  const completedToday = today.filter(task => task.completed);
-  const backlog = selectEarlierIncomplete(snapshot);
-  const allActive = snapshot.tasks.filter(task => !task.completed);
-  let tasks = page === 'today' ? activeToday : page === 'deadlines' ? selectDeadlines(snapshot) : page === 'completed' ? snapshot.tasks.filter(task => task.completed).sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || '')) : allActive;
-  if (query.trim()) tasks = tasks.filter(task => `${task.title} ${task.notes}`.toLowerCase().includes(query.toLowerCase().trim()));
+  async function moveToday(task: Task, direction: -1 | 1) {
+    if (!view || busy) return;
+    const before = view.activeToday.map(item => item.id);
+    const index = todayPositions.get(task.id);
+    if (index === undefined || index + direction < 0 || index + direction >= before.length) return;
+    const ordered = [...before];
+    [ordered[index], ordered[index + direction]] = [ordered[index + direction], ordered[index]];
+    try {
+      await mutate({ type: 'reorderToday', date: day, taskIds: ordered });
+      setToast({ message: '今日顺序已调整', undo: async () => { await mutate({ type: 'reorderToday', date: day, taskIds: before }); } });
+    } catch { /* Keep the last committed order and show the store error. */ }
+  }
+  async function removeToday(task: Task) {
+    try {
+      await mutate({ type: 'planTask', id: task.id, planned: false, date: day });
+      setToast({ message: '已移出今日，任务仍保留', actionLabel: '重新加入今日', undo: async () => { await mutate({ type: 'planTask', id: task.id, planned: true, date: day }); } });
+    } catch { /* No false success on a failed plan write. */ }
+  }
+  if (loading || !snapshot || !view) return <div className="app-loading"><Brand/><LoaderCircle className="spin" size={20}/><p>{error || '正在加载任务…'}</p>{error && <button className="primary-button" onClick={() => location.reload()}>重新加载</button>}</div>;
+  const { today, activeToday, completedToday, earlier: backlog, active: allActive } = view;
   const total = today.length;
-  const row = (task: Task) => <TaskRow key={task.id} task={task} today={page !== 'today' && isPlannedToday(snapshot, task.id)} selected={task.id === selectedId} disabled={busy} onSelect={() => navigate(() => setSelectedId(task.id))} onToggle={() => toggleTask(task)} onPlan={page !== 'today' ? () => void run({ type: 'planTask', id: task.id, planned: true, date: localDate() }, '已加入今日计划') : undefined}/>;
+  const row = (task: Task) => {
+    const position = todayPositions.get(task.id);
+    const arrange = page === 'today' && !searching && position !== undefined;
+    return <TaskRow key={task.id} task={task} today={(searching || page !== 'today') && view.todayIds.has(task.id)} selected={task.id === selectedId} disabled={busy} onSelect={() => navigate(() => setSelectedId(task.id))} onToggle={() => toggleTask(task)} onPlan={searching || page !== 'today' ? () => void run({ type: 'planTask', id: task.id, planned: true, date: day }, '已加入今日计划') : undefined}
+      onMoveUp={arrange && position > 0 ? () => void moveToday(task, -1) : undefined}
+      onMoveDown={arrange && position < activeToday.length - 1 ? () => void moveToday(task, 1) : undefined}
+      onRemoveToday={arrange ? () => void removeToday(task) : undefined}/>;
+  };
   return <div className="console-shell">
-    <aside className="sidebar"><div className="sidebar-brand"><Brand/></div><nav aria-label="主导航">{(['today','all','deadlines','completed'] as Page[]).map(item => { const Icon = icons[item]; const count = item === 'today' ? activeToday.length : item === 'all' ? allActive.length : item === 'deadlines' ? selectDeadlines(snapshot).length : snapshot.tasks.filter(task => task.completed).length; return <button key={item} className={`nav-item ${page === item ? 'nav-active' : ''}`} onClick={() => navigate(() => { setPage(item); setSelectedId(null); setQuery(''); })}><Icon size={17} strokeWidth={1.65}/><span>{pageTitles[item]}</span><span className="nav-count">{count}</span></button>; })}</nav><div className="sidebar-bottom"><button className="nav-item" onClick={() => void showPanel()}><PanelRight size={17}/><span>打开边缘小窗</span></button><button className={`nav-item ${page === 'settings' ? 'nav-active' : ''}`} onClick={() => navigate(() => { setPage('settings'); setSelectedId(null); setQuery(''); })}><Settings2 size={17}/><span>设置</span></button></div></aside>
-    <div className="workspace"><header className="workspace-toolbar"><div className="breadcrumb"><span>我的任务</span><span>/</span><strong>{pageTitles[page]}</strong></div><div className="toolbar-actions">{page !== 'settings' && <label className="search-box"><Search size={15}/><input ref={searchRef} value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索任务" aria-label="搜索任务"/><kbd>/</kbd>{query && <button className="icon-button" title="清除搜索" onClick={() => setQuery('')}><X size={13}/></button>}</label>}<button className="primary-button new-task-button" disabled={busy || resolving} onClick={() => setNewTask(true)}><Plus size={16}/>新建任务</button></div></header>
+    <aside className="sidebar"><div className="sidebar-brand"><Brand/></div><nav aria-label="主导航">{(['today','all','deadlines','completed'] as Page[]).map(item => { const Icon = icons[item]; const count = item === 'today' ? activeToday.length : item === 'all' ? allActive.length : item === 'deadlines' ? view.deadlineCount : view.completed.length; return <button key={item} className={`nav-item ${page === item ? 'nav-active' : ''}`} onClick={() => navigate(() => { setPage(item); setSelectedId(null); setQuery(''); })}><Icon size={17} strokeWidth={1.65}/><span>{pageTitles[item]}</span><span className="nav-count">{count}</span></button>; })}</nav><div className="sidebar-bottom"><button className="nav-item" onClick={() => void showPanel()}><PanelRight size={17}/><span>打开边缘小窗</span></button><button className={`nav-item ${page === 'settings' ? 'nav-active' : ''}`} onClick={() => navigate(() => { setPage('settings'); setSelectedId(null); setQuery(''); })}><Settings2 size={17}/><span>设置</span></button></div></aside>
+    <div className="workspace"><header className="workspace-toolbar"><div className="breadcrumb"><span>我的任务</span><span>/</span><strong>{pageTitles[page]}</strong></div><div className="toolbar-actions">{page !== 'settings' && <label className="search-box"><Search size={15}/><input ref={searchRef} value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索全部任务" aria-label="搜索任务"/><kbd>/</kbd>{query && <button className="icon-button" title="清除搜索" onClick={() => setQuery('')}><X size={13}/></button>}</label>}<button className="primary-button new-task-button" disabled={busy || resolving} onClick={() => setNewTask(true)}><Plus size={16}/>新建任务</button></div></header>
       {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={clearError} aria-label="关闭错误提示"><X size={15}/></button></div>}
-      <div className="workspace-body"><main className={`main-content ${page === 'settings' ? 'settings-content' : ''}`}>
+      <div className="workspace-body"><main ref={listScroll} className={`main-content ${page === 'settings' ? 'settings-content' : ''}`}>
       {page === 'settings' ? <SettingsPage settings={snapshot.settings} busy={busy} save={changes => mutate({ type: 'updateSettings', changes })} onSaved={() => setToast({ message: '设置已保存' })} /> : <><div className="page-heading"><div><h1>{pageTitles[page]}</h1>{page === 'today' && <p className="page-date">{dateText}</p>}</div></div>
-      <div className="list-heading"><div><span>{query ? '搜索结果' : page === 'today' ? '今日计划' : page === 'completed' ? '完成记录' : page === 'deadlines' ? '即将到来' : '未完成任务'}</span><span className="count-badge">{tasks.length}</span></div>{page === 'deadlines' ? <label className="sort-control"><ArrowDownWideNarrow size={14}/><select aria-label="截止任务排序" value={snapshot.settings.ddlSort} onChange={event => void run({ type: 'updateSettings', changes: { ddlSort: event.target.value as Settings['ddlSort'] } })}><option value="date">按截止日期</option><option value="priority">按重要程度</option></select><ChevronDown size={12}/></label> : <span className="list-hint">{page === 'today' ? `已完成 ${completedToday.length} / ${total}` : page === 'completed' ? '最近完成在前' : '点击任务查看详情'}</span>}</div>
-      <div className="task-list">{tasks.length ? tasks.map(row) : <EmptyState icon={page === 'completed' ? <CheckCheck size={27}/> : <Sun size={27}/>} title={query ? '没有找到相关任务' : page === 'today' && total ? '今日计划已全部完成' : page === 'today' ? '今日暂无任务' : page === 'deadlines' ? '暂时没有截止日期' : page === 'completed' ? '暂无已完成任务' : '暂无任务'} description={query ? '试试其他关键词，或创建一项新任务。' : page === 'today' && total ? '可在下方查看已完成的任务。' : page === 'today' ? snapshot.tasks.length ? '添加今日任务，或从全部任务中加入今日。' : '新建第一项任务。边缘小窗可快速查看；关闭控制台后，可从菜单栏或托盘重新打开。' : page === 'deadlines' ? '为任务设置日期后，它就会出现在这里。' : page === 'completed' ? '勾选已做完的任务，在这里回顾你的进展。' : '点击“新建任务”，添加第一项任务。'}/>}</div>
+      <div className="list-heading"><div><span>{searching ? '全部任务中的搜索结果' : page === 'today' ? '今日计划' : page === 'completed' ? '完成记录' : page === 'deadlines' ? '即将到来' : '未完成任务'}</span><span className="count-badge">{tasks.length}</span></div>{page === 'deadlines' && !searching ? <label className="sort-control"><ArrowDownWideNarrow size={14}/><select aria-label="截止任务排序" value={snapshot.settings.ddlSort} onChange={event => void run({ type: 'updateSettings', changes: { ddlSort: event.target.value as Settings['ddlSort'] } })}><option value="date">按截止日期</option><option value="priority">按重要程度</option></select><ChevronDown size={12}/></label> : <span className="list-hint">{searching ? '包含未完成和已完成任务' : page === 'today' ? `已完成 ${completedToday.length} / ${total}` : page === 'completed' ? '最近完成在前' : '点击任务查看详情'}</span>}</div>
+      <div className="task-list">{tasks.length ? <VirtualTaskList items={tasks} renderItem={row} scrollRef={listScroll} resetKey={`${page}:${query.trim()}:${page === 'deadlines' && !searching ? snapshot.settings.ddlSort : ''}`} label={searching ? '全部任务搜索结果' : pageTitles[page]} /> : <EmptyState icon={page === 'completed' ? <CheckCheck size={27}/> : <Sun size={27}/>} title={searching ? '没有找到相关任务' : page === 'today' && total ? '今日计划已全部完成' : page === 'today' ? '今日暂无任务' : page === 'deadlines' ? '暂时没有截止日期' : page === 'completed' ? '暂无已完成任务' : '暂无任务'} description={searching ? '试试其他关键词，或创建一项新任务。' : page === 'today' && total ? '可在下方查看已完成的任务。' : page === 'today' ? snapshot.tasks.length ? '添加今日任务，或从全部任务中加入今日。' : '新建第一项任务。边缘小窗可快速查看；关闭控制台后，可从菜单栏或托盘重新打开。' : page === 'deadlines' ? '为任务设置日期后，它就会出现在这里。' : page === 'completed' ? '勾选已做完的任务，在这里回顾你的进展。' : '点击“新建任务”，添加第一项任务。'}/>}</div>
       {page !== 'completed' && <button className="add-task-row" disabled={busy || resolving} onClick={() => setNewTask(true)}><span><Plus size={15}/></span>{page === 'today' ? '添加今日任务' : '添加任务'}<kbd>⌘ / Ctrl N</kbd></button>}
-      {page === 'today' && !query && completedToday.length > 0 && <section className="completed-section"><button className="section-disclosure" onClick={() => setShowCompleted(!showCompleted)}><ChevronDown size={14} className={showCompleted ? '' : 'is-collapsed'}/>已完成<span>{completedToday.length}</span></button>{showCompleted && completedToday.map(row)}</section>}
-      {page === 'today' && !query && backlog.length > 0 && <section className="backlog-section"><div className="list-heading"><div><span>此前未完成</span><span className="count-badge">{backlog.length}</span></div><span className="list-hint">可重新加入今日</span></div>{backlog.map(task => <TaskRow key={task.id} task={task} disabled={busy} selected={task.id === selectedId} onSelect={() => navigate(() => setSelectedId(task.id))} onToggle={() => toggleTask(task)} onPlan={() => void run({ type: 'planTask', id: task.id, planned: true, date: localDate() }, '已加入今日计划')}/>)}</section>}
+      {page === 'today' && !searching && completedToday.length > 0 && <section className="completed-section"><button className="section-disclosure" onClick={() => setShowCompleted(!showCompleted)}><ChevronDown size={14} className={showCompleted ? '' : 'is-collapsed'}/>已完成<span>{completedToday.length}</span></button>{showCompleted && <VirtualTaskList items={completedToday} renderItem={row} scrollRef={listScroll} label="今日已完成任务" />}</section>}
+      {page === 'today' && !searching && backlog.length > 0 && <section className="backlog-section"><div className="list-heading"><div><span>此前未完成</span><span className="count-badge">{backlog.length}</span></div><span className="list-hint">可重新加入今日</span></div>{<VirtualTaskList items={backlog} scrollRef={listScroll} label="此前未完成任务" renderItem={task => <TaskRow key={task.id} task={task} disabled={busy} selected={task.id === selectedId} onSelect={() => navigate(() => setSelectedId(task.id))} onToggle={() => toggleTask(task)} onPlan={() => void run({ type: 'planTask', id: task.id, planned: true, date: localDate() }, '已加入今日计划')}/>} />}</section>}
       </>}
-      </main>{selected && page !== 'settings' && <TaskDetail key={selected.id} task={selected} planned={isPlannedToday(snapshot, selected.id)} busy={busy} onClose={() => navigate(() => { setSelectedId(null); })}  onSave={async (changes, revision) => { await mutate({ type: 'updateTask', id: selected.id, changes, expectedRevision: revision }); setToast({ message: '任务已保存' }); }} onPlan={() => run({ type: 'planTask', id: selected.id, planned: !isPlannedToday(snapshot, selected.id), date: localDate() }, isPlannedToday(snapshot, selected.id) ? '已移出今日，任务和截止日期已保留' : '已加入今日计划')} onToggle={() => toggleTask(selected)}/>}</div>
+      </main>{selected && page !== 'settings' && <TaskDetail key={selected.id} task={selected} planned={view.todayIds.has(selected.id)} busy={busy} onClose={() => navigate(() => { setSelectedId(null); })}  onSave={async (changes, revision) => { await mutate({ type: 'updateTask', id: selected.id, changes, expectedRevision: revision }); setToast({ message: '任务已保存' }); }} onPlan={() => run({ type: 'planTask', id: selected.id, planned: !view.todayIds.has(selected.id), date: localDate() }, view.todayIds.has(selected.id) ? '已移出今日，任务和截止日期已保留' : '已加入今日计划')} onToggle={() => toggleTask(selected)}/>}</div>
       <footer className="workspace-statusbar"><span><span className={`status-dot ${busy ? 'is-busy' : ''}`}/>{busy ? '正在保存…' : draftDirty ? '有尚未保存的修改' : error ? '操作未完成，请查看错误提示' : '更改已保存在本机'}</span><button onClick={() => void showPanel()}><PanelRight size={13}/>边缘小窗</button></footer>
     </div>
     {newTask && <NewTaskModal busy={busy} addToToday={page === 'today'} onClose={() => setNewTask(false)} onSubmit={async task => { await mutate({ type: 'createTask', task, date: localDate() }); setNewTask(false); setToast({ message: task.addToToday ? '已添加到今日计划' : '任务已创建' }); }}/>}
     {pendingNavigation && <Modal onClose={() => setPendingNavigation(null)} title="保留正在编辑的内容？"><p className="dialog-description">还有未保存的修改。你可以继续编辑，或放弃修改并离开。</p><div className="dialog-footer"><button className="secondary-button" disabled={busy || resolving} onClick={() => { discardAll(); pendingNavigation(); setPendingNavigation(null); }}>放弃修改</button><button className="secondary-button" disabled={busy || resolving} onClick={async () => { setResolving(true); try { if (await saveAll()) { pendingNavigation(); setPendingNavigation(null); } } finally { setResolving(false); } }}>保存并离开</button><button className="primary-button" onClick={() => setPendingNavigation(null)}>继续编辑</button></div></Modal>}
     {exitRequest !== null && draftDirty && <Modal onClose={() => void cancelExit()} title="退出前保存修改？"><p className="dialog-description">还有未保存的任务或设置。保存成功后才能退出；取消会保留当前编辑。</p>{exitFailure && <p className="inline-error" role="alert">{exitFailure}</p>}<div className="dialog-footer"><button className="secondary-button" disabled={busy || resolving} onClick={() => void cancelExit()}>取消退出</button><button className="secondary-button" disabled={busy || resolving} onClick={() => void finishExit(false)}>放弃并退出</button><button className="primary-button" disabled={busy || resolving} onClick={() => void finishExit(true)}>保存并退出</button></div></Modal>}
     {exitFailure && exitRequest === null && <div className="error-banner" role="alert">{exitFailure}</div>}
-    {toast && <div className="toast" role="status"><Check size={15}/><span>{toast.message}</span>{toast.undo && <button onClick={async () => { try { await toast.undo?.(); setToast({ message: '已撤销' }); } catch { setToast(null); } }}>撤销</button>}<button aria-label="关闭提示" onClick={() => setToast(null)}><X size={13}/></button></div>}
+    {toast && <div className="toast" role="status"><Check size={15}/><span>{toast.message}</span>{toast.undo && <button onClick={async () => { try { await toast.undo?.(); setToast({ message: toast.actionLabel ? '已重新加入今日' : '已撤销' }); } catch { setToast(null); } }}>{toast.actionLabel || '撤销'}</button>}<button aria-label="关闭提示" onClick={() => setToast(null)}><X size={13}/></button></div>}
   </div>;
 }
 

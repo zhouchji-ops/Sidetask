@@ -1,0 +1,8 @@
+.virtual-task-list { position: relative; overflow-anchor: none; }
+.virtual-task-item { display: flow-root; min-width: 0; }
+:root[data-style='studio'] .virtual-task-list.task-list > [data-first] .task-row,
+:root[data-style='studio'] .task-list > .virtual-task-list > [data-first] .task-row { border-radius: 7px 7px 0 0; }
+:root[data-style='studio'] .virtual-task-list.task-list > [data-last] .task-row,
+:root[data-style='studio'] .task-list > .virtual-task-list > [data-last] .task-row { border-bottom: 0; border-radius: 0 0 7px 7px; }
+:root[data-style='studio'] .virtual-task-list.task-list > [data-first][data-last] .task-row,
+:root[data-style='studio'] .task-list > .virtual-task-list > [data-first][data-last] .task-row { border-radius: 7px; }

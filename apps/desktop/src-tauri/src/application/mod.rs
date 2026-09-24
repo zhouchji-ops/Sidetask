@@ -205,6 +205,37 @@ mod tests {
         assert!(!service.snapshot.tasks[0].completed);
     }
     #[test]
+    fn failed_reorder_save_preserves_the_published_plan_order_and_revision() {
+        let mut service = TaskService::new(Box::new(FailingRepo)).unwrap();
+        let before = serde_json::to_value(&service.snapshot).unwrap();
+        let task_ids = service
+            .snapshot
+            .tasks
+            .iter()
+            .filter(|task| {
+                !task.completed
+                    && service
+                        .snapshot
+                        .plans
+                        .iter()
+                        .any(|plan| plan.date == "2026-09-24" && plan.task_id == task.id)
+            })
+            .map(|task| task.id.clone())
+            .rev()
+            .collect();
+        let error = service
+            .mutate(
+                Action::ReorderToday {
+                    date: "2026-09-24".into(),
+                    task_ids,
+                },
+                service.snapshot.revision,
+            )
+            .unwrap_err();
+        assert_eq!(error, "disk full");
+        assert_eq!(serde_json::to_value(&service.snapshot).unwrap(), before);
+    }
+    #[test]
     fn invalid_imports_share_preview_validation_and_never_publish_changes() {
         let mut service = TaskService::new(Box::new(FailingRepo)).unwrap();
         let valid: serde_json::Value =

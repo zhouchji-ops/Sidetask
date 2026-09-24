@@ -5,6 +5,7 @@ import { attachNativeNavigation, isDesktop, windowAction } from './lib/native';
 import Console from './surfaces/console/Console';
 import EdgePanel from './surfaces/edge-panel/EdgePanel';
 import EdgeHandle from './surfaces/edge-panel/EdgeHandle';
+import { StartupGate } from './surfaces/recovery/Recovery';
 import './styles/app.css';
 import './styles/variants.css';
 import './styles/style-picker.css';
@@ -119,4 +120,5 @@ function App() {
   if (surface === 'edge-panel') return <div style={{ width: previewSize?.width ?? '100%', height: previewSize?.height ?? '100%', maxWidth: '100%', maxHeight: '100%' }}><EdgePanel /></div>;
   return <><Console />{!isDesktop && <BrowserEdgePreview />}</>;
 }
-createRoot(document.getElementById('root')!).render(<React.StrictMode><AppStoreProvider><App /></AppStoreProvider></React.StrictMode>);
+const application = <AppStoreProvider><App /></AppStoreProvider>;
+createRoot(document.getElementById('root')!).render(<React.StrictMode>{isDesktop && surface === 'console' ? <StartupGate>{application}</StartupGate> : application}</React.StrictMode>);

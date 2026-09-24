@@ -1,0 +1,509 @@
+[
+  {
+    "event": "environment",
+    "browser": "153.0.8010.12",
+    "node": "v24.14.1",
+    "bundle": "index-DnBltNai.js",
+    "time": "2026-09-24T18:06:51.858Z",
+    "run": "final-smoke"
+  },
+  {
+    "event": "mounted",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "pageName": "all",
+    "jsonBytes": 4421735,
+    "wallMs": 158.13541599999996,
+    "errors": [],
+    "run": "final-smoke",
+    "stats": {
+      "heapMiB": 14.64297866821289,
+      "heapTotalMiB": 15.421875,
+      "documents": 1,
+      "nodes": 677,
+      "listeners": 215,
+      "taskSeconds": 0.127855,
+      "scriptSeconds": 0.072815,
+      "layoutSeconds": 0.014614,
+      "rows": 17,
+      "buttons": 34,
+      "lists": [
+        {
+          "label": "全部任务",
+          "virtual": "true",
+          "mounted": 17,
+          "total": 10000
+        }
+      ],
+      "mutationMs": [],
+      "errors": []
+    }
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "pageName": "all",
+    "rep": 0,
+    "label": "filter-one",
+    "wallMs": 54.39270800000003,
+    "eventToPaintMs": 39,
+    "run": "final-smoke"
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "pageName": "all",
+    "rep": 0,
+    "label": "clear-filter",
+    "wallMs": 32.004334000000085,
+    "eventToPaintMs": 28.5,
+    "run": "final-smoke"
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "pageName": "all",
+    "rep": 1,
+    "label": "filter-one",
+    "wallMs": 32.854124999999954,
+    "eventToPaintMs": 30.299999997019768,
+    "run": "final-smoke"
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "pageName": "all",
+    "rep": 1,
+    "label": "clear-filter",
+    "wallMs": 32.43341699999996,
+    "eventToPaintMs": 30.099999994039536,
+    "run": "final-smoke"
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "pageName": "all",
+    "label": "complete-first",
+    "wallMs": 149.7711250000001,
+    "eventToPaintMs": 114.1000000089407,
+    "run": "final-smoke"
+  },
+  {
+    "event": "after_complete",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "pageName": "all",
+    "idleTaskSeconds": 0.016791999999999974,
+    "idleLongTasks": [],
+    "errors": [],
+    "run": "final-smoke",
+    "stats": {
+      "heapMiB": 25.411945343017578,
+      "heapTotalMiB": 26,
+      "documents": 1,
+      "nodes": 701,
+      "listeners": 230,
+      "taskSeconds": 0.267483,
+      "scriptSeconds": 0.159612,
+      "layoutSeconds": 0.016781,
+      "rows": 17,
+      "buttons": 34,
+      "lists": [
+        {
+          "label": "全部任务",
+          "virtual": "true",
+          "mounted": 17,
+          "total": 9999
+        }
+      ],
+      "mutationMs": [
+        18.69999998807907
+      ],
+      "errors": []
+    }
+  },
+  {
+    "event": "reachability",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "pageName": "all",
+    "wallMs": 1679.1356250000008,
+    "lastId": "perf-009999",
+    "lastPosition": "9999",
+    "middleVisible": [
+      0,
+      4993,
+      4994,
+      4995,
+      4996,
+      4997,
+      4998,
+      4999,
+      5000,
+      5001,
+      5002,
+      5003,
+      5004,
+      5005,
+      5006,
+      5007,
+      5008,
+      5009,
+      5010,
+      5011,
+      5012,
+      5013,
+      5014,
+      5015,
+      5016,
+      5017
+    ],
+    "taskCount": 10000,
+    "planCount": 10000,
+    "lastCompleted": false,
+    "result": "passed",
+    "run": "final-smoke"
+  },
+  {
+    "event": "mounted",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "edge-panel",
+    "noDue": false,
+    "pageName": "all",
+    "jsonBytes": 4421735,
+    "wallMs": 190.89887500000077,
+    "errors": [],
+    "run": "final-smoke",
+    "stats": {
+      "heapMiB": 14.336738586425781,
+      "heapTotalMiB": 15.4375,
+      "documents": 1,
+      "nodes": 659,
+      "listeners": 224,
+      "taskSeconds": 0.152985,
+      "scriptSeconds": 0.107594,
+      "layoutSeconds": 0.007109,
+      "rows": 19,
+      "buttons": 48,
+      "lists": [
+        {
+          "label": "今日未完成任务",
+          "virtual": "true",
+          "mounted": 10,
+          "total": 10000
+        },
+        {
+          "label": "截止日期任务",
+          "virtual": "true",
+          "mounted": 9,
+          "total": 6666
+        }
+      ],
+      "mutationMs": [],
+      "errors": []
+    }
+  },
+  {
+    "event": "reachability",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "edge-panel",
+    "noDue": false,
+    "pageName": "all",
+    "result": "passed",
+    "checks": [
+      {
+        "section": 0,
+        "total": 10000,
+        "lastId": "perf-009999",
+        "lastPosition": "10000"
+      },
+      {
+        "section": 1,
+        "total": 6666,
+        "lastId": "perf-009967",
+        "lastPosition": "6666"
+      }
+    ],
+    "run": "final-smoke",
+    "stats": {
+      "rows": 19
+    }
+  },
+  {
+    "event": "mounted",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "pageName": "today",
+    "jsonBytes": 4421735,
+    "wallMs": 171.8499580000007,
+    "errors": [],
+    "run": "final-smoke",
+    "stats": {
+      "heapMiB": 14.68979263305664,
+      "heapTotalMiB": 15.921875,
+      "documents": 1,
+      "nodes": 721,
+      "listeners": 265,
+      "taskSeconds": 0.128369,
+      "scriptSeconds": 0.074534,
+      "layoutSeconds": 0.014532,
+      "rows": 17,
+      "buttons": 85,
+      "lists": [
+        {
+          "label": "今日",
+          "virtual": "true",
+          "mounted": 17,
+          "total": 10000
+        }
+      ],
+      "mutationMs": [],
+      "errors": []
+    }
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "pageName": "today",
+    "rep": 0,
+    "label": "filter-one",
+    "wallMs": 37.90720799999872,
+    "eventToPaintMs": 26.799999997019768,
+    "run": "final-smoke"
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "pageName": "today",
+    "rep": 0,
+    "label": "clear-filter",
+    "wallMs": 32.51170899999852,
+    "eventToPaintMs": 30,
+    "run": "final-smoke"
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "pageName": "today",
+    "rep": 1,
+    "label": "filter-one",
+    "wallMs": 32.35412499999984,
+    "eventToPaintMs": 29.900000005960464,
+    "run": "final-smoke"
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "pageName": "today",
+    "rep": 1,
+    "label": "clear-filter",
+    "wallMs": 33.112584000000425,
+    "eventToPaintMs": 30.900000005960464,
+    "run": "final-smoke"
+  },
+  {
+    "event": "action",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "pageName": "today",
+    "label": "complete-first",
+    "wallMs": 149.49933399999827,
+    "eventToPaintMs": 114.09999999403954,
+    "run": "final-smoke"
+  },
+  {
+    "event": "after_complete",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "pageName": "today",
+    "idleTaskSeconds": 0.016056000000000015,
+    "idleLongTasks": [],
+    "errors": [],
+    "run": "final-smoke",
+    "stats": {
+      "heapMiB": 25.477569580078125,
+      "heapTotalMiB": 26.25,
+      "documents": 1,
+      "nodes": 769,
+      "listeners": 284,
+      "taskSeconds": 0.271708,
+      "scriptSeconds": 0.163149,
+      "layoutSeconds": 0.016838,
+      "rows": 18,
+      "buttons": 87,
+      "lists": [
+        {
+          "label": "今日",
+          "virtual": "true",
+          "mounted": 17,
+          "total": 9999
+        },
+        {
+          "label": "今日已完成任务",
+          "virtual": "false",
+          "mounted": 1,
+          "total": 1
+        }
+      ],
+      "mutationMs": [
+        18.700000002980232
+      ],
+      "errors": []
+    }
+  },
+  {
+    "event": "reachability",
+    "count": 10000,
+    "archive": false,
+    "mode": "native-mock",
+    "surface": "console",
+    "noDue": false,
+    "pageName": "today",
+    "wallMs": 1673.7142080000012,
+    "lastId": "perf-009999",
+    "lastPosition": "9999",
+    "middleVisible": [
+      0,
+      4993,
+      4994,
+      4995,
+      4996,
+      4997,
+      4998,
+      4999,
+      5000,
+      5001,
+      5002,
+      5003,
+      5004,
+      5005,
+      5006,
+      5007,
+      5008,
+      5009,
+      5010,
+      5011,
+      5012,
+      5013,
+      5014,
+      5015,
+      5016,
+      5017,
+      5018
+    ],
+    "taskCount": 10000,
+    "planCount": 10000,
+    "lastCompleted": false,
+    "result": "passed",
+    "run": "final-smoke"
+  },
+  {
+    "event": "grouped_reachability",
+    "count": 3000,
+    "groups": {
+      "today": 1000,
+      "completedToday": 1000,
+      "earlier": 1000
+    },
+    "result": "passed",
+    "checks": [
+      {
+        "surface": "console",
+        "label": "今日",
+        "lastId": "perf-000999",
+        "lastPosition": "1000"
+      },
+      {
+        "surface": "console",
+        "label": "今日已完成任务",
+        "lastId": "perf-001999",
+        "lastPosition": "1000"
+      },
+      {
+        "surface": "console",
+        "label": "此前未完成任务",
+        "lastId": "perf-002999",
+        "lastPosition": "1000"
+      },
+      {
+        "surface": "edge-panel",
+        "label": "今日未完成任务",
+        "lastId": "perf-000999",
+        "lastPosition": "1000"
+      },
+      {
+        "surface": "edge-panel",
+        "label": "今日已完成任务",
+        "lastId": "perf-001999",
+        "lastPosition": "1000"
+      }
+    ],
+    "taskCounts": [
+      3000,
+      3000
+    ],
+    "run": "final-smoke"
+  },
+  {
+    "event": "done",
+    "run": "final-smoke"
+  }
+]

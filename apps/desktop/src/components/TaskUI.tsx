@@ -1,4 +1,4 @@
-import { CalendarDays, Check, ChevronRight, Flag, Plus, Sun } from 'lucide-react';
+import { ArrowDown, ArrowUp, CalendarDays, CalendarMinus, Check, ChevronRight, Flag, Plus, Sun } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { Task } from '../lib/types';
 import { formatDue, isOverdue } from '../lib/domain';
@@ -9,13 +9,16 @@ export function Brand({ compact = false }: { compact?: boolean }) {
 export function CheckButton({ task, onToggle, disabled }: { task: Task; onToggle: () => void; disabled?: boolean }) {
   return <button className={`task-check ${task.completed ? 'is-checked' : ''} ${task.priority === 'high' && !task.completed ? 'is-high' : ''}`} aria-label={`${task.completed ? '撤销完成' : '完成'}：${task.title}`} aria-pressed={task.completed} onClick={e => { e.stopPropagation(); onToggle(); }} disabled={disabled}>{task.completed && <Check size={12} strokeWidth={2.8} />}</button>;
 }
-export function TaskRow({ task, selected, today, compact = false, onSelect, onToggle, onPlan, disabled }: { task: Task; selected?: boolean; today?: boolean; compact?: boolean; onSelect: () => void; onToggle: () => void; onPlan?: () => void; disabled?: boolean }) {
+export function TaskRow({ task, selected, today, compact = false, onSelect, onToggle, onPlan, onMoveUp, onMoveDown, onRemoveToday, disabled }: { task: Task; selected?: boolean; today?: boolean; compact?: boolean; onSelect: () => void; onToggle: () => void; onPlan?: () => void; onMoveUp?: () => void; onMoveDown?: () => void; onRemoveToday?: () => void; disabled?: boolean }) {
   const due = task.dueDate ? formatDue(task) : '';
   const overdue = isOverdue(task);
   return <div className={`task-row ${selected ? 'is-selected' : ''} ${task.completed ? 'is-completed' : ''} ${compact ? 'task-row-compact' : ''}`}>
     <CheckButton task={task} onToggle={onToggle} disabled={disabled}/>
     <button className="task-open" title={compact ? task.title : undefined} onClick={onSelect} aria-label={`编辑任务：${task.title}`}><span className="task-title">{task.title}</span><span className="task-meta">{task.priority === 'high' && <span className="priority-high"><Flag size={11}/>高优先级</span>}{task.priority === 'low' && <span>低优先级</span>}{due && <span className={overdue ? 'due-overdue' : ''}><CalendarDays size={12}/>{due}</span>}{today && <span className="today-indicator"><Sun size={12}/>今日</span>}{!due && task.priority === 'normal' && !today && <span>未设截止日期</span>}</span></button>
-    {onPlan && !today && !task.completed ? <button className="row-plan icon-button" aria-label={`将${task.title}加入今日`} title="加入今日" onClick={onPlan} disabled={disabled}><Plus size={15}/></button> : <ChevronRight className="row-chevron" size={14}/>}
+    {onRemoveToday || onMoveUp || onMoveDown ? <div className="task-quick-actions">
+      {!compact && (onMoveUp || onMoveDown) && <><button className="icon-button" aria-label={`上移任务：${task.title}`} title="上移" disabled={disabled || !onMoveUp} onClick={onMoveUp}><ArrowUp size={14}/></button><button className="icon-button" aria-label={`下移任务：${task.title}`} title="下移" disabled={disabled || !onMoveDown} onClick={onMoveDown}><ArrowDown size={14}/></button></>}
+      {onRemoveToday && <button className="icon-button" aria-label={`将${task.title}移出今日`} title="移出今日，保留任务和截止日期" disabled={disabled} onClick={onRemoveToday}><CalendarMinus size={15}/></button>}
+    </div> : onPlan && !today && !task.completed ? <button className="row-plan icon-button" aria-label={`将${task.title}加入今日`} title="加入今日" onClick={onPlan} disabled={disabled}><Plus size={15}/></button> : <ChevronRight className="row-chevron" size={14}/>}
   </div>;
 }
 export function EmptyState({ icon, title, description, action }: { icon?: ReactNode; title: string; description: string; action?: ReactNode }) {

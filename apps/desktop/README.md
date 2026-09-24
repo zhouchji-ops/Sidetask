@@ -20,7 +20,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri -- dev # 原生开发（会启动 Vite，不要同时占用 1420）
 ```
 
-打包 Mac 应用：`npm run tauri -- build --bundles app`。Windows 在 Windows 构建环境运行 `npm run tauri -- build --bundles nsis`；命令已配置不表示已在 Windows 执行成功。
+打包 Mac 应用：`npm run tauri -- build --bundles app`。Windows 在 Windows 构建环境运行 `npm run tauri -- build --bundles nsis`；基线48e5d4f已在Windows CI构建成功，但artifact上传因账户配额失败，安装与交互仍需实机验收。
 
 浏览器预览使用独立的合成数据存储 `sidetask-browser-preview-v1`，不读取本机 SQLite。原生数据位于系统应用数据目录 `com.changjin.sidetask/sidetask.sqlite3`，不在仓库内。首次原生启动为空库。浏览器演示才使用示例任务；旧数据库升级不会重置任务。
 
@@ -40,7 +40,7 @@ npm run tauri -- dev # 原生开发（会启动 Vite，不要同时占用 1420�
 | src-tauri/migrations | 实际数据库初始化 SQL |
 | tests | Vitest 业务与 Playwright UI 自动化 |
 
-`src/features` 仍预留，不为目录形式提前拆空模块。规范化表、Windows/多屏窗口全面验收与损坏启动恢复向导尚未完成。固定时区DDL、升级备份及控制台导出/恢复已实现，证据和限制见STATUS及数据恢复说明。
+`src/features` 仍预留，不为目录形式提前拆空模块。规范化表和Windows/多屏窗口全面验收尚未完成。固定时区DDL、升级备份、控制台导出/恢复以及独立损坏启动恢复向导已实现，证据和限制见STATUS及数据恢复说明。
 
 ## 数据与安全检查
 
@@ -53,4 +53,4 @@ npm audit
 cargo audit --file src-tauri/Cargo.lock # 需要cargo-audit；本轮使用0.22.2
 ```
 
-CI使用Node24.14.1/Rust1.98.1，Actions固定commit；生成Mac app归档和Windows NSIS试用artifact。CI只存在配置时不能算执行通过。隔离原生验收使用临时Tauri配置覆盖productName和identifier，不向正式个人数据库注入合成数据。
+CI使用Node24.14.1/Rust1.98.1，Actions固定commit；生成Mac app归档和Windows NSIS试用artifact。每次推送的执行状态见STATUS；基线双平台测试/打包通过，artifact上传配额仍阻塞下载。隔离原生验收使用临时Tauri配置覆盖productName和identifier，不向正式个人数据库注入合成数据。

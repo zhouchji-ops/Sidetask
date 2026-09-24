@@ -2,6 +2,7 @@ pub mod exit;
 mod geometry;
 #[cfg(target_os = "macos")]
 mod macos_exit;
+pub mod startup_recovery;
 use crate::{
     domain::{Action, Settings},
     AppState,
@@ -388,8 +389,7 @@ pub fn open_console(app: &tauri::AppHandle, payload: Value) -> Result<(), String
     Ok(())
 }
 fn settings(app: &tauri::AppHandle) -> Result<Settings, String> {
-    Ok(app
-        .state::<AppState>()
+    Ok(crate::task_state(app)?
         .service
         .lock()
         .map_err(|_| "任务服务不可用。")?
@@ -400,8 +400,7 @@ fn settings(app: &tauri::AppHandle) -> Result<Settings, String> {
 
 pub fn get_window_status(app: &tauri::AppHandle) -> Result<WindowStatus, String> {
     let desired = settings(app)?;
-    Ok(app
-        .state::<AppState>()
+    Ok(crate::task_state(app)?
         .dock
         .lock()
         .map_err(|_| "窗口服务不可用。")?
@@ -412,7 +411,9 @@ fn publish_window_status(app: &tauri::AppHandle, failure: Option<String>) {
     let Ok(desired) = settings(app) else {
         return;
     };
-    let state = app.state::<AppState>();
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
     let status = {
         let Ok(mut dock) = state.dock.lock() else {
             return;
@@ -431,6 +432,15 @@ fn publish_window_status(app: &tauri::AppHandle, failure: Option<String>) {
 }
 
 pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    setup_console(app, false)?;
+    setup_auxiliary(app)
+}
+
+pub fn setup_recovery(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    setup_console(app, true)
+}
+
+fn setup_console(app: &mut tauri::App, recovery: bool) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "macos")]
     macos_exit::install(app.handle())?;
     #[cfg(target_os = "macos")]
@@ -440,7 +450,11 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         "console",
         WebviewUrl::App("index.html?surface=console".into()),
     )
-    .title("侧笺 · SideTask")
+    .title(if recovery {
+        "侧笺 · 数据恢复"
+    } else {
+        "侧笺 · SideTask"
+    })
     .inner_size(1180., 790.)
     .min_inner_size(880., 620.)
     .center()
@@ -450,9 +464,19 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     console.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
-            let _ = console_copy.hide();
+            if recovery {
+                if let Err(error) = exit::request(console_copy.app_handle()) {
+                    eprintln!("recovery close request: {error}");
+                }
+            } else {
+                let _ = console_copy.hide();
+            }
         }
     });
+    Ok(())
+}
+
+fn setup_auxiliary(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     for (label, width, height) in [("edge-panel", 376., 620.), ("edge-handle", 18., 92.)] {
         WebviewWindowBuilder::new(
             app,
@@ -907,6 +931,7 @@ pub fn window_action(
     if action == "openConsole" {
         return open_console(app, payload);
     }
+    crate::task_state(app)?;
     if action == "startDrag" {
         if !["edge-handle", "edge-panel"].contains(&caller.label()) {
             return Err("此窗口不能停靠。".into());

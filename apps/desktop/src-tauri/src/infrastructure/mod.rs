@@ -1,3 +1,5 @@
+pub mod recovery;
+
 use crate::domain::Snapshot;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use std::{
@@ -237,6 +239,7 @@ fn migrate_schema_one(
 
 impl SqliteRepository {
     pub fn open(path: &Path) -> Result<Self, String> {
+        recovery::ensure_no_pending(path)?;
         let in_memory = path == Path::new(":memory:");
         let is_new = if in_memory {
             true
@@ -245,12 +248,16 @@ impl SqliteRepository {
                 Ok(metadata) if metadata.is_file() => false,
                 Ok(_) => return Err("数据路径不是普通文件，未打开或覆盖。".into()),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    recovery::ensure_no_orphan_sidecars(path)?;
                     private_new_file(path)?;
                     true
                 }
                 Err(error) => return Err(storage_error(error)),
             }
         };
+        if !is_new {
+            recovery::verify_before_open(path)?;
+        }
         let result = (|| {
             let mut connection = if in_memory {
                 Connection::open_in_memory()

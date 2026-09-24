@@ -44,11 +44,19 @@ impl ExitRuntime {
 }
 
 pub fn is_authorized(app: &tauri::AppHandle) -> bool {
-    app.state::<AppState>()
-        .exit
-        .lock()
-        .map(|exit| exit.authorized)
-        .unwrap_or(false)
+    if let Some(state) = app.try_state::<AppState>() {
+        state
+            .exit
+            .lock()
+            .map(|exit| exit.authorized)
+            .unwrap_or(false)
+    } else if let Some(recovery) = app.try_state::<super::startup_recovery::RecoveryState>() {
+        recovery.is_exit_authorized()
+    } else {
+        // Initialization did not install either runtime: no draft or database
+        // operation exists to protect, and shutdown must not panic or deadlock.
+        true
+    }
 }
 
 /// Call while holding the task service lock, so a final exit approval cannot
@@ -67,17 +75,27 @@ pub fn ensure_running(state: &AppState) -> Result<(), String> {
 }
 
 pub fn pending(app: &tauri::AppHandle) -> Result<Option<ExitRequest>, String> {
-    Ok(app
-        .state::<AppState>()
-        .exit
-        .lock()
-        .map_err(|_| "退出服务暂不可用。")?
-        .pending)
+    let Some(state) = app.try_state::<AppState>() else {
+        return Ok(None);
+    };
+    let pending = state.exit.lock().map_err(|_| "退出服务暂不可用。")?.pending;
+    Ok(pending)
 }
 
 pub fn request(app: &tauri::AppHandle) -> Result<(), String> {
-    let request = app
-        .state::<AppState>()
+    let Some(state) = app.try_state::<AppState>() else {
+        let should_exit =
+            if let Some(recovery) = app.try_state::<super::startup_recovery::RecoveryState>() {
+                recovery.request_exit()?
+            } else {
+                true
+            };
+        if should_exit {
+            app.exit(0);
+        }
+        return Ok(());
+    };
+    let request = state
         .exit
         .lock()
         .map_err(|_| "退出服务暂不可用。")?
@@ -90,7 +108,7 @@ pub fn request(app: &tauri::AppHandle) -> Result<(), String> {
 }
 
 pub fn resolve(app: &tauri::AppHandle, request_id: u64, allow: bool) -> Result<(), String> {
-    let state = app.state::<AppState>();
+    let state = crate::task_state(app)?;
     {
         // Same order as geometry writes: dock -> service -> exit. Never wait
         // for the native main thread while any of these guards is held.

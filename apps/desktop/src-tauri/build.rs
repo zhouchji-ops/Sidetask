@@ -11,6 +11,9 @@ fn main() {
             "export_backup",
             "preview_restore",
             "restore_backup",
+            "get_startup_recovery",
+            "recover_startup_backup",
+            "restart_after_recovery",
         ]),
     ))
     .expect("failed to build SideTask command permissions")

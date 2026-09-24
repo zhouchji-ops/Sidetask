@@ -79,7 +79,11 @@ export function fixDeadline(task: Task, previous?: Task): void {
 export function compareUtcInstants(a: string, b: string): number {
   return Temporal.Instant.compare(a, b);
 }
-export function effectiveDeadline(task: Task): number {
+/** A sortable key without losing the sub-millisecond precision accepted by imports. */
+export function utcInstantNanoseconds(value: string): bigint {
+  return Temporal.Instant.from(value).epochNanoseconds;
+}
+export function effectiveDeadline(task: Task, localZone?: string): number {
   if (!task.dueDate) return Infinity;
   if (task.dueAtUtc) {
     const at = Temporal.Instant.from(task.dueAtUtc);
@@ -89,7 +93,7 @@ export function effectiveDeadline(task: Task): number {
   if (task.dueTimezone) return Temporal.PlainDate.from(task.dueDate).add({ days: 1 }).toZonedDateTime(task.dueTimezone).epochMilliseconds;
   // Legacy records deliberately retain the old floating-local interpretation until edited.
   if (task.dueTime) return new Date(`${task.dueDate}T${task.dueTime}:00`).getTime();
-  return Temporal.PlainDate.from(task.dueDate).add({ days: 1 }).toZonedDateTime(currentTimeZone()).epochMilliseconds;
+  return Temporal.PlainDate.from(task.dueDate).add({ days: 1 }).toZonedDateTime(localZone ?? currentTimeZone()).epochMilliseconds;
 }
 export function deadlineDisplay(task: Task, now = Date.now()): { date: string | null; time: string | null; today: string } {
   if (task.dueAtUtc) {
