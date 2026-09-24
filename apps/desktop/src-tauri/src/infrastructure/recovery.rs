@@ -96,6 +96,8 @@ fn candidate_kind(name: &str) -> Option<&'static str> {
     let name = name.strip_suffix(".sqlite3")?;
     if uuid_suffix(name, "sidetask-before-schema-2-") {
         Some("before-schema-2")
+    } else if uuid_suffix(name, "sidetask-before-schema-3-") {
+        Some("before-schema-3")
     } else if uuid_suffix(name, "sidetask-safety-backup-") {
         Some("safety-backup")
     } else {
@@ -785,7 +787,7 @@ mod tests {
         assert_eq!(candidates.len(), 1);
         let candidate = &candidates[0];
         assert_eq!(candidate.file_name, candidate_name);
-        assert_eq!(candidate.schema_version, 2);
+        assert_eq!(candidate.schema_version, 3);
         assert_eq!(candidate.kind, "safety-backup");
         assert_eq!(candidate.task_count, snapshot.tasks.len());
         assert_eq!(candidate.plan_count, snapshot.plans.len());
@@ -1175,21 +1177,41 @@ mod tests {
     }
     #[test]
     fn legacy_backup_is_not_upgraded_during_scan_or_recovery_copy() {
-        let temp = Temp::new();
-        let (backup, _) = temp.valid_backup();
-        let connection = Connection::open(&backup).unwrap();
-        connection
-            .execute_batch("PRAGMA user_version=1; PRAGMA application_id=0;")
-            .unwrap();
-        drop(connection);
-        let bytes = fs::read(&backup).unwrap();
-        temp.corrupt();
-        let token = temp.token();
-        assert_eq!(list_candidates(&temp.root).unwrap()[0].schema_version, 1);
-        recover_from_backup(&temp.root, &token).unwrap();
-        assert_eq!(fs::read(&backup).unwrap(), bytes);
-        assert_eq!(fs::read(temp.root.join(DATABASE)).unwrap(), bytes);
-        let _ = SqliteRepository::open(&temp.root.join(DATABASE)).unwrap();
-        assert_eq!(fs::read(&backup).unwrap(), bytes);
+        for (version, kind) in [(1, "before-schema-2"), (2, "before-schema-3")] {
+            let temp = Temp::new();
+            let (original_backup, _) = temp.valid_backup();
+            let backup = temp
+                .root
+                .join(format!("sidetask-{kind}-{}.sqlite3", uuid::Uuid::new_v4()));
+            fs::rename(original_backup, &backup).unwrap();
+            let connection = Connection::open(&backup).unwrap();
+            connection
+                .pragma_update(None, "user_version", version)
+                .unwrap();
+            connection
+                .pragma_update(
+                    None,
+                    "application_id",
+                    if version == 1 {
+                        0
+                    } else {
+                        super::super::APPLICATION_ID
+                    },
+                )
+                .unwrap();
+            drop(connection);
+            let bytes = fs::read(&backup).unwrap();
+            temp.corrupt();
+            let token = temp.token();
+            let candidates = list_candidates(&temp.root).unwrap();
+            assert_eq!(candidates[0].schema_version, version);
+            assert_eq!(candidates[0].kind, kind);
+            recover_from_backup(&temp.root, &token).unwrap();
+            assert_eq!(fs::read(&backup).unwrap(), bytes);
+            assert_eq!(fs::read(temp.root.join(DATABASE)).unwrap(), bytes);
+            let repo = SqliteRepository::open(&temp.root.join(DATABASE)).unwrap();
+            assert_eq!(super::super::verify_database(&repo.connection).unwrap(), 3);
+            assert_eq!(fs::read(&backup).unwrap(), bytes);
+        }
     }
 }

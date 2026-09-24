@@ -1,6 +1,6 @@
 # 任务生命周期：软删除与恢复的最小实现计划
 
-日期：2026-09-25。状态：已完成源码检查与方案，**尚未实现**。承接 [PRD R10](../product/PRD.md)、B06/B07/B19/B21；建议由主任务单列 P1 工作包。目标是让误建、取消的任务退出日常列表，并能随时找回。第一阶段只做单项移入回收站、单项恢复；不提供永久删除、清空、到期清理、批量操作或新的任务业务状态。
+日期：2026-09-25。状态：**实现与集成验收中**；Rust 数据迁移/备份与动作已落地并通过定向测试，UI/两平台原生验收以文末及交付状态为准。承接 [PRD R10](../product/PRD.md)、B06/B07/B19/B21。目标是让误建、取消的任务退出日常列表，并能随时找回。第一阶段只做单项移入回收站、单项恢复；不提供永久删除、清空、到期清理、批量操作或新的任务业务状态。
 
 ## 当前缺口与直接修改点
 
@@ -66,4 +66,25 @@
 
 默认“回收站”命名、只在控制台操作、无草稿直接移入并提供恢复、保留全部计划与原完成状态、跨日不自动安排今日、正常搜索排除回收站。这些是本计划建议，主任务可直接采用，无需让未决偏好阻塞实现。唯一需在编码前统一的是迁移/备份版本号与文件归属，防止多工作包各自定义。永久删除、自动清理、批量生命周期、取消原因均继续延后。
 
-本次仅交付方案和源码/许可核对；未修改运行时代码，未运行或宣称新功能测试通过。
+## 实现状态与数据验证
+
+本节记录本轮从上述方案落实到源码的进度，不能将设计表格本身当作已完成验收。
+
+- `infrastructure/mod.rs` 当前 schema 为 **3**，验证 1/2/3：schema1 的 application_id=0，schema2/3为1396986955。旧库先经原有完整四文件副本预检（包含 WAL 提交）再打开；损坏、主库缺失但有日志、pending 恢复标记等保护保持。schema1/2先完成一致性备份、校验与同步，再在事务中写 schema3 标记，snapshot 与 placement 原文不重编码；失败回滚版本和数据。
+- 升级前备份命名 `sidetask-before-schema-3-<UUID>.sqlite3`。`recovery.rs` 同时识别旧 before-schema-2、新 before-schema-3 与 safety-backup。扫描或复制恢复时不迁移源备份；恢复后的正常启动才升级旧 schema。原件和 WAL/SHM/journal 证据保留、候选摘要重查及恢复中断重试逻辑不变。
+- `application/mod.rs` 新导出 **portable schemaVersion=2**，全量任务包含回收站，计划含过去/现在/未来。v1/v2 使用同一解析验证路径，v1 缺失/null deletedAt合法，任一非空删除状态拒绝。预览固定 `trashedTaskCount`（其中回收站），`taskCount`仍为全量总数，`planCount`仍为全部计划。
+- JSON 备份恢复继续替换整个任务/计划集合、保留本机 settings/placement，创建完整 SQLite 安全副本后提交；deletedAt 原值保留，Task/global revision 统一提升。v1恢复将任务还原为旧备份中的未删除状态，不合并当前回收站。所有回收站记录仍计入 10MiB/10,000任务/100,000计划限制。
+- 新字段/TrashTask/RestoreTask与 console 路由由原生领域工作包实现；界面、草稿、投影和浏览器对等实现由各自工作包接入。此数据阶段没有增加删除/清空后台任务，也没有修改正常窗口行为。
+
+数据工作包定向测试（macOS arm64、仅 UUID 临时合成数据）：
+
+```text
+cargo test --locked infrastructure::   35 passed / 0 failed（1.91秒）
+cargo test --locked application::       9 passed / 0 failed（0.65秒）
+```
+
+新增证据包括 schema2升级保留 snapshot/placement 原文及可扫描旧版本副本、schema2升级失败回滚；schema1升级与既有损坏/WAL/中断恢复继续通过。恢复候选测试覆盖 before-schema-2/schema1和before-schema-3/schema2，复制期间不改源，重启再迁3。
+
+便携备份测试覆盖 v2回收站删除时间（含纳秒）和所有计划导出→预览→恢复→SQLite重启、设备信息保留、修订号严格提高；v1缺失/null兼容与非空删除状态拒绝，实际v1恢复替换当前回收站集合。Trash/Restore写入失败分别验证完整已发布快照不变；原备份距离10MiB仅16字节余量时增加删除时间会明确拒绝，任务保持原状态，未越过可恢复容量或悄悄丢弃回收站。
+
+本次继续核对上文两项固定 GitHub 文件与 LICENSE，只使用已记录的行为参考，不复制 GPL/AGPL 实现、没有新增数据依赖。原生工作包独占执行的全 Rust 集成结果：`cargo test --locked` **88/88**（1.85秒），`cargo fmt --check`、`cargo clippy --locked --all-targets -- -D warnings` 均通过。最终95项TS、60项UI和Mac生产构建通过，包含脏草稿、多窗口、失败焦点和万条回收站回归。最后资源 index-GFNXw43Q.js / index-Cp14iSy_.css 已打包并本地验签。Mac原生流程因锁屏尚未执行；Windows与原生演练不借用自动化结果，详见[生命周期验收记录](../../tests/manual/2026-09-25-task-lifecycle.md)。本工作包未设Done，不将自动化当作可发布证明。

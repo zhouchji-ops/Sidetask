@@ -20,6 +20,7 @@ struct TaskBackup {
 #[serde(rename_all = "camelCase")]
 pub struct RestorePreview {
     pub task_count: usize,
+    pub trashed_task_count: usize,
     pub plan_count: usize,
     pub exported_at: String,
 }
@@ -34,7 +35,7 @@ fn encode_backup(snapshot: &Snapshot) -> Result<String, String> {
         return Err("任务或计划数量超出可恢复备份容量，未保存。".into());
     }
     let backup = TaskBackup {
-        schema_version: 1,
+        schema_version: 2,
         exported_at: chrono::Utc::now().to_rfc3339(),
         tasks: snapshot.tasks.clone(),
         plans: snapshot.plans.clone(),
@@ -52,11 +53,14 @@ fn parse_backup(content: &str) -> Result<TaskBackup, String> {
     }
     let backup: TaskBackup =
         serde_json::from_str(content).map_err(|e| format!("备份格式无效，原数据未更改：{e}"))?;
-    if backup.schema_version != 1 {
+    if ![1, 2].contains(&backup.schema_version) {
         return Err(format!(
             "备份版本 {} 不受支持，原数据未更改。",
             backup.schema_version
         ));
+    }
+    if backup.schema_version == 1 && backup.tasks.iter().any(|task| task.deleted_at.is_some()) {
+        return Err("旧版 v1 备份不能携带回收站状态，原数据未更改。".into());
     }
     if backup.tasks.len() > MAX_BACKUP_TASKS || backup.plans.len() > MAX_BACKUP_PLANS {
         return Err("备份任务或计划数量超出此版本限制，原数据未更改。".into());
@@ -119,6 +123,11 @@ impl TaskService {
         let backup = parse_backup(content)?;
         Ok(RestorePreview {
             task_count: backup.tasks.len(),
+            trashed_task_count: backup
+                .tasks
+                .iter()
+                .filter(|task| task.deleted_at.is_some())
+                .count(),
             plan_count: backup.plans.len(),
             exported_at: backup.exported_at,
         })
@@ -186,6 +195,81 @@ mod tests {
         fn save_placement(&mut self, _: &Snapshot, _: &str) -> Result<(), String> {
             Err("disk full".into())
         }
+    }
+    #[test]
+    fn failed_trash_and_restore_writes_never_publish_lifecycle_changes() {
+        for restore in [false, true] {
+            let mut service = TaskService::new(Box::new(FailingRepo)).unwrap();
+            if restore {
+                service.snapshot.tasks[0].deleted_at = Some("2026-09-25T01:02:03Z".into());
+            }
+            let before = serde_json::to_value(&service.snapshot).unwrap();
+            let id = service.snapshot.tasks[0].id.clone();
+            let action = if restore {
+                Action::RestoreTask {
+                    id,
+                    expected_revision: 1,
+                }
+            } else {
+                Action::TrashTask {
+                    id,
+                    expected_revision: 1,
+                }
+            };
+            assert_eq!(
+                service
+                    .mutate(action, service.snapshot.revision)
+                    .unwrap_err(),
+                "disk full"
+            );
+            assert_eq!(serde_json::to_value(&service.snapshot).unwrap(), before);
+        }
+    }
+    #[test]
+    fn portable_v1_accepts_missing_or_null_deleted_state_but_rejects_nonempty_trash() {
+        let mut service = TaskService::new(Box::new(FailingRepo)).unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&service.export_backup().unwrap()).unwrap();
+        value["schemaVersion"] = serde_json::json!(1);
+        for task in value["tasks"].as_array_mut().unwrap() {
+            task.as_object_mut().unwrap().remove("deletedAt");
+        }
+        let content = serde_json::to_string(&value).unwrap();
+        assert_eq!(
+            service
+                .preview_restore(&content)
+                .unwrap()
+                .trashed_task_count,
+            0
+        );
+        value["tasks"][0]["deletedAt"] = serde_json::Value::Null;
+        assert!(service
+            .preview_restore(&serde_json::to_string(&value).unwrap())
+            .is_ok());
+        value["tasks"][0]["deletedAt"] = serde_json::json!("2026-09-25T01:02:03Z");
+        let content = serde_json::to_string(&value).unwrap();
+        let before = serde_json::to_value(&service.snapshot).unwrap();
+        assert!(service
+            .preview_restore(&content)
+            .err()
+            .unwrap()
+            .contains("v1"));
+        assert!(service
+            .restore_backup(&content, service.snapshot.revision)
+            .err()
+            .unwrap()
+            .contains("v1"));
+        assert_eq!(serde_json::to_value(&service.snapshot).unwrap(), before);
+        value["schemaVersion"] = serde_json::json!(2);
+        let preview = service
+            .preview_restore(&serde_json::to_string(&value).unwrap())
+            .unwrap();
+        assert_eq!(preview.trashed_task_count, 1);
+        assert_eq!(preview.task_count, service.snapshot.tasks.len());
+        value["tasks"][0]["deletedAt"] = serde_json::json!("invalid-time");
+        assert!(service
+            .preview_restore(&serde_json::to_string(&value).unwrap())
+            .is_err());
     }
     #[test]
     fn failed_write_never_publishes_uncommitted_state() {
@@ -332,5 +416,47 @@ mod tests {
         assert!(error.contains("可恢复备份容量"));
         assert_eq!(service.snapshot.tasks.len(), MAX_BACKUP_TASKS);
         assert_eq!(service.snapshot.revision, 1);
+    }
+    #[test]
+    fn trash_metadata_over_backup_capacity_keeps_the_task_visible_and_unchanged() {
+        let mut service = TaskService::new(Box::new(FailingRepo)).unwrap();
+        let template = service.snapshot.tasks[0].clone();
+        service.snapshot.tasks = (0..2200)
+            .map(|index| {
+                let mut task = template.clone();
+                task.id = format!("synthetic-byte-boundary-{index}");
+                task.notes = "x".repeat(5000);
+                task
+            })
+            .collect();
+        service.snapshot.plans.clear();
+        // Leave a small but valid export margin. Adding a deletion timestamp
+        // must not silently produce a state this app cannot back up/restore.
+        let sized = TaskBackup {
+            schema_version: 2,
+            exported_at: chrono::Utc::now().to_rfc3339(),
+            tasks: service.snapshot.tasks.clone(),
+            plans: vec![],
+        };
+        let mut excess = serde_json::to_string(&sized).unwrap().len() - (MAX_BACKUP_BYTES - 16);
+        for task in &mut service.snapshot.tasks {
+            let removed = excess.min(task.notes.len());
+            task.notes.truncate(task.notes.len() - removed);
+            excess -= removed;
+        }
+        assert_eq!(excess, 0);
+        assert!(encode_backup(&service.snapshot).is_ok());
+        let before = serde_json::to_value(&service.snapshot).unwrap();
+        let error = service
+            .mutate(
+                Action::TrashTask {
+                    id: service.snapshot.tasks[0].id.clone(),
+                    expected_revision: 1,
+                },
+                service.snapshot.revision,
+            )
+            .unwrap_err();
+        assert!(error.contains("10 MiB"), "{error}");
+        assert_eq!(serde_json::to_value(&service.snapshot).unwrap(), before);
     }
 }

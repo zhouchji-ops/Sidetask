@@ -538,3 +538,190 @@ it('does not mark a task with a later planned date as previously unfinished afte
   expect(selectEarlierIncomplete(snapshot, today)).toEqual([]);
   expect(selectEarlierIncomplete(snapshot, '2026-09-26').map(task => task.id)).toEqual(['demo-design']);
 });
+
+describe('recoverable task lifecycle', () => {
+  it.each([false, true])('trashes and restores completed=%s without changing task content, fixed DDL or any plan', completed => {
+    const snapshot = createSeed(today);
+    snapshot.tasks[0] = task('demo-design', {
+      title: '保留原任务', notes: '包含历史和未来计划', priority: 'high', completed,
+      completedAt: completed ? '2026-09-02T03:04:05.000000123Z' : null,
+      createdAt: '2026-09-01T03:04:05.000000001Z',
+      dueDate: '2026-11-01', dueTime: '01:30', dueTimezone: 'America/New_York',
+      dueAtUtc: '2026-11-01T06:30:00.000000123Z',
+    });
+    snapshot.plans.push({ taskId: 'demo-design', date: '2026-09-23', sortOrder: 9 }, { taskId: 'demo-design', date: '2026-09-26', sortOrder: 7 });
+    const before = structuredClone(snapshot);
+    const deleted = apply(snapshot, { type: 'trashTask', id: 'demo-design', expectedRevision: 1 });
+    expect(deleted.tasks[0]).toEqual({ ...before.tasks[0], deletedAt: new Date().toISOString(), revision: 2 });
+    expect(indexSnapshot(deleted).byId.get('demo-design')).toBe(deleted.tasks[0]);
+    expect(isPlannedToday(deleted, 'demo-design')).toBe(false);
+    expect(deleted.plans).toEqual(before.plans);
+    const restored = apply(deleted, { type: 'restoreTask', id: 'demo-design', expectedRevision: 2 });
+    expect(restored.tasks[0]).toEqual({ ...before.tasks[0], deletedAt: null, revision: 3 });
+    expect(restored.tasks.slice(1)).toEqual(before.tasks.slice(1));
+    expect(restored.plans).toEqual(before.plans);
+    expect(isPlannedToday(restored, 'demo-design')).toBe(true);
+    expect(effectiveDeadline(restored.tasks[0])).toBe(effectiveDeadline(before.tasks[0]));
+    expect(restored.revision).toBe(before.revision + 2);
+    expect(snapshot).toEqual(before);
+  });
+
+  it('keeps repeated lifecycle requests idempotent after revision checks, including missing legacy markers', () => {
+    const initial = createSeed(today);
+    const unchanged = apply(initial, { type: 'restoreTask', id: 'demo-design', expectedRevision: 1 });
+    expect(unchanged.tasks).toEqual(initial.tasks);
+    expect(unchanged.tasks[0]).not.toHaveProperty('deletedAt');
+    const deleted = apply(unchanged, { type: 'trashTask', id: 'demo-design', expectedRevision: 1 });
+    vi.advanceTimersByTime(60_000);
+    const repeated = apply(deleted, { type: 'trashTask', id: 'demo-design', expectedRevision: 2 });
+    expect(repeated.tasks).toEqual(deleted.tasks);
+    expect(repeated.plans).toEqual(deleted.plans);
+    expect(repeated.revision).toBe(deleted.revision + 1);
+    expect(() => apply(repeated, { type: 'trashTask', id: 'demo-design', expectedRevision: 1 })).toThrow('任务已更新');
+    const restored = apply(repeated, { type: 'restoreTask', id: 'demo-design', expectedRevision: 2 });
+    expect(apply(restored, { type: 'restoreTask', id: 'demo-design', expectedRevision: 3 }).tasks).toEqual(restored.tasks);
+  });
+
+  it('rejects stale deletion, restoration and old undo after another delete cycle atomically', () => {
+    const initial = createSeed(today);
+    const completed = apply(initial, { type: 'setCompleted', id: 'demo-design', completed: true, expectedRevision: 1 });
+    expect(() => apply(completed, { type: 'trashTask', id: 'demo-design', expectedRevision: 1 })).toThrow('任务已更新');
+    expect(() => applyPreviewAction(completed, { type: 'trashTask', id: 'demo-design', expectedRevision: 2 }, initial.revision)).toThrow('另一窗口');
+    const deleted = apply(completed, { type: 'trashTask', id: 'demo-design', expectedRevision: 2 });
+    const restored = apply(deleted, { type: 'restoreTask', id: 'demo-design', expectedRevision: 3 });
+    const deletedAgain = apply(restored, { type: 'trashTask', id: 'demo-design', expectedRevision: 4 });
+    const before = structuredClone(deletedAgain);
+    expect(() => apply(deletedAgain, { type: 'restoreTask', id: 'demo-design', expectedRevision: 3 })).toThrow('任务已更新');
+    expect(deletedAgain).toEqual(before);
+  });
+
+  it.each([
+    { type: 'updateTask', id: 'demo-design', changes: { title: '不能覆盖' }, expectedRevision: 2 },
+    { type: 'setCompleted', id: 'demo-design', completed: true, expectedRevision: 2 },
+    { type: 'planTask', id: 'demo-design', date: today, planned: true },
+    { type: 'planTask', id: 'demo-design', date: today, planned: false },
+  ] as Action[])('rejects ordinary mutations on a trashed task: $type', action => {
+    const deleted = apply(createSeed(today), { type: 'trashTask', id: 'demo-design', expectedRevision: 1 });
+    const before = structuredClone(deleted);
+    expect(() => apply(deleted, action)).toThrow('请先恢复');
+    expect(deleted).toEqual(before);
+  });
+
+  it('filters every normal projection while retaining all IDs and deleted task records', () => {
+    const snapshot = createSeed(today);
+    snapshot.tasks[0].deletedAt = '2026-09-24T01:00:00Z';
+    snapshot.tasks[3].deletedAt = '2026-09-24T02:00:00Z';
+    snapshot.tasks[4].deletedAt = '2026-09-24T03:00:00Z';
+    snapshot.plans.push({ taskId: 'demo-lab', date: '2026-09-23', sortOrder: 0 }, { taskId: 'demo-portfolio', date: '2026-09-23', sortOrder: 1 });
+    const before = structuredClone(snapshot);
+    const view = indexSnapshot(snapshot);
+    expect(view.byId.size).toBe(6);
+    expect(view.visibleTasks.map(task => task.id)).toEqual(['demo-read', 'demo-paper', 'demo-portfolio']);
+    expect(view.active).toEqual(view.visibleTasks);
+    expect(view.completed).toEqual([]);
+    expect(view.today.map(task => task.id)).toEqual(['demo-read', 'demo-paper']);
+    expect([...view.todayIds]).toEqual(['demo-read', 'demo-paper']);
+    expect(view.activeToday).toEqual(view.today);
+    expect(view.completedToday).toEqual([]);
+    expect(view.earlier.map(task => task.id)).toEqual(['demo-portfolio']);
+    expect(view.deadlineCount).toBe(2);
+    expect(selectDeadlines(snapshot).map(task => task.id)).toEqual(['demo-paper', 'demo-portfolio']);
+    expect(view.trashed.map(task => task.id)).toEqual(['demo-lab', 'demo-review', 'demo-design']);
+    expect(snapshot).toEqual(before);
+  });
+
+  it('sorts trash by exact deletion instant descending, with stable IDs for equivalent timestamp spellings', () => {
+    const snapshot = createSeed(today);
+    snapshot.tasks = [
+      task('old', { deletedAt: '2026-09-24T00:00:00.000000001Z' }),
+      task('b-tie', { deletedAt: '2026-09-24T00:00:00.000000002+00:00' }),
+      task('z-new', { deletedAt: '2026-09-24T00:00:00.000000003Z' }),
+      task('a-tie', { deletedAt: '2026-09-24T00:00:00.000000002Z' }),
+    ];
+    snapshot.plans = [];
+    const view = indexSnapshot(normalizePreviewSnapshot(snapshot));
+    expect(view.trashed.map(task => task.id)).toEqual(['z-new', 'a-tie', 'b-tie', 'old']);
+    expect(view.visibleTasks).toEqual([]);
+    expect(view.active).toEqual([]);
+    expect(view.completed).toEqual([]);
+    expect(view.deadlineCount).toBe(0);
+  });
+
+  it('restores historical, future and unplanned tasks across midnight without adding today plans', () => {
+    let snapshot = createSeed(today);
+    snapshot.tasks = [task('past'), task('future'), task('unplanned')];
+    snapshot.plans = [{ taskId: 'past', date: today, sortOrder: 8 }, { taskId: 'future', date: '2026-09-26', sortOrder: 2 }];
+    const plans = structuredClone(snapshot.plans);
+    for (const item of snapshot.tasks) snapshot = apply(snapshot, { type: 'trashTask', id: item.id, expectedRevision: 1 });
+    vi.setSystemTime(new Date('2026-09-25T12:00:00'));
+    for (const item of snapshot.tasks) snapshot = apply(snapshot, { type: 'restoreTask', id: item.id, expectedRevision: 2 });
+    expect(indexSnapshot(snapshot).today).toEqual([]);
+    expect(indexSnapshot(snapshot).earlier.map(task => task.id)).toEqual(['past']);
+    expect(indexSnapshot(snapshot).active).toHaveLength(3);
+    expect(snapshot.plans).toEqual(plans);
+    expect(snapshot.tasks.every(task => task.dueDate === today && !task.completed)).toBe(true);
+  });
+
+  it.each([1, Number.MAX_SAFE_INTEGER])('keeps hidden plan order %s during visible reorder and append, then restores without moving plans', hiddenOrder => {
+    const initial = createSeed(today);
+    initial.plans[0].sortOrder = hiddenOrder;
+    initial.plans.push({ taskId: 'demo-design', date: '2026-09-23', sortOrder: 99 });
+    const deleted = apply(initial, { type: 'trashTask', id: 'demo-design', expectedRevision: 1 });
+    expect(() => apply(deleted, { type: 'reorderToday', date: today, taskIds: ['demo-design', 'demo-paper', 'demo-read'] })).toThrow('重新排序');
+    const reordered = apply(deleted, { type: 'reorderToday', date: today, taskIds: ['demo-paper', 'demo-read'] });
+    for (const create of [false, true]) {
+      const appended = apply(reordered, create
+        ? { type: 'createTask', date: today, task: { title: '新增任务', notes: '', priority: 'normal', dueDate: null, dueTime: null, addToToday: true } }
+        : { type: 'planTask', id: 'demo-lab', date: today, planned: true });
+      const hidden = (s: Snapshot) => s.plans.filter(plan => plan.taskId === 'demo-design');
+      expect(hidden(appended)).toEqual(hidden(initial));
+      expect(indexSnapshot(appended).today.slice(0, 3).map(task => task.id)).toEqual(['demo-paper', 'demo-read', 'demo-review']);
+      const restored = apply(appended, { type: 'restoreTask', id: 'demo-design', expectedRevision: 2 });
+      expect(restored.plans).toEqual(appended.plans);
+      const expected = [...restored.plans].filter(plan => plan.date === today).sort((a, b) => a.sortOrder - b.sortOrder).map(plan => plan.taskId);
+      expect(selectToday(restored).map(task => task.id)).toEqual(expected);
+    }
+  });
+
+  it('accepts old missing/null deletion markers without rewriting the preview snapshot', () => {
+    const snapshot = createSeed(today);
+    snapshot.tasks[1].deletedAt = null;
+    const normalized = normalizePreviewSnapshot(snapshot);
+    expect(normalized).toEqual(snapshot);
+    expect(normalized.tasks[0]).not.toHaveProperty('deletedAt');
+    expect(indexSnapshot(normalized).visibleTasks).toHaveLength(snapshot.tasks.length);
+  });
+
+  it.each(['', '2026-02-30T00:00:00Z', '2026-09-24T12:00:00+08:00', '2026-09-24T12:00:00', 0])('rejects invalid deletion timestamps without discarding preview data: %j', deletedAt => {
+    const snapshot = createSeed(today);
+    Object.assign(snapshot.tasks[0], { deletedAt });
+    const before = structuredClone(snapshot);
+    expect(() => normalizePreviewSnapshot(snapshot)).toThrow('删除时间');
+    expect(snapshot).toEqual(before);
+  });
+
+  it('does not allow editing the lifecycle marker through ordinary task input', () => {
+    const snapshot = createSeed(today);
+    const action = { type: 'updateTask', id: 'demo-design', expectedRevision: 1, changes: { deletedAt: '2026-09-24T00:00:00Z' } } as unknown as Action;
+    expect(() => apply(snapshot, action)).toThrow('不支持的字段');
+    expect(snapshot.tasks[0]).not.toHaveProperty('deletedAt');
+  });
+
+  it('ignores trashed deadline instants and source-zone midnights while preserving their stored DDL', () => {
+    vi.setSystemTime(new Date('2026-09-24T19:59:59Z'));
+    const now = Date.now();
+    const precise = task('precise', { dueTimezone: 'UTC', dueTime: '19:59', dueAtUtc: '2026-09-24T19:59:59.500000001Z', deletedAt: '2026-09-24T01:00:00Z' });
+    const dateOnly = task('date', { dueDate: '2026-10-02', dueTimezone: 'Asia/Dubai', deletedAt: '2026-09-24T01:00:00Z' });
+    const before = structuredClone([precise, dateOnly]);
+    const localBoundary = nextTimeBoundary([], now);
+    expect(nextTimeBoundary([precise, dateOnly], now)).toBe(localBoundary);
+    expect(isOverdue(precise, now + 1000)).toBe(false);
+    expect(formatDue(precise)).not.toContain('已逾期');
+    const restored = { ...precise, deletedAt: null };
+    expect(nextTimeBoundary([restored], now)).toBe(Math.min(localBoundary, now + 501));
+    expect(isOverdue(restored, now + 500)).toBe(false);
+    expect(isOverdue(restored, now + 501)).toBe(true);
+    expect(nextTimeBoundary([{ ...dateOnly, deletedAt: null }], now)).toBe(Math.min(localBoundary, Date.parse('2026-09-24T20:00:00Z')));
+    expect([precise, dateOnly]).toEqual(before);
+  });
+});

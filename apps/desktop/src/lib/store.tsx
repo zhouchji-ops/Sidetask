@@ -20,7 +20,7 @@ interface Store {
   loading: boolean;
   error: string | null;
   busy: boolean;
-  mutate: (action: Action) => Promise<void>;
+  mutate: (action: Action) => Promise<Snapshot>;
   restoreBackup: (content: string, expectedRevision: number) => Promise<string>;
   clearError: () => void;
 }
@@ -89,16 +89,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     const expectedRevision = ref.current.revision;
     try {
       if (isDesktop) {
-        apply(await invoke<Snapshot>('mutate', { action, expectedRevision }));
+        const committed = await invoke<Snapshot>('mutate', { action, expectedRevision });
+        apply(committed);
+        return committed;
       } else {
         const write = async () => {
           const next = applyPreviewAction(previewRead(), action, expectedRevision);
           localStorage.setItem(PREVIEW_KEY, JSON.stringify(next));
           apply(next);
           channel.current?.postMessage({ revision: next.revision });
+          return next;
         };
-        if (navigator.locks) await navigator.locks.request('sidetask-preview-write', write);
-        else await write();
+        if (navigator.locks) return await navigator.locks.request('sidetask-preview-write', write);
+        return await write();
       }
     } catch (err) {
       setError(String(err));

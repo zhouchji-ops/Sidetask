@@ -8,12 +8,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const APPLICATION_ID: i64 = 0x5344544b;
 const MAX_SNAPSHOT_BYTES: i64 = 16 * 1024 * 1024;
 
-/// One shared database and one transaction per command. Schema 1 is retained in
-/// a verified SQLite backup before the non-destructive schema 2 upgrade.
+/// One shared database and one transaction per command. Older schemas are
+/// retained in a verified SQLite backup before the schema 3 marker upgrade.
 pub trait Repository: Send {
     fn load(&self) -> Result<Option<Snapshot>, String>;
     fn save(&mut self, snapshot: &Snapshot) -> Result<(), String>;
@@ -61,14 +61,12 @@ fn verify_schema(connection: &Connection) -> Result<i64, String> {
     let application: i64 = connection
         .query_row("PRAGMA application_id", [], |r| r.get(0))
         .map_err(storage_error)?;
-    if ![1, SCHEMA_VERSION].contains(&version) {
+    if ![1, 2, SCHEMA_VERSION].contains(&version) {
         return Err(format!(
             "数据库版本 {version} 不受此版本支持。原数据未覆盖。"
         ));
     }
-    if (version == 1 && application != 0)
-        || (version == SCHEMA_VERSION && application != APPLICATION_ID)
-    {
+    if (version == 1 && application != 0) || (version >= 2 && application != APPLICATION_ID) {
         return Err("数据库身份不匹配，原数据未覆盖。".into());
     }
     let mut statement = connection
@@ -206,19 +204,20 @@ fn consistent_backup(
     }
     result
 }
-fn migrate_schema_one(
+fn migrate_schema(
     connection: &mut Connection,
     path: &Path,
+    from_version: i64,
     migration_sql: &str,
 ) -> Result<(), String> {
     // The backup is checked and flushed before the transaction. Migration SQL
     // is compiled into the app; neither backup files nor IPC can supply it.
-    let backup = consistent_backup(connection, path, "before-schema-2")?;
+    let backup = consistent_backup(connection, path, "before-schema-3")?;
     let result = (|| {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage_error)?;
-        if verify_database(&transaction)? != 1 {
+        if verify_database(&transaction)? != from_version {
             return Err("数据库在升级前已改变，请重新打开。".into());
         }
         transaction
@@ -287,12 +286,16 @@ impl SqliteRepository {
                     .pragma_update(None, "user_version", SCHEMA_VERSION)
                     .map_err(storage_error)?;
                 transaction.commit().map_err(storage_error)?;
-            } else if verify_database(&connection)? == 1 {
-                migrate_schema_one(
-                    &mut connection,
-                    path,
-                    "PRAGMA application_id=1396986955; PRAGMA user_version=2;",
-                )?;
+            } else {
+                let version = verify_database(&connection)?;
+                if version < SCHEMA_VERSION {
+                    migrate_schema(
+                        &mut connection,
+                        path,
+                        version,
+                        "PRAGMA application_id=1396986955; PRAGMA user_version=3;",
+                    )?;
+                }
             }
             verify_database(&connection)?;
             let (baseline, _) = read_snapshot(&connection)?;
@@ -462,11 +465,21 @@ mod tests {
             }
         }
         fn legacy(&self) -> String {
+            self.legacy_version(1)
+        }
+        fn legacy_version(&self, version: i64) -> String {
             let connection = Connection::open(&self.path).unwrap();
             connection
                 .execute_batch(include_str!("../../migrations/0001_snapshot.sql"))
                 .unwrap();
-            connection.pragma_update(None, "user_version", 1).unwrap();
+            connection
+                .pragma_update(None, "user_version", version)
+                .unwrap();
+            if version == 2 {
+                connection
+                    .pragma_update(None, "application_id", APPLICATION_ID)
+                    .unwrap();
+            }
             let mut value = serde_json::to_value(Snapshot::demo("2026-09-24")).unwrap();
             value["settings"].as_object_mut().unwrap().remove("uiStyle");
             value["revision"] = serde_json::json!(42);
@@ -515,11 +528,16 @@ mod tests {
         let temp = TempDatabase::new();
         let raw = temp.legacy();
         let repo = SqliteRepository::open(&temp.path).unwrap();
-        assert_eq!(verify_database(&repo.connection).unwrap(), 2);
+        assert_eq!(verify_database(&repo.connection).unwrap(), SCHEMA_VERSION);
         assert_eq!(read_snapshot(&repo.connection).unwrap().0, raw);
         assert_eq!(repo.load().unwrap().unwrap().settings.ui_style, "paper");
         let backups = temp.backups();
         assert_eq!(backups.len(), 1);
+        assert!(backups[0]
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("sidetask-before-schema-3-"));
         let backup =
             Connection::open_with_flags(&backups[0], OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         assert_eq!(verify_database(&backup).unwrap(), 1);
@@ -533,13 +551,180 @@ mod tests {
         );
     }
     #[test]
+    fn schema_two_upgrade_preserves_raw_snapshot_placement_and_restorable_backup() {
+        let temp = TempDatabase::new();
+        let raw = temp.legacy_version(2);
+        let placement = "{\"retained\":\"synthetic placement\"}";
+        let connection = Connection::open(&temp.path).unwrap();
+        connection
+            .execute(
+                "INSERT INTO app_state(key,value) VALUES('placement',?1)",
+                [placement],
+            )
+            .unwrap();
+        drop(connection);
+        let repo = SqliteRepository::open(&temp.path).unwrap();
+        assert_eq!(verify_database(&repo.connection).unwrap(), 3);
+        assert_eq!(read_snapshot(&repo.connection).unwrap().0, raw);
+        assert!(repo
+            .load()
+            .unwrap()
+            .unwrap()
+            .tasks
+            .iter()
+            .all(|task| task.deleted_at.is_none()));
+        assert_eq!(repo.load_placement().unwrap().as_deref(), Some(placement));
+        let candidates = recovery::list_candidates(&temp.directory).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].kind, "before-schema-3");
+        assert_eq!(candidates[0].schema_version, 2);
+        let backup = Connection::open_with_flags(
+            temp.directory.join(&candidates[0].file_name),
+            OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        assert_eq!(verify_database(&backup).unwrap(), 2);
+        assert_eq!(read_snapshot(&backup).unwrap().0, raw);
+        let preserved: String = backup
+            .query_row(
+                "SELECT value FROM app_state WHERE key='placement'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(preserved, placement);
+        drop(backup);
+        drop(repo);
+        let _restarted = SqliteRepository::open(&temp.path).unwrap();
+        assert_eq!(temp.backups().len(), 1);
+    }
+    #[test]
+    fn failed_schema_two_upgrade_keeps_original_version_and_verified_backup() {
+        let temp = TempDatabase::new();
+        let raw = temp.legacy_version(2);
+        let mut connection = Connection::open(&temp.path).unwrap();
+        configure(&connection).unwrap();
+        let error = migrate_schema(
+            &mut connection,
+            &temp.path,
+            2,
+            "PRAGMA user_version=3; SELECT missing_column FROM app_state;",
+        )
+        .unwrap_err();
+        assert!(error.contains("安全备份"));
+        assert_eq!(verify_database(&connection).unwrap(), 2);
+        assert_eq!(read_snapshot(&connection).unwrap().0, raw);
+        let candidates = recovery::list_candidates(&temp.directory).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].schema_version, 2);
+    }
+    #[test]
+    fn trash_survives_portable_backup_restore_and_sqlite_restart_with_all_plans() {
+        let temp = TempDatabase::new();
+        let mut repo = SqliteRepository::open(&temp.path).unwrap();
+        let mut original = Snapshot::demo("2026-09-24");
+        original.tasks[0].deleted_at = Some("2026-09-25T01:02:03.123456789Z".into());
+        original.plans.push(crate::domain::Plan {
+            task_id: original.tasks[0].id.clone(),
+            date: "2026-09-23".into(),
+            sort_order: 99,
+        });
+        original.settings.theme = "dark".into();
+        repo.save_placement(&original, "retained-placement")
+            .unwrap();
+        let mut service = TaskService::new(Box::new(repo)).unwrap();
+        let content = service.export_backup().unwrap();
+        let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(value["schemaVersion"], 2);
+        let preview = service.preview_restore(&content).unwrap();
+        assert_eq!(preview.task_count, original.tasks.len());
+        assert_eq!(preview.trashed_task_count, 1);
+        assert_eq!(preview.plan_count, original.plans.len());
+        let preview_json = serde_json::to_value(preview).unwrap();
+        assert_eq!(preview_json["trashedTaskCount"], 1);
+        let result = service.restore_backup(&content, original.revision).unwrap();
+        assert!(result.snapshot.revision > original.revision);
+        assert_eq!(
+            result.snapshot.tasks[0].deleted_at,
+            original.tasks[0].deleted_at
+        );
+        assert_eq!(
+            serde_json::to_value(&result.snapshot.plans).unwrap(),
+            serde_json::to_value(&original.plans).unwrap()
+        );
+        assert_eq!(result.snapshot.settings, original.settings);
+        assert!(result
+            .snapshot
+            .tasks
+            .iter()
+            .all(|task| task.revision == result.snapshot.revision));
+        drop(service);
+        let restarted = SqliteRepository::open(&temp.path).unwrap();
+        assert_eq!(
+            serde_json::to_value(restarted.load().unwrap().unwrap()).unwrap(),
+            serde_json::to_value(result.snapshot).unwrap()
+        );
+        assert_eq!(
+            restarted.load_placement().unwrap().as_deref(),
+            Some("retained-placement")
+        );
+    }
+    #[test]
+    fn portable_v1_restore_replaces_current_trash_with_the_legacy_backup_state() {
+        let temp = TempDatabase::new();
+        let mut repo = SqliteRepository::open(&temp.path).unwrap();
+        let original = Snapshot::demo("2026-09-24");
+        repo.save(&original).unwrap();
+        let mut service = TaskService::new(Box::new(repo)).unwrap();
+        let mut legacy: serde_json::Value =
+            serde_json::from_str(&service.export_backup().unwrap()).unwrap();
+        legacy["schemaVersion"] = serde_json::json!(1);
+        for task in legacy["tasks"].as_array_mut().unwrap() {
+            task.as_object_mut().unwrap().remove("deletedAt");
+        }
+        let id = original.tasks[0].id.clone();
+        service
+            .mutate(
+                Action::TrashTask {
+                    id,
+                    expected_revision: 1,
+                },
+                service.snapshot.revision,
+            )
+            .unwrap();
+        assert!(service.snapshot.tasks[0].deleted_at.is_some());
+        let revision = service.snapshot.revision;
+        let restored = service
+            .restore_backup(&serde_json::to_string(&legacy).unwrap(), revision)
+            .unwrap();
+        assert!(restored
+            .snapshot
+            .tasks
+            .iter()
+            .all(|task| task.deleted_at.is_none()));
+        assert_eq!(
+            serde_json::to_value(&restored.snapshot.plans).unwrap(),
+            serde_json::to_value(&original.plans).unwrap()
+        );
+        assert!(restored.snapshot.revision > revision);
+        drop(service);
+        let repo = SqliteRepository::open(&temp.path).unwrap();
+        assert!(repo
+            .load()
+            .unwrap()
+            .unwrap()
+            .tasks
+            .iter()
+            .all(|task| task.deleted_at.is_none()));
+    }
+    #[test]
     fn failed_migration_rolls_back_both_version_markers_and_keeps_backup() {
         let temp = TempDatabase::new();
         let raw = temp.legacy();
         let mut connection = Connection::open(&temp.path).unwrap();
         configure(&connection).unwrap();
-        let error = migrate_schema_one(&mut connection,&temp.path,
-            "PRAGMA application_id=1396986955; PRAGMA user_version=2; SELECT missing_column FROM app_state;").unwrap_err();
+        let error = migrate_schema(&mut connection,&temp.path,1,
+            "PRAGMA application_id=1396986955; PRAGMA user_version=3; SELECT missing_column FROM app_state;").unwrap_err();
         assert!(error.contains("安全备份"));
         assert_eq!(verify_database(&connection).unwrap(), 1);
         assert_eq!(read_snapshot(&connection).unwrap().0, raw);
@@ -647,7 +832,7 @@ mod tests {
         let backup_path = repo.backup().unwrap();
         let backup =
             Connection::open_with_flags(&backup_path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-        assert_eq!(verify_database(&backup).unwrap(), 2);
+        assert_eq!(verify_database(&backup).unwrap(), SCHEMA_VERSION);
         assert_eq!(read_snapshot(&backup).unwrap().1.tasks, snapshot.tasks);
         #[cfg(unix)]
         {

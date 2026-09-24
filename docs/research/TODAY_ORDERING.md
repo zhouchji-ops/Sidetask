@@ -31,3 +31,7 @@ Rust `append_plan` 与浏览器预览 `appendPlan` 现在共用同一规则：**
 新增 5 项 Rust 回归：重排保留任务、多个已完成计划和其他日期；拒绝错误 ID 集合与非法日期；完成/排序双向交错拒绝旧快照；空/单项日期；存储失败时不发布新顺序或修订号。定向测试 5/5，全库 `cargo test --lib --locked` 72/72，`cargo clippy --all-targets --locked -- -D warnings`、`cargo fmt --check` 与 `git diff --check` 通过。UI 接线、浏览器对等实现与实际按钮操作由对应工作包验证，不能由这组领域测试推断原生 UI 已通过。
 
 追加顺序缺陷修复后：`npm test` **74/74**，Rust `cargo test --locked` **74/74**（1.57 秒）；`npx tsc -b`、`cargo clippy --all-targets --locked -- -D warnings`、`cargo fmt --check`、相关文件 `git diff --check` 全通过。这里只报告领域/编译检查，300 项原生重排/移出/重新加入的修复后复验由主工作包记录。
+
+## 回收站接入后的规则（2026-09-25）
+
+本工作包之后接入单项回收站。reorderToday 的完整集合只包含当日未删除、未完成任务；回收站计划保留且不参与重排。新建/重新加入计划时，只稳定整理该日未删除任务的已有计划（含已完成），回收站与其他日期计划原样。恢复不改变原sortOrder，同键沿用稳定次序，因此不承诺绝对旧行号。数据与恢复契约见 [任务生命周期](TASK_LIFECYCLE.md)。

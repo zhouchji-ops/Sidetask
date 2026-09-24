@@ -1,6 +1,6 @@
 # 数据模型与业务一致性
 
-状态：本文下方表结构是正式目标模型。当前实际实现为SQLite schema2的版本化JSON snapshot，类型见 `apps/desktop/src/lib/types.ts`；升级前一致性备份、严格字段/关系验证、便携导入恢复与新DDL固定时区已实现。规范化表、软删除等目标字段尚未实现。见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md)。控制台与边缘小窗共享Rust服务和数据库。
+状态：当前实现继续使用 SQLite 的 app_state JSON snapshot，本阶段契约升级为 schema3 并加入 Task.deletedAt；类型见 `apps/desktop/src/lib/types.ts`，具体协议见本文末尾。下方独立表、DailyPlanRevision、设备设置 revision 及 dataset_epoch/change_seq 是目标模型，**没有因 schema3 升级而完成规范化**。控制台与边缘小窗共享 Rust 服务和数据库。架构取舍见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md)，实际完成度、测试数字与双平台验收见 [STATUS](../delivery/STATUS.md)。
 
 首版仅有独立的大任务。模型中不设 `parent_id`、子任务表、任务依赖、步骤清单、百分比进度或父子完成聚合；备注是普通文本，不支持可独立勾选的步骤。一次勾选表示整项任务完成，加入今日也不会创建一天的小任务或进度记录。见 [ADR-0002](../decisions/0002-console-and-edge-panel.md)。
 
@@ -20,10 +20,12 @@
 | due_timezone | 有 DDL 时保存 IANA 时区，用于解释日期及显示来源 |
 | completed_at | 完成时间 UTC；仅 done 时非空 |
 | created_at / updated_at | UTC 时间 |
-| deleted_at | 软删除时间，未删除为 null |
+| deleted_at | 与完成状态独立的 UTC 软删除时间；当前 JSON 字段 deletedAt，缺失/null 表示未删除 |
 | revision | 单调递增整数，防止旧界面覆盖新状态 |
 
 约束：none 时所有 DDL 字段为空；date 时仅 due_date + due_timezone 非空；datetime 时仅 due_at_utc + due_timezone 非空。status 与 completed_at 必须一致。
+
+上述 status/due_kind 为目标命名，当前 JSON 仍使用 completed、dueDate/dueTime、dueTimezone/dueAtUtc。deletedAt 不改变 completed/completedAt：已完成和未完成任务均可移入回收站。恢复只清除删除标记，保留 Task ID、内容、DDL、优先级、创建和完成时间，不引入取消状态、父子关系或完成事件表。
 
 ### DailyPlanEntry
 
@@ -34,13 +36,15 @@
 | sort_order | 今日清单内的手动排序键 |
 | created_at | 安排时间 UTC |
 
-唯一约束 `(task_id, plan_date)`。不存另一份 title、status、due、priority。SQLite 连接启用外键；软删除保留关系供恢复，最终物理删除需单独策略，MVP 不自动永久清理。
+唯一约束 `(task_id, plan_date)`。不存另一份 title、status、due、priority。当前 JSON 引用和唯一性由领域校验，规范化后的外键约束仍属目标设计。软删除和恢复完整保留当天、历史、未来计划及其排序值；本阶段不提供永久删除或自动清理。
 
-### DailyPlanRevision
+### DailyPlanRevision（目标）
 
 每个 `plan_date` 保存一个 `revision`，用于检查同一天计划引用与排序的并发修改。添加、移出或重排计划在同一事务更新引用及该日 revision；一天尚无安排时按初始 revision 处理。任务内容修改不必递增计划 revision，任务完成状态依然只在 Task 内存一份。
 
-### DevicePreferences / PreferenceApplyState
+当前 schema3 仍用 Snapshot.revision 保护全部计划操作，不新增每日 revision 字段。软删除/恢复另校验 Task.revision；同一服务内先验证版本，再保存并发布提交结果。
+
+### DevicePreferences / PreferenceApplyState（目标）
 
 `DevicePreferences` 是本机设置，与 Task 和 DailyPlanEntry 分开；由 Rust 设置服务统一读写，包含独立的 `revision` 和 `updated_at`。建议按职责组织：
 
@@ -59,7 +63,7 @@
 
 拖动时的指针捕获、候选显示器/边缘、旧停靠快照和开始时设置 revision 也是运行态，不逐帧持久化。拖动结束校准后，通过一次设置命令保存新停靠位置；取消或写入失败恢复最近已提交的合法位置。控制台并发修改导致 revision 冲突时保留最新持久化配置，不以旧拖动快照覆盖；屏幕失效由窗口层取消旧动作并安全回退。固定展开不表示锁定屏幕或位置。
 
-### StoreMetadata / SchemaVersion
+### StoreMetadata / SchemaVersion（目标）
 
 数据库元数据包含 `dataset_epoch` 和 `change_seq`。任何可查询持久化变更在同一事务递增 `change_seq`；它用于跨窗口快照的新旧比较，不能代替实体 revision 的冲突检查。整体恢复数据后生成新的 `dataset_epoch`，避免旧窗口把恢复前的较大序号误认成新数据。
 
@@ -71,11 +75,15 @@
 - 此前未完成：未完成/未删除 Task 有历史计划，其最近计划日早于今天，且无今天计划；按 Task 去重。点击转入今日新增今天引用，保留历史。
 - 移出今日后若还有历史计划，会回到「此前未完成」待安排组；这符合只移除当日安排的语义。MVP 没有「今天忽略」功能，不能用删除引用实现彻底隐藏。
 - DDL：未删除且有截止字段的任务，默认展示 open；done 在折叠区。即使它同时在今日，也不从 DDL 区消失。
-- 全部任务：所有未删除任务，含无 DDL 且不在今日的任务，防止用户移出今日后找不到。
+- 全部任务：未删除且未完成的任务，含无 DDL 且不在今日的任务，防止用户移出今日后找不到；已完成任务另在“已完成”页展示。
+
+正常全局搜索覆盖未删除的未完成和已完成任务。回收站独立展示删除任务，按 deletedAt 倒序、ID 稳定排序，其搜索只查回收站标题/备注。所有日常列表、侧栏数字、今日完成分母、DDL 与时间刷新边界排除删除任务；全量 ID 索引仍保留原 Task，供详情草稿与恢复使用。
 
 MVP 历史计划仅记录「安排过」，不提供按历史日期统计完成率的功能。以后需要历史完成事实时加入 TaskEvent，不倒推当前状态。
 
 ## 命令与事务
+
+下表沿用规范化目标的用例名称与计划/设置版本；当前动作名、快照写入协议和生命周期规则以末节为准。
 
 | 命令 | 原子操作 | 明确不做的事 |
 | --- | --- | --- |
@@ -86,10 +94,12 @@ MVP 历史计划仅记录「安排过」，不提供按历史日期统计完成�
 | completeTask | 校验任务 revision，置 done，写 completed_at，revision + 1 | 不逐列表分别勾选 |
 | reopenTask | 校验任务 revision，置 open，清 completed_at，revision + 1 | 不丢失计划、优先级或 DDL |
 | editTask | 校验 revision 后更新允许字段 | 不让过期界面静默覆盖较新数据 |
-| delete / restore | 校验任务 revision，设置/清除 deleted_at，保留关联计划 | 不马上永久清理 |
+| trashTask / restoreTask | 校验快照和任务 revision，设置/清除 deletedAt，保留全部计划与完成字段 | 不删除 Task/Plan，不改变 DDL，不自动安排到今天 |
 | updatePreferences | 校验设置 revision 并提交；随后请求协调器应用已提交设置 | 不在数据库失败时提前变更实际系统状态 |
 
 每次真实变更同时更新 `change_seq`；业务数据、完成时间、实体/计划 revision 和全局序号在同一事务提交。命令返回已提交结果及版本标记，然后发布小型失效通知（数据集代次、变更序号、受影响类型/ID），界面通过返回值或重查获取已提交数据。通知发送失败不回滚已经提交的事务，也不能让用户因误报失败重复创建任务。
+
+此处 change_seq、每日和设置 revision 描述目标协议；当前实际使用 Snapshot.revision 与 Task.revision，schema3 的精确动作规则见末节，不将这些目标字段当成已存在的数据列。
 
 用 `setCompleted(true/false)` 表达意图，比没有目标状态的 toggle 更容易处理重复请求。重复完成已完成任务保持原 completed_at；如果携带的是过期 revision，返回冲突及当前值，前端判断目标是否已达到，否则请用户重新确认，不静默覆盖。计划操作同时校验引用的任务存在且未删除。
 
@@ -97,9 +107,13 @@ MVP 可在提交期间禁用重复提交按钮，等待服务端确认后更新 
 
 ### 两个窗口同时操作
 
-控制台编辑任务时，小窗可能同时完成它。每个命令都带 `expectedRevision`，SQLite 事务中的条件更新决定唯一结果；不依赖“控制台先打开”“最后一次前端事件”或 UI 禁用按钮实现并发控制。发生冲突时展示新状态，保留未提交草稿，让用户重新确认受影响修改。计划排序和设置保存分别使用该日计划 revision、设置 revision，防止两个窗口把旧顺序或旧配置覆盖回来。
+控制台编辑任务时，小窗可能同时完成它。当前每个命令都带快照 `expectedRevision`，任务编辑另带 Task revision，由 Rust 写入锁内的校验和 Repository 事务决定唯一结果；不依赖“控制台先打开”“最后一次前端事件”或 UI 禁用按钮实现并发控制。发生冲突时展示新状态，保留未提交草稿，让用户重新确认受影响修改。当前计划排序和设置保存也用全局快照版本，未来规范化模型才分别使用该日计划 revision、设置 revision。
+
+删除与完成、计划重排交错时也适用当前快照版本锁。旧“恢复”提示须携带其对应删除的 Task revision，不能撤销新一次删除。表单草稿独立于列表投影；另一窗口删除该 Task 后仍保留输入，恢复动作本身不能卸载脏详情。恢复后基于新版本明确确认草稿，再执行编辑；不得直接用最新 revision 静默重放旧修改。
 
 ### 订阅与快照协议
+
+以下描述含 dataset_epoch/change_seq 的目标协议；当前以 Snapshot.revision 完成版本比较，整份恢复的当前处理见末节。
 
 1. 窗口加载时先注册 Rust 变更通知监听，等待注册完成；此时先缓存通知，不直接把事件内容写成任务数据。
 2. 通过查询命令请求所需视图快照。服务在同一个读事务读取任务、计划、相关设置及 `(dataset_epoch, change_seq)`，保证这份快照内部一致。
@@ -135,19 +149,27 @@ MVP 可在提交期间禁用重复提交按钮，等待服务端确认后更新 
 
 ## 备份、恢复与迁移
 
-- 导出内容含任务、计划、版本和导出时间；首版任务备份排除 DevicePreferences 等设备专属设置，恢复保留当前设备配置并重新校验窗口几何。
+- 导出内容含全部任务（含回收站）、全部计划、版本和导出时间；首版任务备份排除 DevicePreferences 等设备专属设置，恢复保留当前设备配置并重新校验窗口几何。便携 v2 读取 v1/v2 的实际兼容规则见末节。
 - 导入前验证字段/外键/唯一性/版本，展示条数和处理策略，再一次事务落盘。MVP 优先「备份后整体恢复」，不实现含糊的自动多库合并。
-- 恢复、数据库迁移前创建一致性备份；失败不能把半更新库当成正常数据继续使用。整体恢复成功时更换数据集代次，通知两个任务窗口丢弃旧查询结果并重新取快照。
+- 恢复、数据库迁移前创建一致性备份；失败不能把半更新库当成正常数据继续使用。整体恢复成功后通知两个任务窗口丢弃旧查询结果并重新取快照；当前提高版本号，目标协议另更换数据集代次。
 - 任务数据库、个人备份与导出不在源码目录，不提交 Git。
 
 数据模型验收至少覆盖：同源完成与撤销、重复加入今日、移出今日、软删除恢复、写入失败、跨日、时区、同优先级排序、重启恢复、跨窗口 revision 冲突、订阅/快照竞争、事件丢失后恢复、设置保存/应用分别失败。另需核对任务结构及入口不包含拆解功能。详见验收计划。
 
-## 原型外观兼容（2026-09-25）
+## 历史原型外观兼容（2026-09-25）
 
-当前 schema1 JSON snapshot 的 Settings 已增加 `uiStyle`。Rust serde 及浏览器只读兼容层对缺失字段默认 `paper`，读取旧记录不重写任务/计划，下一次合法写入随事务保存新字段。非法风格值拒绝保存。任务与计划数据不随外观变更，窗口协调器只在几何/显隐相关设置改变时重新定位和显示，不因外观或排序变化隐藏、重新弹出窗口。此项向后兼容不代表完整数据库升级备份/恢复已实现。
+schema1 原型时期已在 JSON Settings 增加 `uiStyle`。Rust serde 及浏览器只读兼容层对缺失字段默认 `paper`，读取旧记录不重写任务/计划，下一次合法写入随事务保存新字段。非法风格值拒绝保存。任务与计划数据不随外观变更，窗口协调器只在几何/显隐相关设置改变时重新定位和显示，不因外观或排序变化隐藏、重新弹出窗口。外观字段兼容与数据库版本迁移是独立机制。
 
-## schema2实际兼容契约
+## schema 3 实际兼容与生命周期契约
 
-当前Task仍用`completed`和`dueDate`/`dueTime`区分任务状态与DDL类型；新截止日期可带`dueTimezone`，精确时刻带`dueAtUtc`。原schema1中缺这些字段时以None解码，保留原截止语义，普通任务编辑不能悄悄重新固定旧时区。恢复保持Task ID和DailyPlan引用；全局及导入任务revision统一提升到大于所有已见值的整数，不回退。字段与时区验证详见TIME_SEMANTICS，备份协议见STORAGE_HARDENING。
+当前 Task 用 `completed`/`completedAt` 和 `dueDate`/`dueTime` 表示完成与 DDL；新截止日期可带 `dueTimezone`，精确时刻带 `dueAtUtc`。旧记录缺时区字段时保留原截止语义，普通标题/备注编辑不能重新固定时区。新增 `deletedAt` 对应 Rust `deleted_at: Option<String>`，serde default/skip_none，旧记录缺失或 null 均为未删除；非空值必须通过既有严格 UTC RFC3339 校验。该字段只能由生命周期动作修改，普通字段编辑不能注入它。
 
-schema1→2先VACUUM INTO生成可读、校验通过并同步磁盘的完整备份，事务只加版本/身份标记，不重编码原JSON。未知结构、坏快照、孤立计划和非法DDL拒绝打开，不能自动seed掩盖数据错误。首次新库写入空快照。
+`trashTask {id, expectedRevision}` / `restoreTask {id, expectedRevision}` 通过原有 mutate 入口提交，外层另携带 Snapshot expectedRevision。先校验版本，再判断是否已达目标状态；同状态不重写删除时间或 Task revision，全局 revision 沿用现有提交递增规则。真正删除/恢复只改 deletedAt 与 Task revision；写入失败不发布新快照。删除状态下拒绝 updateTask、setCompleted 和 planTask 的加入/移出两种方向。
+
+reorderToday 的精确集合只包括当天未删除、未完成任务；已删除及已完成计划的排序值不参与重排。追加今日计划仅稳定压缩当日未删除任务的计划，保留删除项原值。恢复不调整任何 Plan；排序值相同时沿用 Plan 数组的稳定顺序，因此其他任务重排后不保证恢复到删除前的绝对行号。跨日按原计划重新投影，不创建今天的新引用。
+
+SQLite schema1/2→3 先对完整数据库做保留 WAL 的副本预检，再创建校验可读、已同步的一致性 `before-schema-3` 备份；迁移事务只更新版本/身份标记，保留 snapshot 与 placement 原字节，不重编码任务。旧 schema1/2 和当前 schema3 都可识别；坏库恢复候选保留 `before-schema-2`、`before-schema-3` 与 `safety-backup` 三种来源。迁移失败不以空库或演示数据替代，旧版应用应明确拒绝 schema3。首次新库写入空快照。
+
+便携 JSON 的 schemaVersion 与 SQLite 版本独立：新导出 v2，导入接受 v1/v2，均包含完整 tasks/plans；v1 缺失或 null 的 deletedAt 作为未删除，v1 携带非空删除状态则拒绝。预览提供 taskCount、trashedTaskCount、planCount 和 exportedAt。整份恢复先备份当前库，再替换任务及回收站、保留设备设置，并将全局及所有导入任务 revision 提高到已见值以上；当前没有 dataset_epoch 字段。旧备份按备份时的完整集合恢复，不与现有回收站合并。回收站仍计入现有容量限制，元数据增长超限时保持原已提交状态并提示失败。
+
+本节是本阶段代码与产品必须遵守的契约，不将自动化测试、文档同步或 Mac 证据写成双平台验收完成。来源与分阶段检查见 [TASK_LIFECYCLE](../research/TASK_LIFECYCLE.md)，最终证据统一见 [STATUS](../delivery/STATUS.md)。

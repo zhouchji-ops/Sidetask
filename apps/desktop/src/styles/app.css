@@ -363,3 +363,12 @@ h1 { font-size: 27px; line-height: 1.3; font-weight: 600; letter-spacing: -.5px;
 .backup-path { overflow-wrap: anywhere; user-select: text; }
 
 .form-fields { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
+
+/* Recoverable task lifecycle uses the existing continuous task list. */
+.trash-task-symbol { flex-shrink: 0; color: var(--muted); margin: 0 4px; }
+.trash-restore { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--secondary); background: transparent; font-size: 12px; }
+.trash-restore:hover { background: var(--hover); color: var(--ink); }
+.trash-task-action { display: inline-flex; align-items: center; gap: 7px; margin-top: 22px; padding: 7px 0; border: 0; background: transparent; color: var(--secondary); font-size: 12px; }
+.trash-task-action:hover { color: var(--danger); }
+.trash-detail-notice { margin: 0 20px 16px; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--subtle); }
+.trash-detail-notice p { color: var(--secondary); font-size: 12px; line-height: 1.7; margin: 0 0 10px; overflow-wrap: anywhere; }

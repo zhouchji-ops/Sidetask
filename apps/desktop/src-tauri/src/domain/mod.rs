@@ -22,6 +22,8 @@ pub struct Task {
     pub completed: bool,
     pub created_at: String,
     pub completed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<String>,
     pub revision: u64,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -90,6 +92,10 @@ pub enum Action {
         completed: bool,
         expected_revision: u64,
     },
+    #[serde(rename = "trashTask", rename_all = "camelCase")]
+    TrashTask { id: String, expected_revision: u64 },
+    #[serde(rename = "restoreTask", rename_all = "camelCase")]
+    RestoreTask { id: String, expected_revision: u64 },
     #[serde(rename = "planTask")]
     PlanTask {
         id: String,
@@ -113,7 +119,16 @@ fn validate_task(task: &Task) -> Result<(), String> {
     if !["high", "normal", "low"].contains(&task.priority.as_str()) {
         return Err("重要程度无效。".into());
     }
+    if let Some(at) = &task.deleted_at {
+        deadline::parse_utc(at).map_err(|_| "任务移入回收站的时间无效。".to_string())?;
+    }
     deadline::validate(task)
+}
+fn require_active_task(task: &Task) -> Result<(), String> {
+    if task.deleted_at.is_some() {
+        return Err("任务已移入回收站，请先恢复后再操作。".into());
+    }
+    Ok(())
 }
 fn validate_settings(settings: &Settings) -> Result<(), String> {
     if !["left", "right"].contains(&settings.edge.as_str())
@@ -268,6 +283,7 @@ impl Snapshot {
                 completed,
                 created_at: now.clone(),
                 completed_at: if completed { Some(now.clone()) } else { None },
+                deleted_at: None,
                 revision: 1,
             });
         }
@@ -293,11 +309,19 @@ impl Snapshot {
         // Removal leaves gaps and older snapshots may contain equal or very
         // large orders. Stable compaction preserves the displayed order while
         // making append unambiguous, without incrementing an unsafe maximum.
+        let visible: HashSet<_> = self
+            .tasks
+            .iter()
+            .filter(|task| task.deleted_at.is_none())
+            .map(|task| task.id.as_str())
+            .collect();
         let mut indices: Vec<_> = self
             .plans
             .iter()
             .enumerate()
-            .filter_map(|(index, plan)| (plan.date == date).then_some(index))
+            .filter_map(|(index, plan)| {
+                (plan.date == date && visible.contains(plan.task_id.as_str())).then_some(index)
+            })
             .collect();
         indices.sort_by_key(|index| self.plans[*index].sort_order);
         for (order, index) in indices.iter().enumerate() {
@@ -333,6 +357,7 @@ impl Snapshot {
                     completed: false,
                     created_at: Utc::now().to_rfc3339(),
                     completed_at: None,
+                    deleted_at: None,
                     revision: 1,
                 };
                 let mut value = serde_json::to_value(&item).map_err(|e| e.to_string())?;
@@ -371,6 +396,7 @@ impl Snapshot {
                 expected_revision,
             } => {
                 let task = next.task_mut(&id, expected_revision)?;
+                require_active_task(task)?;
                 let mut value = serde_json::to_value(&*task).map_err(|e| e.to_string())?;
                 merge_known(
                     &mut value,
@@ -397,6 +423,7 @@ impl Snapshot {
                 expected_revision,
             } => {
                 let task = next.task_mut(&id, expected_revision)?;
+                require_active_task(task)?;
                 if task.completed != completed {
                     task.completed = completed;
                     task.completed_at = if completed {
@@ -407,11 +434,34 @@ impl Snapshot {
                     task.revision += 1;
                 }
             }
+            Action::TrashTask {
+                id,
+                expected_revision,
+            } => {
+                let task = next.task_mut(&id, expected_revision)?;
+                if task.deleted_at.is_none() {
+                    task.deleted_at = Some(Utc::now().to_rfc3339());
+                    task.revision += 1;
+                }
+            }
+            Action::RestoreTask {
+                id,
+                expected_revision,
+            } => {
+                let task = next.task_mut(&id, expected_revision)?;
+                if task.deleted_at.is_some() {
+                    task.deleted_at = None;
+                    task.revision += 1;
+                }
+            }
             Action::PlanTask { id, planned, date } => {
                 valid_date(&date)?;
-                if !next.tasks.iter().any(|t| t.id == id) {
-                    return Err("任务不存在。".into());
-                }
+                let task = next
+                    .tasks
+                    .iter()
+                    .find(|task| task.id == id)
+                    .ok_or("任务不存在。")?;
+                require_active_task(task)?;
                 let exists = next.plans.iter().any(|p| p.task_id == id && p.date == date);
                 if planned && !exists {
                     next.append_plan(id, date);
@@ -424,7 +474,7 @@ impl Snapshot {
                 let incomplete: HashSet<_> = self
                     .tasks
                     .iter()
-                    .filter(|task| !task.completed)
+                    .filter(|task| !task.completed && task.deleted_at.is_none())
                     .map(|task| task.id.as_str())
                     .collect();
                 let planned: HashSet<_> = self
@@ -490,7 +540,7 @@ mod tests {
         let active: HashSet<_> = snapshot
             .tasks
             .iter()
-            .filter(|task| !task.completed)
+            .filter(|task| !task.completed && task.deleted_at.is_none())
             .map(|task| task.id.as_str())
             .collect();
         let mut plans: Vec<_> = snapshot
@@ -500,6 +550,327 @@ mod tests {
             .collect();
         plans.sort_by_key(|plan| plan.sort_order);
         plans.iter().map(|plan| plan.task_id.clone()).collect()
+    }
+
+    fn lifecycle_action(kind: &str, task: &Task) -> Action {
+        serde_json::from_value(serde_json::json!({
+            "type": kind, "id": task.id, "expectedRevision": task.revision
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn trash_and_restore_preserve_open_and_completed_tasks_and_all_plan_dates() {
+        for index in [0, 3] {
+            let mut initial = Snapshot::demo("2026-09-24");
+            initial.tasks[0].due_timezone = Some("Asia/Shanghai".into());
+            initial.tasks[0].due_at_utc = Some("2026-09-25T10:00:00Z".into());
+            for (date, order) in [("2026-09-23", 17), ("2026-09-30", 29)] {
+                initial.plans.push(Plan {
+                    task_id: initial.tasks[index].id.clone(),
+                    date: date.into(),
+                    sort_order: order,
+                });
+            }
+            initial.validate().unwrap();
+            let original = initial.tasks[index].clone();
+            let plans = serde_json::to_value(&initial.plans).unwrap();
+            let deleted = initial
+                .apply(lifecycle_action("trashTask", &original), initial.revision)
+                .unwrap();
+            deadline::parse_utc(deleted.tasks[index].deleted_at.as_ref().unwrap()).unwrap();
+            let mut expected = initial.tasks.clone();
+            expected[index].deleted_at = deleted.tasks[index].deleted_at.clone();
+            expected[index].revision += 1;
+            assert_eq!(deleted.tasks, expected);
+            assert_eq!(serde_json::to_value(&deleted.plans).unwrap(), plans);
+            assert_eq!(deleted.settings, initial.settings);
+            assert_eq!(deleted.revision, initial.revision + 1);
+
+            let restored = deleted
+                .apply(
+                    lifecycle_action("restoreTask", &deleted.tasks[index]),
+                    deleted.revision,
+                )
+                .unwrap();
+            expected[index].deleted_at = None;
+            expected[index].revision += 1;
+            assert_eq!(restored.tasks, expected);
+            assert_eq!(serde_json::to_value(&restored.plans).unwrap(), plans);
+            assert_eq!(restored.settings, initial.settings);
+            assert_eq!(restored.revision, initial.revision + 2);
+            assert!(!restored.plans.iter().any(|plan| plan.date == "2026-09-25"));
+        }
+    }
+
+    #[test]
+    fn deleted_timestamp_is_backward_compatible_and_strict_utc() {
+        let initial = Snapshot::demo("2026-09-24");
+        let encoded = serde_json::to_value(&initial).unwrap();
+        assert!(encoded["tasks"][0].get("deletedAt").is_none());
+        let legacy: Snapshot = serde_json::from_value(encoded.clone()).unwrap();
+        assert!(legacy.tasks.iter().all(|task| task.deleted_at.is_none()));
+        for timestamp in [
+            serde_json::Value::Null,
+            serde_json::json!("2026-09-25T04:05:06.123456789Z"),
+            serde_json::json!("2026-09-25T04:05:06+00:00"),
+        ] {
+            let mut value = encoded.clone();
+            value["tasks"][0]["deletedAt"] = timestamp;
+            serde_json::from_value::<Snapshot>(value)
+                .unwrap()
+                .validate()
+                .unwrap();
+        }
+        for timestamp in [
+            "",
+            "2026-02-30T00:00:00Z",
+            "2026-09-25",
+            "2026-09-25T04:05:06",
+            "2026-09-25T04:05:06+08:00",
+            "2026-09-25T04:05:60Z",
+        ] {
+            let mut invalid = initial.clone();
+            invalid.tasks[0].deleted_at = Some(timestamp.into());
+            assert!(invalid.validate().is_err(), "{timestamp}");
+        }
+        assert!(initial
+            .apply(
+                Action::UpdateTask {
+                    id: initial.tasks[0].id.clone(),
+                    changes: serde_json::json!({"deletedAt":"2026-09-25T00:00:00Z"}),
+                    expected_revision: 1
+                },
+                initial.revision
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn repeated_lifecycle_intent_keeps_timestamp_and_task_revision_but_checks_versions() {
+        let initial = Snapshot::demo("2026-09-24");
+        let deleted = initial
+            .apply(
+                lifecycle_action("trashTask", &initial.tasks[0]),
+                initial.revision,
+            )
+            .unwrap();
+        let repeated = deleted
+            .apply(
+                lifecycle_action("trashTask", &deleted.tasks[0]),
+                deleted.revision,
+            )
+            .unwrap();
+        assert_eq!(repeated.tasks, deleted.tasks);
+        assert_eq!(
+            serde_json::to_value(&repeated.plans).unwrap(),
+            serde_json::to_value(&deleted.plans).unwrap()
+        );
+        assert_eq!(repeated.revision, deleted.revision + 1);
+        assert!(repeated
+            .apply(
+                lifecycle_action("trashTask", &initial.tasks[0]),
+                repeated.revision
+            )
+            .is_err());
+        assert!(repeated
+            .apply(
+                lifecycle_action("trashTask", &repeated.tasks[0]),
+                deleted.revision
+            )
+            .is_err());
+
+        let restored = repeated
+            .apply(
+                lifecycle_action("restoreTask", &repeated.tasks[0]),
+                repeated.revision,
+            )
+            .unwrap();
+        let restored_twice = restored
+            .apply(
+                lifecycle_action("restoreTask", &restored.tasks[0]),
+                restored.revision,
+            )
+            .unwrap();
+        assert_eq!(restored_twice.tasks, restored.tasks);
+        assert!(restored_twice
+            .apply(
+                lifecycle_action("restoreTask", &deleted.tasks[0]),
+                restored_twice.revision
+            )
+            .is_err());
+        let deleted_again = restored_twice
+            .apply(
+                lifecycle_action("trashTask", &restored_twice.tasks[0]),
+                restored_twice.revision,
+            )
+            .unwrap();
+        assert!(
+            deleted_again
+                .apply(
+                    lifecycle_action("restoreTask", &deleted.tasks[0]),
+                    deleted_again.revision
+                )
+                .is_err(),
+            "an old undo must not restore a later deletion"
+        );
+    }
+
+    #[test]
+    fn deleted_tasks_reject_edits_completion_and_any_plan_changes() {
+        let initial = Snapshot::demo("2026-09-24");
+        let deleted = initial
+            .apply(
+                lifecycle_action("trashTask", &initial.tasks[0]),
+                initial.revision,
+            )
+            .unwrap();
+        let task = &deleted.tasks[0];
+        let mut actions = vec![Action::UpdateTask {
+            id: task.id.clone(),
+            changes: serde_json::json!({"title":"Changed"}),
+            expected_revision: task.revision,
+        }];
+        for completed in [false, true] {
+            actions.push(Action::SetCompleted {
+                id: task.id.clone(),
+                completed,
+                expected_revision: task.revision,
+            });
+        }
+        for date in ["2026-09-23", "2026-09-24", "2026-09-30"] {
+            for planned in [false, true] {
+                actions.push(Action::PlanTask {
+                    id: task.id.clone(),
+                    planned,
+                    date: date.into(),
+                });
+            }
+        }
+        let before = serde_json::to_value(&deleted).unwrap();
+        for action in actions {
+            assert!(deleted
+                .apply(action, deleted.revision)
+                .unwrap_err()
+                .contains("回收站"));
+            assert_eq!(serde_json::to_value(&deleted).unwrap(), before);
+        }
+        for kind in ["trashTask", "restoreTask"] {
+            let mut unknown = task.clone();
+            unknown.id = "missing-task".into();
+            assert!(deleted
+                .apply(lifecycle_action(kind, &unknown), deleted.revision)
+                .is_err());
+        }
+    }
+
+    #[test]
+    fn completion_and_trash_reject_stale_intents_in_both_orders() {
+        let initial = Snapshot::demo("2026-09-24");
+        let complete = || Action::SetCompleted {
+            id: initial.tasks[0].id.clone(),
+            completed: true,
+            expected_revision: initial.tasks[0].revision,
+        };
+        let completed = initial.apply(complete(), initial.revision).unwrap();
+        assert!(completed
+            .apply(
+                lifecycle_action("trashTask", &initial.tasks[0]),
+                initial.revision
+            )
+            .is_err());
+        assert!(completed
+            .apply(
+                lifecycle_action("trashTask", &initial.tasks[0]),
+                completed.revision
+            )
+            .is_err());
+        let deleted_completed = completed
+            .apply(
+                lifecycle_action("trashTask", &completed.tasks[0]),
+                completed.revision,
+            )
+            .unwrap();
+        assert_eq!(
+            deleted_completed.tasks[0].completed_at,
+            completed.tasks[0].completed_at
+        );
+        assert!(deleted_completed.tasks[0].completed);
+
+        let deleted = initial
+            .apply(
+                lifecycle_action("trashTask", &initial.tasks[0]),
+                initial.revision,
+            )
+            .unwrap();
+        assert!(deleted.apply(complete(), initial.revision).is_err());
+        assert!(deleted.apply(complete(), deleted.revision).is_err());
+    }
+
+    #[test]
+    fn reorder_and_append_exclude_deleted_tasks_and_preserve_their_plan_orders() {
+        let date = "2026-09-24";
+        let mut initial = Snapshot::demo(date);
+        initial.plans[0].sort_order = 73;
+        let order = active_plan_ids(&initial, date);
+        let deleted = initial
+            .apply(
+                lifecycle_action("trashTask", &initial.tasks[0]),
+                initial.revision,
+            )
+            .unwrap();
+        let stale_reorder = || Action::ReorderToday {
+            date: date.into(),
+            task_ids: order.clone(),
+        };
+        assert!(deleted.apply(stale_reorder(), initial.revision).is_err());
+        assert!(deleted.apply(stale_reorder(), deleted.revision).is_err());
+        let visible: Vec<_> = active_plan_ids(&deleted, date).into_iter().rev().collect();
+        let reordered = deleted
+            .apply(
+                Action::ReorderToday {
+                    date: date.into(),
+                    task_ids: visible.clone(),
+                },
+                deleted.revision,
+            )
+            .unwrap();
+        assert_eq!(active_plan_ids(&reordered, date), visible);
+        assert_eq!(reordered.plans[0].sort_order, 73);
+        assert_eq!(reordered.tasks, deleted.tasks);
+        let appended = reordered
+            .apply(
+                Action::PlanTask {
+                    id: reordered.tasks[4].id.clone(),
+                    date: date.into(),
+                    planned: true,
+                },
+                reordered.revision,
+            )
+            .unwrap();
+        assert_eq!(appended.plans[0].sort_order, 73);
+        let restored = appended
+            .apply(
+                lifecycle_action("restoreTask", &appended.tasks[0]),
+                appended.revision,
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&restored.plans).unwrap(),
+            serde_json::to_value(&appended.plans).unwrap()
+        );
+        assert!(
+            restored
+                .apply(
+                    Action::ReorderToday {
+                        date: date.into(),
+                        task_ids: active_plan_ids(&appended, date)
+                    },
+                    restored.revision
+                )
+                .is_err(),
+            "restored tasks must be included in a fresh complete order"
+        );
     }
 
     #[test]

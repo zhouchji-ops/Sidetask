@@ -112,13 +112,13 @@ export function deadlineTimeZoneHint(task: Task): string | null {
 }
 /** Next view invalidation, including fixed-zone date labels. No persistent revision changes. */
 export function nextTimeBoundary(tasks: readonly Task[], now = Date.now()): number {
-  const zones = new Set([currentTimeZone(), ...tasks.flatMap(task => task.dueDate && !task.dueTime && task.dueTimezone ? [task.dueTimezone] : [])]);
+  const zones = new Set([currentTimeZone(), ...tasks.flatMap(task => task.deletedAt == null && task.dueDate && !task.dueTime && task.dueTimezone ? [task.dueTimezone] : [])]);
   const boundaries = [...zones].map(zone => {
     const current = Temporal.Instant.fromEpochMilliseconds(now).toZonedDateTimeISO(zone);
     return current.toPlainDate().add({ days: 1 }).toZonedDateTime(zone).epochMilliseconds;
   });
   for (const task of tasks) {
-    if (task.completed) continue;
+    if (task.completed || task.deletedAt != null) continue;
     const at = effectiveDeadline(task);
     if (Number.isFinite(at) && at > now) boundaries.push(at);
   }

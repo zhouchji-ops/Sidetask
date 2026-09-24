@@ -128,7 +128,7 @@ function Recovery({ initialStatus }: { initialStatus: RecoveryStatus }) {
         {status.candidates.length ? <fieldset className="recovery-options" disabled={busy || confirm}><legend className="sr-only">选择恢复备份</legend>
           {status.candidates.map(candidate => <label className={`recovery-option ${candidate.id === selectedId ? 'is-selected' : ''}`} key={candidate.id}>
             <input type="radio" name="recovery-backup" value={candidate.id} checked={candidate.id === selectedId} onChange={() => { setSelectedId(candidate.id); setError(''); }} />
-            <span><strong>{backupDate(candidate.modifiedAt)} · 文件修改时间</strong><span>{candidate.taskCount.toLocaleString()} 项任务 · {candidate.planCount.toLocaleString()} 项计划 · {candidate.kind === 'before-schema-2' ? '升级前备份' : '安全备份'}</span><small>{candidate.fileName}</small></span>
+            <span><strong>{backupDate(candidate.modifiedAt)} · 文件修改时间</strong><span>{candidate.taskCount.toLocaleString()} 项任务 · {candidate.planCount.toLocaleString()} 项计划 · {['before-schema-2', 'before-schema-3'].includes(candidate.kind) ? '升级前备份' : '安全备份'}</span><small>{candidate.fileName}</small></span>
           </label>)}
         </fieldset> : <div className="recovery-empty"><p>未找到验证通过的本机备份。请退出侧笺后保留下面的整个数据目录，再联系维护者协助恢复。</p><p className="recovery-path">{status.dataDirectory}</p><p>请勿删除原数据库或日志文件，也不要将 JSON 备份改名为 SQLite 数据库。另有备份时，请按项目的《数据恢复说明》处理。</p></div>}
       </section>

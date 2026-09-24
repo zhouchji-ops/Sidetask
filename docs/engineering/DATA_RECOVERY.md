@@ -6,12 +6,15 @@
 
 | 文件 | 内容 | 使用方式 |
 | --- | --- | --- |
-| `exports/SideTask-<UUID>.json` | 可携带任务与计划；含 schemaVersion / exportedAt | 应用可打开时，在控制台「设置 → 数据备份 → 选择备份恢复」导入 |
+| `exports/SideTask-<UUID>.json` | v2 可携带全部任务（含回收站）及计划；含 schemaVersion / exportedAt | 应用可打开时，在控制台「设置 → 数据备份 → 选择备份恢复」导入；继续接受 v1 |
 | `sidetask-safety-backup-<UUID>.sqlite3` | 恢复前的完整 SQLite，包括本机设置及停靠信息 | 启动恢复界面选取已验证副本，或按下面离线流程恢复 |
 | `sidetask-before-schema-2-<UUID>.sqlite3` | 升级schema前完整SQLite副本 | 同上；新版本再次打开时先验证并安全升级 |
+| `sidetask-before-schema-3-<UUID>.sqlite3` | 从 schema1/2 升到回收站数据版本前的完整 SQLite 副本 | 同上；保留旧快照原文、全部计划与设备信息 |
 | `sidetask.sqlite3` | 正在使用的唯一任务数据库 | 不能被JSON直接替换，不在应用运行时复制它作为完整备份 |
 
 JSON 文件即使改名为 `.sqlite3` 也不是数据库。SQLite 安全副本也不能从 JSON 文件选择器导入。JSON 恢复保留当前本机设置；离线完整 SQLite 恢复会恢复该副本内的本机设置。
+
+当前 SQLite 为 schema3，旧 schema1/2 会先生成经过校验的 `before-schema-3` 完整副本，再在事务中升级标记；缺少 `deletedAt` 的旧任务按未删除读取。升级不会重新编码原任务 JSON。旧版本应用不支持 schema3，应保留新版和升级前副本，不通过手工改版本号来降级。
 
 ## 数据目录
 
@@ -26,11 +29,13 @@ macOS Finder 的「前往文件夹」可输入上面的路径；Windows 文件�
 
 1. 先处理当前编辑草稿。数据区在有未保存草稿或正在保存时不允许恢复。
 2. 在设置的数据区导出当前任务备份，记下界面返回的完整路径。重要备份另复制到自己管理的安全位置。
-3. 选择需要恢复的 JSON，核对任务数、计划数和导出时间。当前限制为 10 MiB / 10,000 任务 / 100,000 计划。
-4. 点击「备份当前数据并恢复」。应用先创建经过校验的完整 SQLite 安全副本，再一次事务替换任务与计划；保留当前设备设置和停靠位置。备份或校验失败不恢复。
+3. 选择需要恢复的 JSON，核对总任务数、其中回收站数量、计划数和导出时间。当前限制为 10 MiB / 10,000 任务 / 100,000 计划，回收站任务同样计入容量。
+4. 点击「备份当前数据并恢复」。应用先创建经过校验的完整 SQLite 安全副本，再一次事务替换任务与计划（包括回收站状态与全部历史/未来计划）；保留当前设备设置和停靠位置。备份或校验失败不恢复。
 5. 确认恢复成功及自动安全备份路径。核对今日 / 全部任务 / DDL，退出并重启检查。发生冲突先重新预览，不重复点击强行覆盖。
 
 普通导出产生的文件需要另行保管；现版本没有周期备份或云备份。
+
+v1 备份缺失或为 null 的删除标记按未删除处理，不能携带非空回收站状态；v2 明确保留 `deletedAt`。导入旧备份会还原备份当时的任务集合，**不会与当前回收站合并**。单项“恢复任务”只清除该任务的回收站标记，而本节“恢复备份”替换整个任务/计划集合，二者含义不同。没有永久删除、清空或自动过期清理。
 
 ## 启动检测到数据库损坏：恢复界面
 
@@ -50,7 +55,7 @@ macOS Finder 的「前往文件夹」可输入上面的路径；Windows 文件�
 1. 明确退出 SideTask，并确认所有 SideTask 应用/开发进程已结束。仅关闭控制台窗口不等于退出。macOS 活动监视器或 Windows 任务管理器可确认；同时停下可能运行的 `tauri dev`。
 2. 找到上面的整个数据目录。保留原目录为一个新名字，例如 `com.changjin.sidetask.before-recovery-20260925-153000`；确保该备份名字不存在，不覆盖其他备份。目录内的 `sidetask.sqlite3`、`-wal`、`-shm`、`-journal` 及导出文件一起保留。只有进程全部停止后才能执行这步。
 3. 在原位置重新创建空的 `com.changjin.sidetask` 目录。从保留下来的文件中**复制**一份确认过时间与内容的 `sidetask-…-<UUID>.sqlite3` 安全备份到新目录，复制后的名字为 `sidetask.sqlite3`。保留源安全备份不动。新目录不要放旧库的 WAL/SHM/journal；这些文件与旧数据库配套，不能混到恢复副本中。
-4. 启动当前 SideTask。应用先校验库版本、身份、结构、SQLite完整性和业务字段，失败则停止，不以空任务或示例数据覆盖。schema1安全副本通过后会再做一次带备份的schema2升级。
+4. 启动当前 SideTask。应用先校验库版本、身份、结构、SQLite完整性和业务字段，失败则停止，不以空任务或示例数据覆盖。schema1/2安全副本通过后会再做一次带备份的schema3升级。
 5. 若启动成功，先核对任务和计划，再核对停靠屏幕/尺寸等设备设置；完整SQLite副本含创建时的本机配置。确认前继续保留原目录和安全副本。
 6. 若仍失败，退出所有进程，保留这次尝试目录为另一个新名字，再把步骤2的原目录恢复原名。不要把多份库或WAL文件混在一起，不删除唯一原始损坏数据。由维护者用副本进一步分析。
 
@@ -62,7 +67,7 @@ macOS Finder 的「前往文件夹」可输入上面的路径；Windows 文件�
 sqlite3 -readonly "所选安全备份的绝对路径.sqlite3" "PRAGMA integrity_check; PRAGMA user_version; PRAGMA application_id;"
 ```
 
-预期 integrity_check 为 `ok`；schema1 的 application_id 为0，schema2为1396986955。此命令只检查SQLite层，不能替代应用对任务/计划/时区/字段的完整校验。不要执行 `.recover`、`VACUUM` 或手工写 SQL 到唯一原库。
+预期 integrity_check 为 `ok`；schema1 的 application_id 为0，schema2/3为1396986955。此命令只检查SQLite层，不能替代应用对任务/计划/时区/字段的完整校验。不要执行 `.recover`、`VACUUM` 或手工写 SQL 到唯一原库。
 
 ## 未覆盖与后续
 
@@ -70,7 +75,7 @@ sqlite3 -readonly "所选安全备份的绝对路径.sqlite3" "PRAGMA integrity_
 
 ## 附录：启动恢复的文件与实现边界
 
-- 候选名称仅接受 `sidetask-before-schema-2-<UUID>.sqlite3` / `sidetask-safety-backup-<UUID>.sqlite3`，UUID 为标准小写格式；不接受用户路径、链接、JSON 改名或带 WAL/SHM/journal 的备份。候选限 32 MiB，原库与日志证据合计限 1 GiB。
+- 候选名称仅接受 `sidetask-before-schema-2-<UUID>.sqlite3` / `sidetask-before-schema-3-<UUID>.sqlite3` / `sidetask-safety-backup-<UUID>.sqlite3`，UUID 为标准小写格式；不接受用户路径、链接、JSON 改名或带 WAL/SHM/journal 的备份。候选限 32 MiB，原库与日志证据合计限 1 GiB。
 - 候选 ID 包含校验时的 SHA-256；确认后再次校验，文件变更必须重新预览。SHA-256 用于变化检测和复制校验，不代替数据来源可信判断。
 - `sidetask-recovery-evidence-<UUID>/manifest.json` 记录原始四文件的存在情况、长度、摘要；证据不会用于普通候选扫描。Unix 证据目录权限 0700，新文件 0600。
 - `sidetask-recovery-pending.json` 以已完整同步的临时记录通过同目录硬链接发布，先于任何主库/日志移动。重试沿用已验证的原始证据，避免把上次恢复一半的文件当原件。

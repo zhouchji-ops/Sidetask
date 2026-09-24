@@ -324,6 +324,25 @@ mod security_tests {
     use super::*;
 
     #[test]
+    fn lifecycle_mutations_are_console_only() {
+        for action in [
+            Action::TrashTask {
+                id: "task".into(),
+                expected_revision: 1,
+            },
+            Action::RestoreTask {
+                id: "task".into(),
+                expected_revision: 1,
+            },
+        ] {
+            assert!(authorize_mutation("console", &action).is_ok());
+            for label in ["edge-panel", "edge-handle", "unknown"] {
+                assert!(authorize_mutation(label, &action).is_err());
+            }
+        }
+    }
+
+    #[test]
     fn handle_unknown_windows_and_edge_settings_cannot_escalate() {
         let completed = Action::SetCompleted {
             id: "test".into(),

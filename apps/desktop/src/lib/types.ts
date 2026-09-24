@@ -1,6 +1,6 @@
 export type Priority = 'high' | 'normal' | 'low';
 export type UIStyle = 'paper' | 'studio' | 'editorial' | 'mono';
-export type Page = 'today' | 'all' | 'deadlines' | 'completed' | 'settings';
+export type Page = 'today' | 'all' | 'deadlines' | 'completed' | 'trash' | 'settings';
 export interface Task {
   id: string;
   title: string;
@@ -15,6 +15,8 @@ export interface Task {
   completed: boolean;
   createdAt: string;
   completedAt: string | null;
+  /** Missing/null means visible; trash preserves completion, deadlines and plans. */
+  deletedAt?: string | null;
   revision: number;
 }
 export interface Plan { taskId: string; date: string; sortOrder: number }
@@ -41,6 +43,8 @@ export type Action =
   | { type: 'createTask'; task: { title: string; notes: string; priority: Priority; dueDate: string | null; dueTime: string | null; dueTimezone?: string | null; addToToday: boolean }; date: string }
   | { type: 'updateTask'; id: string; changes: TaskChanges; expectedRevision: number }
   | { type: 'setCompleted'; id: string; completed: boolean; expectedRevision: number }
+  | { type: 'trashTask'; id: string; expectedRevision: number }
+  | { type: 'restoreTask'; id: string; expectedRevision: number }
   | { type: 'planTask'; id: string; planned: boolean; date: string }
   | { type: 'reorderToday'; date: string; taskIds: string[] }
   | { type: 'updateSettings'; changes: Partial<Settings> }

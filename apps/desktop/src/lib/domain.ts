@@ -15,17 +15,26 @@ export function normalizePreviewSnapshot(value: unknown): Snapshot {
 }
 export const priorityLabel: Record<Priority, string> = { high: '高优先级', normal: '普通', low: '低优先级' };
 export function isPlannedToday(snapshot: Snapshot, taskId: string): boolean {
+  const task = snapshot.tasks.find(task => task.id === taskId);
+  if (!task || task.deletedAt != null) return false;
   const today = localDate();
   return snapshot.plans.some(plan => plan.taskId === taskId && plan.date === today);
 }
 /** Read-only projections of a committed snapshot. Memoize by snapshot and local day at the view boundary. */
 export function indexSnapshot(snapshot: Snapshot, date = localDate()) {
   const byId = new Map<string, Task>();
+  const visibleTasks: Task[] = [];
+  const trashKeys: Array<{ task: Task; deleted: bigint }> = [];
   const active: Task[] = [];
   const completed: Task[] = [];
   let deadlineCount = 0;
   for (const task of snapshot.tasks) {
     byId.set(task.id, task);
+    if (task.deletedAt != null) {
+      trashKeys.push({ task, deleted: utcInstantNanoseconds(task.deletedAt) });
+      continue;
+    }
+    visibleTasks.push(task);
     (task.completed ? completed : active).push(task);
     if (task.dueDate && !task.completed) deadlineCount++;
   }
@@ -33,6 +42,8 @@ export function indexSnapshot(snapshot: Snapshot, date = localDate()) {
   const todayIds = new Set<string>();
   const latest = new Map<string, string>();
   for (const plan of snapshot.plans) {
+    const task = byId.get(plan.taskId);
+    if (!task || task.deletedAt != null) continue;
     if (plan.date === date) { todayPlans.push(plan); todayIds.add(plan.taskId); }
     if (!latest.has(plan.taskId) || latest.get(plan.taskId)! < plan.date) latest.set(plan.taskId, plan.date);
   }
@@ -40,7 +51,8 @@ export function indexSnapshot(snapshot: Snapshot, date = localDate()) {
     .map(plan => byId.get(plan.taskId)).filter((task): task is Task => !!task);
   const earlier = active.filter(task => latest.has(task.id) && latest.get(task.id)! < date)
     .sort((a, b) => latest.get(b.id)!.localeCompare(latest.get(a.id)!) || a.id.localeCompare(b.id));
-  return { byId, active, completed, today, todayIds, activeToday: today.filter(task => !task.completed), completedToday: today.filter(task => task.completed), earlier, deadlineCount };
+  const trashed = trashKeys.sort((a, b) => (a.deleted > b.deleted ? -1 : a.deleted < b.deleted ? 1 : 0) || a.task.id.localeCompare(b.task.id)).map(item => item.task);
+  return { byId, visibleTasks, trashed, active, completed, today, todayIds, activeToday: today.filter(task => !task.completed), completedToday: today.filter(task => task.completed), earlier, deadlineCount };
 }
 export function selectToday(snapshot: Snapshot): Task[] {
   return indexSnapshot(snapshot).today;
@@ -49,7 +61,7 @@ export function selectDeadlines(snapshot: Snapshot, localZone = currentTimeZone(
   const ranks = { high: 0, normal: 1, low: 2 };
   // Temporal/IANA conversion belongs outside the O(n log n) comparator. The
   // original task objects are retained, including imported nanosecond timestamps.
-  return snapshot.tasks.filter(task => !!task.dueDate && !task.completed)
+  return snapshot.tasks.filter(task => task.deletedAt == null && !!task.dueDate && !task.completed)
     .map(task => ({ task, deadline: effectiveDeadline(task, localZone), created: utcInstantNanoseconds(task.createdAt) }))
     .sort((a, b) => {
       if (snapshot.settings.ddlSort === 'priority' && a.task.priority !== b.task.priority) return ranks[a.task.priority] - ranks[b.task.priority];
@@ -57,10 +69,10 @@ export function selectDeadlines(snapshot: Snapshot, localZone = currentTimeZone(
     }).map(item => item.task);
 }
 export function isOverdue(task: Task, now = Date.now()): boolean {
-  return !task.completed && effectiveDeadline(task) <= now;
+  return task.deletedAt == null && !task.completed && effectiveDeadline(task) <= now;
 }
 export function dueTone(task: Task): 'overdue' | 'today' | 'future' | 'none' {
-  if (!task.dueDate) return 'none';
+  if (task.deletedAt != null || !task.dueDate) return 'none';
   if (isOverdue(task)) return 'overdue';
   const display = deadlineDisplay(task);
   return display.date === display.today ? 'today' : 'future';
@@ -121,11 +133,12 @@ export function validateSnapshot(snapshot: Snapshot): void {
   validateSettings(snapshot.settings);
   const ids = new Set<string>();
   for (const task of snapshot.tasks) {
-    assertKnown(task, [...taskFields, 'dueAtUtc', 'id', 'completed', 'createdAt', 'completedAt', 'revision']);
+    assertKnown(task, [...taskFields, 'dueAtUtc', 'id', 'completed', 'createdAt', 'completedAt', 'deletedAt', 'revision']);
     validateTask(task);
     if (typeof task.id !== 'string' || !task.id.trim() || new TextEncoder().encode(task.id).length > 128 || ids.has(task.id)) throw new Error('任务 ID 无效或重复');
     if (!validRevision(task.revision) || task.revision > snapshot.revision) throw new Error('任务版本无效');
     if (!validUtcInstant(task.createdAt) || typeof task.completed !== 'boolean' || (task.completed ? !validUtcInstant(task.completedAt) : task.completedAt !== null)) throw new Error('任务完成状态或时间记录无效');
+    if (task.deletedAt != null && !validUtcInstant(task.deletedAt)) throw new Error('任务删除时间记录无效');
     ids.add(task.id);
   }
   const plans = new Set<string>();
@@ -145,8 +158,10 @@ export function selectEarlierIncomplete(snapshot: Snapshot, today = localDate())
 }
 function appendPlan(snapshot: Snapshot, taskId: string, date: string) {
   // Match Rust's stable same-day compaction: preserve visible order, including
-  // ties, then append without max+1 overflow. Other dates remain untouched.
-  const existing = snapshot.plans.filter(plan => plan.date === date).sort((a, b) => a.sortOrder - b.sortOrder);
+  // ties, then append without max+1 overflow. Other dates and the preserved
+  // plans of trashed tasks remain untouched until those tasks are restored.
+  const visible = new Set(snapshot.tasks.filter(task => task.deletedAt == null).map(task => task.id));
+  const existing = snapshot.plans.filter(plan => plan.date === date && visible.has(plan.taskId)).sort((a, b) => a.sortOrder - b.sortOrder);
   existing.forEach((plan, index) => { plan.sortOrder = index; });
   snapshot.plans.push({ taskId, date, sortOrder: existing.length });
 }
@@ -185,13 +200,22 @@ export function applyPreviewAction(current: Snapshot, action: Action, expectedRe
     const task = next.tasks.find(item => item.id === action.id);
     if (!task) throw new Error('这个任务已不存在，请刷新后重试');
     if (action.type === 'planTask') {
+      if (task.deletedAt != null) throw new Error('任务已移入回收站，请先恢复');
       if (!validDate(action.date) || typeof action.planned !== 'boolean') throw new Error('计划日期或选项无效');
       const exists = next.plans.some(plan => plan.taskId === task.id && plan.date === action.date);
       if (action.planned && !exists) appendPlan(next, task.id, action.date);
       if (!action.planned) next.plans = next.plans.filter(plan => !(plan.taskId === task.id && plan.date === action.date));
     } else {
       if (!validRevision(action.expectedRevision) || task.revision !== action.expectedRevision) throw new Error('任务已更新，请检查最新内容后重试');
-      if (action.type === 'updateTask') {
+      if (action.type === 'trashTask' || action.type === 'restoreTask') {
+        const deleted = action.type === 'trashTask';
+        if (deleted !== (task.deletedAt != null)) {
+          task.deletedAt = deleted ? new Date().toISOString() : null;
+          task.revision += 1;
+        }
+      } else if (task.deletedAt != null) {
+        throw new Error('任务已移入回收站，请先恢复');
+      } else if (action.type === 'updateTask') {
         assertKnown(action.changes, taskFields);
         const previous = { ...task };
         Object.assign(task, action.changes);

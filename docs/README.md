@@ -14,3 +14,5 @@ PRD 是产品行为的依据；ADR 是技术取舍的依据；BACKLOG 是事项�
 术语：Task = 一个待办事项；DailyPlanEntry = 某日要做它的安排；DDL = 截止日期或时刻；POC = 先验证技术能否成立的小实验；MVP = 第一版能完整解决核心问题的最小产品；ADR = 记录重要决定及理由的文档。
 
 本轮稳定化记录：[总复查](research/RELEASE_HARDENING.md)、[存储](research/STORAGE_HARDENING.md)、[时间](research/TIME_SEMANTICS.md)、[原生安全](research/NATIVE_SECURITY_REVIEW.md)、[安全恢复说明](engineering/DATA_RECOVERY.md)、[ADR-0004](decisions/0004-data-safety-and-fixed-deadlines.md)。
+
+功能与体验接续：[前端性能](research/FRONTEND_PERFORMANCE.md)、[今日整理](research/TODAY_ORDERING.md)、[任务生命周期](research/TASK_LIFECYCLE.md)、[生命周期取舍](decisions/0005-task-lifecycle-and-backup-schema.md)、[窗口偏好计划](research/WINDOW_PREFERENCES.md)。
