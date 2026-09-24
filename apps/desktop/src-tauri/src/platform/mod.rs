@@ -244,8 +244,8 @@ fn apply_rect_live(window: &WebviewWindow, rect: PhysicalRect) -> Result<(), Str
         .map_err(error)
 }
 fn same_window_layout(previous: &Settings, next: &Settings) -> bool {
-    // Appearance and task ordering update inside the existing WebView. They
-    // must not hide/re-show a native window or interrupt its current focus.
+    // Appearance, task ordering, and the internal section split update inside
+    // the existing WebView; they must not hide/re-show or refocus the window.
     previous.edge == next.edge
         && previous.panel_width == next.panel_width
         && previous.panel_height == next.panel_height
@@ -1184,6 +1184,11 @@ mod tests {
     #[test]
     fn appearance_changes_do_not_trigger_native_geometry_or_visibility_reset() {
         let initial = Settings::default();
+        for split in [30, 70] {
+            let mut internal_layout = initial.clone();
+            internal_layout.panel_split = split;
+            assert!(same_window_layout(&initial, &internal_layout));
+        }
         let mut next = initial.clone();
         next.ui_style = "editorial".into();
         next.theme = "dark".into();

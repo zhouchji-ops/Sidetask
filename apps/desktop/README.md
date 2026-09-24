@@ -6,9 +6,9 @@ Tauri 2 + React / TypeScript + Rust + SQLite。任务、今日计划和设置共
 
 移入回收站保留任务 ID、DDL、完成状态和全部历史/未来计划；恢复后仍按原完成状态与计划展示。普通搜索与回收站搜索分开，删除/恢复及查看任务都遵守编辑草稿保护。首轮不提供永久删除、自动清空或批量删除。
 
-最后补丁后的本地检查：95/95 TypeScript 领域、88/88 Rust、60/60 Playwright UI（约1分钟，无重试）通过，含慢保存导航门禁和恢复失败键盘焦点回归。合成 10k 回收站首屏挂载 17 行、639 个 DOM 节点，首尾搜索和恢复路径有回归；这是浏览器桌面分支结果，不是原生 WebView 性能承诺。
+当前本地99/99 TypeScript、93/93 Rust、67/67 Playwright通过；最后包证据见STATUS，含回收站、分区保存及键盘焦点回归。合成 10k 回收站首屏挂载 17 行、639 个 DOM 节点，首尾搜索和恢复路径有回归；这是浏览器桌面分支结果，不是原生 WebView 性能承诺。
 
-最后补丁的 Mac arm64 App 已构建并通过本地 ad-hoc 验签（`index-GFNXw43Q.js` / `index-Cp14iSy_.css`）。因设备锁屏尚未启动本阶段原生验收；包路径和归档摘要见 STATUS，不标记 B31 或双平台验收完成。
+最后补丁的 Mac arm64 App 已构建并通过本地 ad-hoc 验签（`index-B-9KMQ89.js` / `index-BN07M5pO.css`）。因设备锁屏尚未启动本阶段原生验收；包路径和归档摘要见 STATUS，不标记 B31 或双平台验收完成。
 
 ## 开发
 
@@ -59,6 +59,6 @@ npm audit
 cargo audit --file src-tauri/Cargo.lock # 需要cargo-audit；本轮使用0.22.2
 ```
 
-CI 使用 Node24.14.1/Rust1.98.1，Actions 固定 commit。b781899 的 Windows Clippy 因恢复目录构造器 `unused_mut` 失败；fc182cf 按 Unix/非 Unix 拆分声明修复，[CI36042694723](https://github.com/changjin-cpu/SideTask/actions/runs/36042694723)正在运行，该 Windows 步骤已通过。此 CI 修复与本地回收站改动分开，后者仍需自己的双平台验证。旧 artifact 配额问题仍未解决，不能把构建通过写成安装包已可下载。
+CI 使用 Node24.14.1/Rust1.98.1，Actions 固定 commit。b781899 的 Windows Clippy 因恢复目录构造器 `unused_mut` 失败；fc182cf 按 Unix/非 Unix 拆分声明修复，[CI36042694723](https://github.com/changjin-cpu/SideTask/actions/runs/36042694723)已完成Mac74TS/74Rust/47UI、Windows74TS/72Rust/47UI及App/NSIS构建；最终只有artifact配额上传失败。该CI与本地回收站/分区比例改动分开，后者仍需自己的双平台验证。旧 artifact 配额问题仍未解决，不能把构建通过写成安装包已可下载。
 
-隔离原生验收使用临时 Tauri 配置覆盖 productName 和 identifier，不向正式个人数据库注入合成数据。后续窗口位置、分区比例记忆和首次说明尚未实现，执行方案见[窗口偏好计划](../../docs/research/WINDOW_PREFERENCES.md)。
+隔离原生验收使用临时 Tauri 配置覆盖 productName 和 identifier，不向正式个人数据库注入合成数据。小窗分区比例已可保存，后续控制台窗口位置和首次说明尚未实现，执行方案见[窗口偏好计划](../../docs/research/WINDOW_PREFERENCES.md)。

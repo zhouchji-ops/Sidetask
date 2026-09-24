@@ -61,7 +61,7 @@ fn authorize_mutation(label: &str, action: &Action) -> Result<(), String> {
                 !object.is_empty()
                     && object
                         .keys()
-                        .all(|key| ["pinned", "ddlSort"].contains(&key.as_str()))
+                        .all(|key| ["pinned", "ddlSort", "panelSplit"].contains(&key.as_str()))
             }) =>
         {
             Ok(())
@@ -339,6 +339,98 @@ mod security_tests {
             for label in ["edge-panel", "edge-handle", "unknown"] {
                 assert!(authorize_mutation(label, &action).is_err());
             }
+        }
+    }
+
+    #[test]
+    fn legacy_split_default_is_read_only_and_explicit_split_survives_sqlite_reopen() {
+        use crate::infrastructure::Repository;
+
+        let directory = std::env::temp_dir().join(format!(
+            "sidetask-panel-split-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("sidetask.sqlite3");
+        let mut initial = Snapshot::demo("2026-09-24");
+        initial.tasks[0].deleted_at = Some("2026-09-24T00:00:00Z".into());
+        let mut repository = SqliteRepository::open(&path).unwrap();
+        repository.save(&initial).unwrap();
+        drop(repository);
+
+        let mut legacy = serde_json::to_value(&initial).unwrap();
+        legacy["settings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("panelSplit");
+        let legacy_json = serde_json::to_string(&legacy).unwrap();
+        {
+            let connection = rusqlite::Connection::open(&path).unwrap();
+            connection
+                .execute(
+                    "UPDATE app_state SET value=?1 WHERE key='snapshot'",
+                    rusqlite::params![legacy_json],
+                )
+                .unwrap();
+        }
+        let mut service =
+            TaskService::new(Box::new(SqliteRepository::open(&path).unwrap())).unwrap();
+        assert_eq!(service.snapshot.settings.panel_split, 54);
+        assert_eq!(
+            serde_json::to_value(&service.snapshot).unwrap(),
+            serde_json::to_value(&initial).unwrap()
+        );
+        {
+            let connection = rusqlite::Connection::open(&path).unwrap();
+            let stored: String = connection
+                .query_row(
+                    "SELECT value FROM app_state WHERE key='snapshot'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                stored, legacy_json,
+                "loading defaults must not rewrite the old snapshot"
+            );
+        }
+
+        service
+            .mutate(
+                Action::UpdateSettings {
+                    changes: serde_json::json!({"panelSplit": 67}),
+                },
+                initial.revision,
+            )
+            .unwrap();
+        drop(service);
+        let reopened = TaskService::new(Box::new(SqliteRepository::open(&path).unwrap())).unwrap();
+        let mut expected = serde_json::to_value(&initial).unwrap();
+        expected["settings"]["panelSplit"] = serde_json::json!(67);
+        expected["revision"] = serde_json::json!(initial.revision + 1);
+        assert_eq!(serde_json::to_value(&reopened.snapshot).unwrap(), expected);
+        drop(reopened);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn edge_panel_can_save_split_without_access_to_other_window_settings() {
+        for changes in [
+            serde_json::json!({"panelSplit": 65}),
+            serde_json::json!({"panelSplit": 30, "pinned": true, "ddlSort": "priority"}),
+        ] {
+            let action = Action::UpdateSettings { changes };
+            assert!(authorize_mutation("edge-panel", &action).is_ok());
+            assert!(authorize_mutation("console", &action).is_ok());
+            assert!(authorize_mutation("edge-handle", &action).is_err());
+            assert!(authorize_mutation("unknown", &action).is_err());
+        }
+        for changes in [
+            serde_json::json!({"panelSplit": 65, "panelWidth": 400}),
+            serde_json::json!({"panelSplit": 65, "edgeEnabled": false}),
+            serde_json::json!({"panelSplit": 65, "usageGuideSeen": true}),
+        ] {
+            assert!(authorize_mutation("edge-panel", &Action::UpdateSettings { changes }).is_err());
         }
     }
 

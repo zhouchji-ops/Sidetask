@@ -24,6 +24,8 @@ export interface Settings {
   edge: 'left' | 'right';
   panelWidth: number;
   panelHeight: number;
+  /** Percentage of the edge panel's content area reserved for today's tasks. */
+  panelSplit: number;
   revealDelay: number;
   hideDelay: number;
   pinned: boolean;

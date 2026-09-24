@@ -173,3 +173,7 @@ SQLite schema1/2→3 先对完整数据库做保留 WAL 的副本预检，再创
 便携 JSON 的 schemaVersion 与 SQLite 版本独立：新导出 v2，导入接受 v1/v2，均包含完整 tasks/plans；v1 缺失或 null 的 deletedAt 作为未删除，v1 携带非空删除状态则拒绝。预览提供 taskCount、trashedTaskCount、planCount 和 exportedAt。整份恢复先备份当前库，再替换任务及回收站、保留设备设置，并将全局及所有导入任务 revision 提高到已见值以上；当前没有 dataset_epoch 字段。旧备份按备份时的完整集合恢复，不与现有回收站合并。回收站仍计入现有容量限制，元数据增长超限时保持原已提交状态并提示失败。
 
 本节是本阶段代码与产品必须遵守的契约，不将自动化测试、文档同步或 Mac 证据写成双平台验收完成。来源与分阶段检查见 [TASK_LIFECYCLE](../research/TASK_LIFECYCLE.md)，最终证据统一见 [STATUS](../delivery/STATUS.md)。
+
+## 分区偏好的当前扩展
+
+Settings新增panelSplit（Rust panel_split:u8），缺省54，只接受30–70整数；属于本机偏好，便携任务备份不携带，整份任务恢复保留本机值。比例修改沿用统一设置事务，不改Task/Plan字段；同一设置冲突由版本及前端的初始比例核对处理。旧快照缺字段只读补默认，不重编码原文；正常提交后保存。当前schema3保持不变，与uiStyle一样只支持新程序读旧库；旧schema3程序会因未知设置字段拒绝读取，不支持降级继续编辑当前库。后续控制台placement扩展需统一评估schema4备份迁移，见[窗口偏好计划](../research/WINDOW_PREFERENCES.md)。

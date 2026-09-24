@@ -372,3 +372,8 @@ h1 { font-size: 27px; line-height: 1.3; font-weight: 600; letter-spacing: -.5px;
 .trash-task-action:hover { color: var(--danger); }
 .trash-detail-notice { margin: 0 20px 16px; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--subtle); }
 .trash-detail-notice p { color: var(--secondary); font-size: 12px; line-height: 1.7; margin: 0 0 10px; overflow-wrap: anywhere; }
+
+.edge-split-error { flex: none; margin: 0 12px; padding: 8px 10px; color: var(--danger); background: var(--subtle); border: 1px solid var(--line); border-radius: 6px; font-size: 11px; line-height: 1.5; }
+.edge-split-error > div { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 5px; }
+.edge-split-error button { padding: 0; color: var(--ink); font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
+.edge-resize-divider[aria-disabled="true"] { cursor: default; }

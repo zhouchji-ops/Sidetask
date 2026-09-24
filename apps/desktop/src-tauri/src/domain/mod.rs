@@ -39,6 +39,8 @@ pub struct Settings {
     pub edge: String,
     pub panel_width: f64,
     pub panel_height: f64,
+    #[serde(default = "default_panel_split")]
+    pub panel_split: u8,
     pub reveal_delay: u64,
     pub hide_delay: u64,
     pub pinned: bool,
@@ -51,12 +53,16 @@ pub struct Settings {
 fn default_ui_style() -> String {
     "paper".into()
 }
+fn default_panel_split() -> u8 {
+    54
+}
 impl Default for Settings {
     fn default() -> Self {
         Self {
             edge: "right".into(),
             panel_width: 368.,
             panel_height: 610.,
+            panel_split: default_panel_split(),
             reveal_delay: 180,
             hide_delay: 450,
             pinned: false,
@@ -131,6 +137,9 @@ fn require_active_task(task: &Task) -> Result<(), String> {
     Ok(())
 }
 fn validate_settings(settings: &Settings) -> Result<(), String> {
+    if !(30..=70).contains(&settings.panel_split) {
+        return Err("小窗分区比例需为 30–70 的整数。".into());
+    }
     if !["left", "right"].contains(&settings.edge.as_str())
         || !["light", "dark", "system"].contains(&settings.theme.as_str())
         || !["paper", "studio", "editorial", "mono"].contains(&settings.ui_style.as_str())
@@ -507,6 +516,7 @@ impl Snapshot {
                         "edge",
                         "panelWidth",
                         "panelHeight",
+                        "panelSplit",
                         "revealDelay",
                         "hideDelay",
                         "pinned",
@@ -1344,6 +1354,75 @@ mod tests {
                     1
                 )
                 .is_err());
+        }
+    }
+    #[test]
+    fn missing_panel_split_defaults_without_changing_legacy_tasks_or_plans() {
+        let mut legacy = serde_json::to_value(Snapshot::demo("2026-09-24")).unwrap();
+        legacy["settings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("panelSplit");
+        let snapshot: Snapshot = serde_json::from_value(legacy.clone()).unwrap();
+        snapshot.validate().unwrap();
+        assert_eq!(snapshot.settings.panel_split, 54);
+        let mut expected = legacy;
+        expected["settings"]["panelSplit"] = serde_json::json!(54);
+        assert_eq!(serde_json::to_value(&snapshot).unwrap(), expected);
+    }
+    #[test]
+    fn panel_split_updates_only_its_setting_and_uses_snapshot_concurrency() {
+        let mut snapshot = Snapshot::demo("2026-09-24");
+        for split in [30, 70, 54] {
+            let previous = serde_json::to_value(&snapshot).unwrap();
+            let changes = serde_json::json!({"panelSplit": split});
+            let next = snapshot
+                .apply(
+                    Action::UpdateSettings {
+                        changes: changes.clone(),
+                    },
+                    snapshot.revision,
+                )
+                .unwrap();
+            let mut expected = previous;
+            expected["settings"]["panelSplit"] = serde_json::json!(split);
+            expected["revision"] = serde_json::json!(snapshot.revision + 1);
+            assert_eq!(serde_json::to_value(&next).unwrap(), expected);
+            assert!(next
+                .apply(Action::UpdateSettings { changes }, snapshot.revision)
+                .is_err());
+            snapshot = next;
+        }
+    }
+    #[test]
+    fn invalid_panel_split_is_rejected_in_updates_and_persisted_snapshots() {
+        let snapshot = Snapshot::demo("2026-09-24");
+        let before = serde_json::to_value(&snapshot).unwrap();
+        for split in [
+            serde_json::json!(-1),
+            serde_json::json!(29),
+            serde_json::json!(71),
+            serde_json::json!(256),
+            serde_json::json!(54.5),
+            serde_json::json!("54"),
+            serde_json::json!(true),
+            serde_json::Value::Null,
+        ] {
+            assert!(snapshot
+                .apply(
+                    Action::UpdateSettings {
+                        changes: serde_json::json!({"panelSplit": split.clone()})
+                    },
+                    snapshot.revision,
+                )
+                .is_err());
+            assert_eq!(serde_json::to_value(&snapshot).unwrap(), before);
+            let mut persisted = before.clone();
+            persisted["settings"]["panelSplit"] = split;
+            match serde_json::from_value::<Snapshot>(persisted) {
+                Ok(invalid) => assert!(invalid.validate().is_err()),
+                Err(_) => continue,
+            }
         }
     }
     #[test]

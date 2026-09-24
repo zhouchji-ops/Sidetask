@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applyPreviewAction,
+  createEmptySnapshot,
   createSeed,
   dateOffset,
   effectiveDeadline,
@@ -363,6 +364,72 @@ describe('appearance preferences preserve task data', () => {
     expect(normalized).toEqual({ ...before, settings: { ...before.settings, uiStyle: 'paper' } });
     expect(legacy).toEqual(before);
     expect(normalizePreviewSnapshot(normalized)).toEqual(normalized);
+  });
+});
+
+describe('edge panel split preference', () => {
+  it('uses the existing 54 percent layout for both new empty data and preview examples', () => {
+    expect(createSeed(today).settings.panelSplit).toBe(54);
+    expect(createEmptySnapshot().settings.panelSplit).toBe(54);
+  });
+
+  it('saves boundary values without changing tasks, trash, DDL, plans or other settings', () => {
+    const initial = createSeed(today);
+    initial.tasks[0].deletedAt = '2026-09-24T00:00:00.000000001Z';
+    initial.tasks[3].completedAt = '2026-09-23T03:04:05.000000123Z';
+    initial.tasks[4] = task('demo-lab', { dueDate: '2026-11-01', dueTime: '01:30', dueTimezone: 'America/New_York', dueAtUtc: '2026-11-01T06:30:00.000000123Z' });
+    initial.plans.push({ taskId: 'demo-design', date: '2026-09-23', sortOrder: 99 }, { taskId: 'demo-lab', date: '2026-09-26', sortOrder: 7 });
+    initial.settings = { ...initial.settings, edge: 'left', panelWidth: 420, panelHeight: 700, theme: 'dark', uiStyle: 'editorial', ddlSort: 'priority', pinned: true };
+    const before = structuredClone(initial);
+    for (const panelSplit of [30, 54, 70]) {
+      const changed = apply(initial, { type: 'updateSettings', changes: { panelSplit } });
+      expect(changed).toEqual({ ...before, revision: before.revision + 1, settings: { ...before.settings, panelSplit } });
+      expect(normalizePreviewSnapshot(JSON.parse(JSON.stringify(changed)))).toEqual(changed);
+      const rethemed = apply(changed, { type: 'updateSettings', changes: { theme: 'light' } });
+      expect(rethemed.settings).toEqual({ ...changed.settings, theme: 'light' });
+    }
+    expect(initial).toEqual(before);
+  });
+
+  it('defaults missing legacy split and style fields without rewriting existing content', () => {
+    for (const missingStyle of [false, true]) {
+      const initial = createSeed(today);
+      initial.revision = 41;
+      initial.tasks[0].title = '旧版本任务与布局继续保留';
+      initial.tasks[0].deletedAt = '2026-09-24T00:00:00Z';
+      initial.settings.theme = 'dark';
+      initial.settings.uiStyle = 'mono';
+      const legacy = structuredClone(initial) as Omit<Snapshot, 'settings'> & { settings: Record<string, unknown> };
+      delete legacy.settings.panelSplit;
+      if (missingStyle) delete legacy.settings.uiStyle;
+      const before = structuredClone(legacy);
+      const normalized = normalizePreviewSnapshot(legacy);
+      expect(normalized).toEqual({ ...before, settings: { ...before.settings, panelSplit: 54, uiStyle: missingStyle ? 'paper' : 'mono' } });
+      const saved = apply(normalized, { type: 'updateSettings', changes: { panelSplit: 65 } });
+      expect(saved.tasks).toEqual(initial.tasks);
+      expect(saved.plans).toEqual(initial.plans);
+      expect(saved.settings).toEqual({ ...normalized.settings, panelSplit: 65 });
+      expect(legacy).toEqual(before);
+      expect(normalizePreviewSnapshot(normalized)).toEqual(normalized);
+    }
+  });
+
+  it('rejects fractional, empty, nonnumeric and out-of-range values on read and update atomically', () => {
+    const initial = createSeed(today);
+    const before = structuredClone(initial);
+    for (const panelSplit of [29, 71, 54.5, null, '', '54', false, NaN, Infinity, -Infinity, {}, []]) {
+      const action = { type: 'updateSettings', changes: { panelSplit, theme: 'dark' } } as unknown as Action;
+      expect(() => apply(initial, action)).toThrow('分区比例');
+      expect(initial).toEqual(before);
+      const invalid = structuredClone(initial);
+      Object.assign(invalid.settings, { panelSplit });
+      const invalidBefore = structuredClone(invalid);
+      expect(() => normalizePreviewSnapshot(invalid)).toThrow('分区比例');
+      expect(invalid).toEqual(invalidBefore);
+    }
+    const clear = { type: 'updateSettings', changes: { panelSplit: undefined } } as unknown as Action;
+    expect(() => apply(initial, clear)).toThrow('分区比例');
+    expect(initial).toEqual(before);
   });
 });
 
