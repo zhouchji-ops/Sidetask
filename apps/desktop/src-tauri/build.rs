@@ -1,0 +1,17 @@
+fn main() {
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "get_snapshot",
+            "mutate",
+            "window_action",
+            "get_monitors",
+            "get_window_status",
+            "get_pending_exit",
+            "resolve_exit",
+            "export_backup",
+            "preview_restore",
+            "restore_backup",
+        ]),
+    ))
+    .expect("failed to build SideTask command permissions")
+}

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "console",
+  "description": "Only the management console may inspect displays, export/restore data and resolve explicit application exit requests.",
+  "windows": ["console"],
+  "permissions": ["allow-get-monitors", "allow-get-window-status", "allow-get-pending-exit", "allow-resolve-exit", "allow-export-backup", "allow-preview-restore", "allow-restore-backup"]
+}

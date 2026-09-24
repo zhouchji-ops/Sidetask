@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "tasks",
+  "description": "Only task surfaces may request task mutations; Rust further limits the edge panel to its supported intents.",
+  "windows": ["console", "edge-panel"],
+  "permissions": ["allow-mutate"]
+}
