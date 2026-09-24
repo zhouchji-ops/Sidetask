@@ -137,7 +137,10 @@ fn present(path: &Path) -> Result<bool, String> {
     }
 }
 fn private_directory(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
     let mut builder = fs::DirBuilder::new();
+    #[cfg(not(unix))]
+    let builder = fs::DirBuilder::new();
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
