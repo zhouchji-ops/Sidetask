@@ -74,7 +74,7 @@ Todobar 的窗口隐藏、悬停和数据模型与需求有明显差距，因此
 
 本轮 B43 已将 Windows `f099e3ad` 与 Mac `2798841` 合并为产品 `6d32d6c` 并推送新仓库 `mac`：统一小窗新增、schema5 和退出协议，纳入 Windows 首显与 WebView2 清理修复。交付检查头为 `a1b30d63dae6fe5d8aba66b040d1b071afcdec4b`，仅修正恢复测试时序，产品源码与工作流未变。本地全量检查、Mac 内部包及限定隔离原生冒烟已通过；最终 CI、包摘要与剩余平台验收见 [STATUS](docs/delivery/STATUS.md)，B43 仍在复验阶段。
 
-Windows 开发机已有 0.1.0 x64 内部试用安装器，包含小窗「＋」与默认单击/可选悬停模式，源码、位置及SHA见 [STATUS](docs/delivery/STATUS.md)，真实步骤见[本次记录](tests/manual/2026-09-25-windows-panel-interactions.md)。包未签名、未公开发布。前一轮恢复/安装升级证据属于其对应源码；多屏/混合DPI、完整外部焦点/手势和3–7天连续使用仍待验收。该历史产品的 GitHub Actions 因旧仓库账号限制未执行；新仓库 CI 单独记录，不把本地通过写成云端或整合版原生通过。
+Windows 开发机最新 0.1.0 x64 内部安装器为 `SideTask_0.1.0_x64-outside-click-setup.exe`，源码 `57347ae`，含真实外点与隐藏草稿修复；位置及SHA见 [STATUS](docs/delivery/STATUS.md)，步骤见[本轮记录](tests/manual/2026-09-25-windows-outside-click.md)。包未签名、未公开发布。当前仅有单屏硬件，多屏/混合DPI、完整手势和3–7天连续使用仍待验收；新仓库 CI 分别记录，不把本地通过写成云端或完整原生矩阵通过。
 
 文档索引见 [docs/README.md](docs/README.md)。调研记录日期：2026-09-24。
 
