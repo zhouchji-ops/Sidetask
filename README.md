@@ -62,7 +62,7 @@ Windows 最新修复及内部安装包记录见[本轮收尾](tests/manual/2026-
 
 采用 Tauri 2、React / TypeScript、Rust 和 SQLite。界面共用任务服务，平台窗口适配集中在 Rust 平台层；架构、验证和数据恢复资料见下方文档。
 
-Windows 收尾已整合至 `mac`，这是当前统一接续入口；Mac 后续仍推 `mac`，Windows 在自己的分支开发。接续前先核对[项目状态](docs/delivery/STATUS.md)与远端增量。需要 Node.js 24、Rust 与对应系统的 Tauri 构建环境，详情见[桌面客户端开发说明](apps/desktop/README.md)。
+Windows 收尾已整合至 `mac`，已合并的旧 Windows 分支已清理，当前仓库只保留默认分支 `mac`。Mac 后续仍推 `mac`，Windows 从明确的整合 SHA 创建新的任务分支，步骤见[分支清理与接续](docs/delivery/BRANCH_CLEANUP.md)。接续前先核对[项目状态](docs/delivery/STATUS.md)与远端增量。需要 Node.js 24、Rust 与对应系统的 Tauri 构建环境，详情见[桌面客户端开发说明](apps/desktop/README.md)。
 
 ```sh
 git clone --branch mac https://github.com/zhouchji-ops/Sidetask.git

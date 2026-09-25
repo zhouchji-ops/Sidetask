@@ -4,6 +4,8 @@
 
 ### 2026-09-26
 
+- 核对 Windows 分支及本地旧 `main` 均已完整合入 `mac`，清理冗余分支并更新 Windows 下一阶段接续方式；保留全部提交历史及旧仓库，详见[分支清理](docs/delivery/BRANCH_CLEANUP.md)。
+
 - 新增小红书图文、配图文字和短视频口播稿，附录屏安排与内部试用入口说明；按用户指定的 Humanizer 技能润色并核对功能事实，详见[宣传稿](docs/product/PROMO_COPY.md)。
 
 - 将 Windows 收尾成果整合回 `mac`，统一一期内部试用交付、两平台下载/校验、使用文档及下一阶段入口；保留完整原生和公开分发验收边界，详见[一期交付](docs/delivery/PHASE_1_CLOSEOUT.md)。
