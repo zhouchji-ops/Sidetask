@@ -10,6 +10,8 @@ mod macos_exit;
 pub mod startup_recovery;
 #[cfg(any(target_os = "windows", test))]
 mod windows_input;
+#[cfg(target_os = "windows")]
+mod windows_visibility;
 use crate::{
     domain::{Action, Settings},
     AppState,
@@ -458,7 +460,7 @@ fn show_verified_edge(
     let attempts = 2;
     for attempt in 0..attempts {
         let result = (|| {
-            window.show().map_err(error)?;
+            windows_visibility::show_current_frame_then_sync(window)?;
             // Windows can enforce minimum tracking sizes during ShowWindow even
             // after hidden geometry was confirmed. Never cache a widened handle as
             // applied. Queries run on the worker/async IPC path, not a main callback.
