@@ -34,6 +34,15 @@ npm run tauri -- dev # 原生开发（会启动 Vite，不要同时占用 1420�
 
 打包 Mac 应用：`npm run tauri -- build --bundles app`。Windows 在 Windows 构建环境运行 `npm run tauri -- build --bundles nsis`；当前机器已有本地NSIS，不依赖GitHub artifact下载。构建成功与安装/升级验收分别记录。
 
+Mac 本地内部包在没有 Developer ID 时，构建后补完整 App 的 ad-hoc 签名并严格校验；不能把 linker 对二进制的签名当作整个 bundle 已通过。以下在 `apps/desktop` 执行，只针对本机内部试用构建；已有 Developer ID 的发布流程不要被此命令替换。隔离构建需改成其实际 App 名称。
+
+```sh
+codesign --force --deep --sign - 'src-tauri/target/release/bundle/macos/SideTask.app'
+codesign --verify --deep --strict 'src-tauri/target/release/bundle/macos/SideTask.app'
+```
+
+归档使用 `ditto -c -k --sequesterRsrc --keepParent` 保留 App 元数据，并在解压副本上重复严格校验。本轮可取得的 arm64 包、SHA-256、源码版本和原位升级/坏库恢复记录见[Mac阶段验收](../../tests/manual/2026-09-25-mac-next-stage.md)。ad-hoc 不等于 Developer ID、公证或 Gatekeeper 分发验证。
+
 原生自动冒烟入口：`node scripts/windows-native-smoke.mjs --prepare`，会生成唯一隔离identifier及配置；再按[工具说明](scripts/windows-native-smoke.md)构建并驱动真实release EXE。命令不会自动安装驱动、启动构建或改写正式个人库，`--session-only`不等于完整闭环通过。资源采样在已启动的隔离App上执行：
 
 ```powershell
