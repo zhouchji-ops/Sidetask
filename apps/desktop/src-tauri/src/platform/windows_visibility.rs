@@ -4,10 +4,45 @@
 use std::{
     ffi::c_void,
     io::Write,
-    sync::{mpsc, Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
-use tauri::WebviewWindow;
+use tauri::{WebviewWindow, WindowEvent};
+
+// Native resize/move notifications may arrive after the show-time checks. The
+// callback cannot take the coordinator lock (it may be waiting on this thread).
+// Coalesce notifications, then let the worker verify the cached geometry once.
+static GEOMETRY_CHANGED: GeometryChanges = GeometryChanges(AtomicBool::new(false));
+
+struct GeometryChanges(AtomicBool);
+
+impl GeometryChanges {
+    fn observe(&self, event: &WindowEvent) {
+        if matches!(
+            event,
+            WindowEvent::Moved(_)
+                | WindowEvent::Resized(_)
+                | WindowEvent::ScaleFactorChanged { .. }
+        ) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+
+    fn take(&self) -> bool {
+        self.0.swap(false, Ordering::AcqRel)
+    }
+}
+
+pub fn observe_geometry(window: &WebviewWindow) {
+    window.on_window_event(|event| GEOMETRY_CHANGED.observe(event));
+}
+
+pub fn take_geometry_change() -> bool {
+    GEOMETRY_CHANGED.take()
+}
 
 const SHOW_TIMEOUT: Duration = Duration::from_secs(2);
 const EXPIRED_SHOW: &str = "小窗原生显示超时，已取消本次显示；请重试窗口设置。";
@@ -145,6 +180,26 @@ pub fn show_current_frame_then_sync(window: &WebviewWindow) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn geometry_events_coalesce_and_later_changes_are_not_lost() {
+        let changes = GeometryChanges(AtomicBool::new(false));
+        assert!(!changes.take());
+        changes.observe(&WindowEvent::Resized(tauri::PhysicalSize::new(202, 138)));
+        changes.observe(&WindowEvent::Moved(tauri::PhysicalPosition::new(2358, 624)));
+        assert!(changes.take());
+        assert!(!changes.take());
+        changes.observe(&WindowEvent::Resized(tauri::PhysicalSize::new(27, 138)));
+        assert!(changes.take());
+    }
+
+    #[test]
+    fn focus_events_do_not_trigger_geometry_checks() {
+        let changes = GeometryChanges(AtomicBool::new(false));
+        changes.observe(&WindowEvent::Focused(true));
+        changes.observe(&WindowEvent::Focused(false));
+        assert!(!changes.take());
+    }
 
     #[test]
     fn queued_callback_cannot_show_after_worker_cancels() {

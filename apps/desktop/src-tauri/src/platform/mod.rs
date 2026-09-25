@@ -803,6 +803,17 @@ fn apply_geometry_inner(
         .is_some_and(|previous| same_window_layout(previous, settings))
         || dock.signature != signature
         || dock.geometry.is_none();
+    #[cfg(target_os = "windows")]
+    let changed = changed
+        || (dock.drag.is_none()
+            && dock.resize.is_none()
+            && windows_visibility::take_geometry_change()
+            && if let Some(geometry) = dock.geometry {
+                edge_window_rect(&window(app, "edge-panel")?)? != geometry.panel
+                    || edge_window_rect(&window(app, "edge-handle")?)? != geometry.handle
+            } else {
+                false
+            });
     if !changed {
         dock.applied_settings = Some(settings.clone());
         return Ok(());
@@ -1088,7 +1099,11 @@ fn setup_auxiliary(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
         // widening the narrow handle after hidden frame confirmation.
         #[cfg(target_os = "windows")]
         let builder = builder.min_inner_size(1., 1.);
-        builder.build()?;
+        let auxiliary = builder.build()?;
+        #[cfg(target_os = "windows")]
+        windows_visibility::observe_geometry(&auxiliary);
+        #[cfg(not(target_os = "windows"))]
+        let _ = auxiliary;
     }
     use tauri::menu::{Menu, MenuItem};
     let open = MenuItem::with_id(app, "open", "打开侧笺", true, None::<&str>)?;

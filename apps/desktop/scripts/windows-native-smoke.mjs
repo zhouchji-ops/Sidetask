@@ -114,6 +114,10 @@ async function clickElement(id) {
 async function click(selector) { await clickElement(await find(selector)); }
 async function hover(selector) {
   const id = await find(selector);
+  // Row actions also support keyboard focus. WebView2's OS hover can be cleared
+  // by another desktop window between actions; keep a real focus-within target
+  // instead of depending on where the physical pointer happened to start.
+  await execute('arguments[0].focus({preventScroll: true});', { 'element-6066-11e4-a52e-4f735466cecf': id });
   await command('POST', '/actions', { actions: [{ type: 'pointer', id: 'smoke-mouse', parameters: { pointerType: 'mouse' }, actions: [{ type: 'pointerMove', duration: 120, origin: { 'element-6066-11e4-a52e-4f735466cecf': id }, x: 0, y: 0 }] }] });
 }
 const label = name => `button[aria-label=${JSON.stringify(name)}]`;
