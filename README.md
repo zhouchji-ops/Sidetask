@@ -77,7 +77,7 @@ npm run tauri -- dev
 
 | 资料 | 内容 |
 | --- | --- |
-| [卖点与宣传文案](docs/product/SELLING_POINTS.md) / [创新点说明](docs/product/INNOVATIONS.md) | 用户痛点、产品价值、可用文案与实现依据 |
+| [卖点](docs/product/SELLING_POINTS.md) / [社交平台宣传稿](docs/product/PROMO_COPY.md) / [创新点说明](docs/product/INNOVATIONS.md) | 用户痛点、小红书图文与视频口播、产品价值及实现依据 |
 | [产品需求](docs/product/PRD.md) / [交互设计](docs/product/UX.md) | 功能范围与交互契约 |
 | [技术架构](docs/engineering/ARCHITECTURE.md) / [数据模型](docs/engineering/DATA_MODEL.md) | 窗口、任务与持久化设计 |
 | [设计规范](design/DESIGN_SYSTEM.md) / [同类调研](docs/research/ALTERNATIVES.md) | 界面风格、参考与取舍 |
