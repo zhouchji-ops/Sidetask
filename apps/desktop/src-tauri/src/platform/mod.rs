@@ -8,6 +8,8 @@ mod geometry;
 #[cfg(target_os = "macos")]
 mod macos_exit;
 pub mod startup_recovery;
+#[cfg(any(target_os = "windows", test))]
+mod windows_input;
 use crate::{
     domain::{Action, Settings},
     AppState,
@@ -143,6 +145,26 @@ impl DockRuntime {
             || (self.console_focused && self.interaction_owners.contains("console"))
             || self.drag.is_some()
             || self.resize.is_some()
+    }
+
+    fn poll_interval(&self) -> Duration {
+        let millis = if self.drag.is_some() {
+            40
+        } else if self.resize.is_some() {
+            80
+        } else if self
+            .applied_settings
+            .as_ref()
+            .is_some_and(|settings| !settings.edge_enabled)
+            && self.window_error.is_none()
+        {
+            500
+        } else if self.visible {
+            80
+        } else {
+            160
+        };
+        Duration::from_millis(millis)
     }
 
     fn cancel_resize(&mut self, session: Option<&str>) -> bool {
@@ -414,6 +436,59 @@ fn confirm_edge_rect(
     }
     Err("屏幕或窗口尺寸尚未稳定，已暂停小窗；请稍后重试。".into())
 }
+
+#[cfg(not(target_os = "windows"))]
+fn show_verified_edge(
+    window: &WebviewWindow,
+    _rect: Rect,
+    _monitor: &MonitorGeometry,
+) -> Result<(), String> {
+    window.show().map_err(error)
+}
+
+#[cfg(target_os = "windows")]
+fn show_verified_edge(
+    window: &WebviewWindow,
+    rect: Rect,
+    monitor: &MonitorGeometry,
+) -> Result<(), String> {
+    // A first Win32 show can reapply the creation-time minimum-track frame.
+    // Keep recovery inside this operation: hide, reapply while hidden, and
+    // retry once before surfacing an error. Never repair a visible rectangle.
+    let attempts = 2;
+    for attempt in 0..attempts {
+        let result = (|| {
+            window.show().map_err(error)?;
+            // Windows can enforce minimum tracking sizes during ShowWindow even
+            // after hidden geometry was confirmed. Never cache a widened handle as
+            // applied. Queries run on the worker/async IPC path, not a main callback.
+            for sample in 0..2 {
+                let actual = edge_window_rect(window)?;
+                let scale = window.scale_factor().map_err(error)?;
+                if !rect_applied(actual, rect, monitor.work, scale, monitor.scale) {
+                    return Err("显示后系统改变了小窗边界，已暂停小窗；请重试窗口设置。".into());
+                }
+                if sample == 0 {
+                    std::thread::sleep(Duration::from_millis(8));
+                }
+            }
+            Ok(())
+        })();
+        if result.is_ok() {
+            return result;
+        }
+        let _ = window.hide();
+        if attempt + 1 == attempts {
+            return result;
+        }
+        // The visibility query also confirms the queued hide has completed.
+        if window.is_visible().map_err(error)? {
+            return result;
+        }
+        apply_rect(window, rect, monitor)?;
+    }
+    unreachable!("at least one native show attempt")
+}
 fn apply_rect(
     window: &WebviewWindow,
     rect: Rect,
@@ -501,6 +576,27 @@ fn apply_geometry_inner(
     dock: &mut DockRuntime,
     settings: &Settings,
 ) -> Result<(), String> {
+    if !settings.edge_enabled {
+        // Pausing the edge does not require a connected monitor. Hide once and
+        // skip all monitor/cursor/geometry work until it is enabled again.
+        if dock.visible
+            || dock.geometry.is_some()
+            || !dock
+                .applied_settings
+                .as_ref()
+                .is_some_and(|previous| !previous.edge_enabled)
+        {
+            window(app, "edge-panel")?.hide().map_err(error)?;
+            window(app, "edge-handle")?.hide().map_err(error)?;
+        }
+        dock.visible = false;
+        dock.geometry = None;
+        dock.signature.clear();
+        dock.entered = None;
+        dock.left = None;
+        dock.applied_settings = Some(settings.clone());
+        return Ok(());
+    }
     let monitor = choose_monitor(app, &dock.placement)?;
     let area = edge_monitor(&monitor)?;
     let signature = monitor_signature(&monitor, &area);
@@ -557,10 +653,12 @@ fn apply_geometry_inner(
     dock.signature = signature;
     if settings.edge_enabled {
         if dock.visible || settings.pinned {
-            panel.show().map_err(error)?;
+            if !live_resize {
+                show_verified_edge(&panel, geometry.panel, &area)?;
+            }
             dock.visible = true;
         } else {
-            handle.show().map_err(error)?;
+            show_verified_edge(&handle, geometry.handle, &area)?;
         }
     } else {
         panel.hide().map_err(error)?;
@@ -579,7 +677,16 @@ fn show_panel(
     }
     apply_geometry(app, dock, settings)?;
     window(app, "edge-handle")?.hide().map_err(error)?;
-    window(app, "edge-panel")?.show().map_err(error)?;
+    let result = (|| {
+        let monitor = choose_monitor(app, &dock.placement)?;
+        let area = edge_monitor(&monitor)?;
+        let rect = dock.geometry.ok_or("小窗尚未定位。")?.panel;
+        show_verified_edge(&window(app, "edge-panel")?, rect, &area)
+    })();
+    if let Err(message) = result {
+        invalidate_geometry(app, dock);
+        return Err(message);
+    }
     dock.visible = true;
     dock.entered = None;
     dock.left = None;
@@ -595,7 +702,16 @@ fn hide_panel(
 ) -> Result<(), String> {
     window(app, "edge-panel")?.hide().map_err(error)?;
     if settings.edge_enabled {
-        window(app, "edge-handle")?.show().map_err(error)?;
+        let result = (|| {
+            let monitor = choose_monitor(app, &dock.placement)?;
+            let area = edge_monitor(&monitor)?;
+            let rect = dock.geometry.ok_or("小窗尚未定位。")?.handle;
+            show_verified_edge(&window(app, "edge-handle")?, rect, &area)
+        })();
+        if let Err(message) = result {
+            invalidate_geometry(app, dock);
+            return Err(message);
+        }
     }
     dock.visible = false;
     dock.entered = None;
@@ -728,7 +844,7 @@ fn setup_console(app: &mut tauri::App, recovery: bool) -> Result<(), Box<dyn std
 
 fn setup_auxiliary(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     for (label, width, height) in [("edge-panel", 376., 620.), ("edge-handle", 18., 92.)] {
-        WebviewWindowBuilder::new(
+        let builder = WebviewWindowBuilder::new(
             app,
             label,
             WebviewUrl::App(format!("index.html?surface={label}").into()),
@@ -746,8 +862,12 @@ fn setup_auxiliary(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
         .focusable(false)
         .accept_first_mouse(true)
         .visible_on_all_workspaces(true)
-        .on_navigation(local_navigation)
-        .build()?;
+        .on_navigation(local_navigation);
+        // Without explicit constraints Win32 applies SM_CXMINTRACK on show,
+        // widening the narrow handle after hidden frame confirmation.
+        #[cfg(target_os = "windows")]
+        let builder = builder.min_inner_size(1., 1.);
+        builder.build()?;
     }
     use tauri::menu::{Menu, MenuItem};
     let open = MenuItem::with_id(app, "open", "打开侧笺", true, None::<&str>)?;
@@ -767,7 +887,7 @@ fn setup_auxiliary(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
             }
         }
     }
-    tauri::tray::TrayIconBuilder::with_id("sidetask")
+    let tray = tauri::tray::TrayIconBuilder::with_id("sidetask")
         .icon(tauri::image::Image::new_owned(pixels, 32, 32))
         .icon_as_template(true)
         .tooltip("侧笺 · SideTask")
@@ -792,21 +912,46 @@ fn setup_auxiliary(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
                     }
                 });
             }
-        })
-        .build(app)?;
+        });
+    #[cfg(target_os = "windows")]
+    let tray = {
+        // Template images are macOS-only. The bundled colored icon stays
+        // recognizable on both light and dark Windows taskbars.
+        let tray = if let Some(icon) = app.default_window_icon() {
+            tray.icon(icon.clone())
+        } else {
+            tray
+        };
+        tray.show_menu_on_left_click(false)
+            .on_tray_icon_event(|tray, event| {
+                if matches!(
+                    event,
+                    tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    }
+                ) {
+                    if let Err(message) = open_console(tray.app_handle(), Value::Null) {
+                        eprintln!("tray open console: {message}");
+                    }
+                }
+            })
+    };
+    tray.build(app)?;
     let app_handle = app.handle().clone();
     std::thread::Builder::new()
         .name("sidetask-edge".into())
         .spawn(move || {
             let mut last_error = String::new();
             loop {
-                let visible = app_handle
+                let interval = app_handle
                     .state::<AppState>()
                     .dock
                     .lock()
-                    .map(|d| d.visible)
-                    .unwrap_or(false);
-                std::thread::sleep(Duration::from_millis(if visible { 80 } else { 160 }));
+                    .map(|d| d.poll_interval())
+                    .unwrap_or(Duration::from_millis(160));
+                std::thread::sleep(interval);
                 if let Err(message) = tick(&app_handle) {
                     publish_window_status(&app_handle, Some(message.clone()));
                     if message != last_error {
@@ -893,7 +1038,7 @@ fn tick(app: &tauri::AppHandle) -> Result<(), String> {
     let settings = settings(app)?;
     if let Some(drag) = &mut dock.drag {
         drag.cancelled |= escape_down() || drag.settings != settings;
-        if drag.started.elapsed() > Duration::from_millis(160) && !left_button_down() {
+        if drag.started.elapsed() > Duration::from_millis(160) && !primary_button_down() {
             finish_drag(app, &mut dock)?;
         }
         return Ok(());
@@ -955,7 +1100,7 @@ fn tick(app: &tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
     if dock.visible {
-        if settings.pinned || over_panel || over_handle || left_button_down() {
+        if settings.pinned || over_panel || over_handle || primary_button_down() {
             dock.left = None;
         } else {
             let left = dock.left.get_or_insert_with(Instant::now);
@@ -1284,7 +1429,7 @@ pub fn window_action(
         }
         // Native dragging can cancel WebView pointer capture immediately. That
         // cancellation is not a release; only the actual system button state is.
-        "finishDrag" if left_button_down() => Ok(()),
+        "finishDrag" if primary_button_down() => Ok(()),
         "finishDrag" => finish_drag(app, &mut dock),
         "cancelDrag" => {
             if let Some(drag) = dock.drag.as_mut() {
@@ -1293,7 +1438,7 @@ pub fn window_action(
                 }
                 drag.cancelled = true;
             }
-            if left_button_down() {
+            if primary_button_down() {
                 Ok(())
             } else {
                 finish_drag(app, &mut dock)
@@ -1324,7 +1469,7 @@ pub fn get_monitors(app: &tauri::AppHandle) -> Result<Value, String> {
     Ok(Value::Array(panel.available_monitors().map_err(error)?.iter().map(|monitor| json!({"name":monitor.name().cloned().unwrap_or_else(|| "显示器".into()),"width":monitor.size().width as f64 / monitor.scale_factor(),"height":monitor.size().height as f64 / monitor.scale_factor(),"scaleFactor":monitor.scale_factor(),"current":current.as_ref().map(|m|m.position()==monitor.position()).unwrap_or(false)})).collect()))
 }
 #[cfg(target_os = "macos")]
-fn left_button_down() -> bool {
+fn primary_button_down() -> bool {
     #[link(name = "CoreGraphics", kind = "framework")]
     unsafe extern "C" {
         fn CGEventSourceButtonState(state_id: i32, button: u32) -> bool;
@@ -1340,12 +1485,8 @@ fn escape_down() -> bool {
     unsafe { CGEventSourceKeyState(0, 53) }
 }
 #[cfg(target_os = "windows")]
-fn left_button_down() -> bool {
-    #[link(name = "user32")]
-    unsafe extern "system" {
-        fn GetAsyncKeyState(v_key: i32) -> i16;
-    }
-    unsafe { GetAsyncKeyState(0x01) < 0 }
+fn primary_button_down() -> bool {
+    windows_input::primary_button_down()
 }
 #[cfg(target_os = "windows")]
 fn escape_down() -> bool {
@@ -1356,7 +1497,7 @@ fn escape_down() -> bool {
     unsafe { GetAsyncKeyState(0x1B) < 0 }
 }
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn left_button_down() -> bool {
+fn primary_button_down() -> bool {
     false
 }
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -1572,6 +1713,36 @@ mod tests {
         dock.window_error = None;
         dock.applied_settings = Some(next.clone());
         assert!(!dock.status(&next).pending);
+    }
+
+    #[test]
+    fn paused_edge_slows_polling_only_after_native_success_and_gestures_stay_responsive() {
+        let mut dock = DockRuntime::new(Placement::default());
+        assert_eq!(dock.poll_interval(), Duration::from_millis(160));
+        let settings = Settings {
+            edge_enabled: false,
+            ..Settings::default()
+        };
+        dock.applied_settings = Some(settings);
+        assert_eq!(dock.poll_interval(), Duration::from_millis(500));
+        dock.window_error = Some("hide failed".into());
+        assert_eq!(dock.poll_interval(), Duration::from_millis(160));
+        dock.window_error = None;
+        dock.drag = Some(Drag {
+            label: "edge-handle".into(),
+            started: Instant::now(),
+            settings: Settings::default(),
+            original_visible: false,
+            cancelled: false,
+        });
+        assert_eq!(dock.poll_interval(), Duration::from_millis(40));
+        dock.drag = None;
+        dock.resize = resizing_dock().resize;
+        assert_eq!(dock.poll_interval(), Duration::from_millis(80));
+        dock.resize = None;
+        dock.applied_settings = Some(Settings::default());
+        dock.visible = true;
+        assert_eq!(dock.poll_interval(), Duration::from_millis(80));
     }
 
     #[test]

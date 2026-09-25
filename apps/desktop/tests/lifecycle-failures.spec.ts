@@ -12,8 +12,8 @@ async function setup(page: Page) {
     const callbacks = new Map<number, (value: unknown) => void>();
     const listeners = new Map<number, { event: string; handler: number }>();
     const harness = {
-      failAction: '', delayAction: '', concurrentSave: false,
-      release: () => {}, calls: [] as { command: string; args: any }[],
+      failAction: '', delayAction: '', pendingAction: '', concurrentSave: false,
+      release: null as (() => void) | null, calls: [] as { command: string; args: any }[],
       emit(event: string, payload: unknown) { for (const [id, listener] of listeners) if (listener.event === event) callbacks.get(listener.handler)?.({ id, event, payload }); },
       snapshot: () => structuredClone(snapshot),
       async foreign(action: any) {
@@ -38,7 +38,10 @@ async function setup(page: Page) {
           if (command === 'get_window_status' || command === 'get_console_position_status') return { pending: false, error: null };
           if (command === 'window_action' || command === 'resolve_exit') return;
           if (command === 'mutate') {
-            if (harness.delayAction === args.action.type) await new Promise<void>(resolve => { harness.release = resolve; });
+            if (harness.delayAction === args.action.type) await new Promise<void>(resolve => {
+              harness.pendingAction = args.action.type;
+              harness.release = () => { harness.pendingAction = ''; harness.release = null; resolve(); };
+            });
             if (harness.failAction === args.action.type) throw new Error('合成写入失败');
             const path = '/src/lib/domain.ts'; const domain = await import(path);
             snapshot = domain.applyPreviewAction(snapshot, args.action, args.expectedRevision);
@@ -76,6 +79,9 @@ test('保存失败不删除草稿，重试的两步操作冻结界面并延后�
   await expect(prompt(page).getByRole('button', { name: '继续编辑', exact: true })).toBeDisabled();
   await expect(detail(page).getByLabel('任务名称', { exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: '新建任务', exact: true })).toBeDisabled();
+  // The UI freezes before updateTask finishes; wait for the second operation's
+  // actual gate so releasing it cannot run before trashTask reaches the mock.
+  await expect.poll(() => page.evaluate(() => (window as any).__lifecycle.pendingAction)).toBe('trashTask');
   await page.evaluate(() => (window as any).__lifecycle.emit('sidetask:exit-requested', { requestId: 42 }));
   expect(await page.evaluate(() => (window as any).__lifecycle.calls.filter((call: any) => call.command === 'resolve_exit'))).toHaveLength(0);
   await page.evaluate(() => (window as any).__lifecycle.release());

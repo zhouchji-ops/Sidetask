@@ -9,7 +9,9 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "test": "vitest run tests/domain.test.ts",
     "test:ui": "playwright test",
-    "tauri": "tauri"
+    "test:native:windows": "node scripts/windows-native-smoke.mjs",
+    "tauri": "tauri",
+    "test:tools": "node --test tests/windows-native-smoke-finalizer.test.mjs"
   },
   "dependencies": {
     "@js-temporal/polyfill": "0.5.1",

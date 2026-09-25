@@ -86,10 +86,10 @@ async function assertNoMutations(page: Page, snapshot: Snapshot) {
   expect(await page.evaluate(() => (window as any).__guide.snapshot())).toEqual(snapshot);
 }
 
-test('首次说明只取决于本机标记，空库、已有任务和仅回收站均一致，重载后设置仍保留说明', async ({ browser, baseURL }) => {
-  for (const kind of ['empty', 'active', 'trash']) for (const seen of [false, true]) {
-    const context = await browser.newContext({ baseURL, locale: 'zh-CN', timezoneId: 'Asia/Shanghai' });
-    const page = await context.newPage();
+// Each independent cold-start/reload case gets its own fixture and timeout;
+// six contexts in one test exceeded CI's shared 30-second budget on Windows.
+for (const kind of ['empty', 'active', 'trash']) for (const seen of [false, true]) {
+  test(`首次说明独立于任务数量：${kind}，本机${seen ? '已确认' : '未确认'}，重载后设置仍保留说明`, async ({ context, page }) => {
     const snapshot = seed();
     if (kind === 'empty') { snapshot.tasks = []; snapshot.plans = []; }
     if (kind === 'trash') snapshot.tasks.forEach(task => { task.deletedAt = '2026-09-24T04:00:00.000Z'; });
@@ -112,9 +112,8 @@ test('首次说明只取决于本机标记，空库、已有任务和仅回收�
     await expect(guide(page).getByRole('heading', { name: '使用说明', exact: true })).toBeVisible();
     await expect(guide(page)).toContainText('退出 SideTask');
     await expect(acknowledge(page)).toHaveCount(0);
-    await context.close();
-  }
-});
+  });
+}
 
 test('读取与打开失败可重试，不默认展开或确认，读取恢复不卸载任务草稿', async ({ page }) => {
   const snapshot = await native(page, { readFails: true });

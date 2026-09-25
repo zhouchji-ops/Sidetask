@@ -119,6 +119,7 @@ kbd { font: 11px/1.3 inherit; color: var(--muted); border: 1px solid var(--line)
 .search-box .icon-button { width: 19px; height: 19px; }
 .workspace-body { display: flex; flex: 1; min-height: 0; }
 .main-content { padding: 34px 42px 25px; flex: 1; min-width: 0; overflow: auto; }
+.main-content:has(.settings-form) { scroll-padding-block: 12px 110px; }
 .main-content > :not(.toast) { max-width: 880px; margin-left: auto; margin-right: auto; }
 .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 26px; }
 h1 { font-size: 27px; line-height: 1.3; font-weight: 600; letter-spacing: -.5px; }
