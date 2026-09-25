@@ -1,83 +1,87 @@
 # 侧笺 · SideTask
 
-把「今天要做什么」放在屏幕边缘：默认单击展开、点击外部收起，也可选择悬停模式；上半部分是今日计划，下半部分是截止日期（DDL）。让查看任务不必离开当前学习场景。
+**看一眼任务，继续手头的事。**
 
-小窗可以沿边缘拖动调整位置；当前方案也支持主动换边、换屏后重新停靠。防溢出针对停靠后的展开/收起，不限制用户主动移动。
+把今日计划和截止日期放在屏幕边缘。随手查看、直接添加、勾选完成，需要集中整理时再打开完整控制台。
 
-一个 App、两种界面：**大窗口控制台**集中管理任务和设置，**边缘小窗**用于学习时快速查看和勾选，也可点击“今日计划”旁的＋直接添加今日任务。第一版只做独立的大任务，不做拆解或子任务。
+[**完整使用说明书**](docs/product/USER_GUIDE.md) · [下载与安装](#下载与安装) · [产品卖点](docs/product/SELLING_POINTS.md) · [创新点](docs/product/INNOVATIONS.md) · [项目状态](docs/delivery/STATUS.md)
 
-项目仓库：[zhouchji-ops/Sidetask](https://github.com/zhouchji-ops/Sidetask)。两平台成果已按用户要求合并并推送该仓库，代码与文档继续在同一仓库维护；旧仓库保留为 `legacy-origin` 追溯历史，接续步骤见[仓库迁移](docs/delivery/REPOSITORY_MIGRATION.md)。Mac 开发目录为 `任务弹窗`，Windows 本阶段使用 `E:\A_项目\SideTask-next-stage`，原 `E:\A_项目\SideTask` 及历史产物保留。
+当前版本为 **0.1.0 内部试用版**，已有 Mac arm64 App 和 Windows x64 安装包。两平台自动化检查和构建已通过；原生交互、完整系统兼容、多屏与签名分发仍在完善。
 
-2026-09-25 按用户要求修复历史提交作者，三个分支的提交编号随之变化，原有代码和提交关系保留。**已有检出先读[历史身份迁移与 Windows 接续](docs/delivery/GIT_IDENTITY_MIGRATION.md)，不要直接合并旧历史。** 下文旧 SHA 用于描述迁移前的分工，当前编号见该对照表。
+## 用侧笺做什么
 
-**Mac 开发固定使用 [`mac`](https://github.com/zhouchji-ops/Sidetask/tree/mac) 分支，后续 Mac 代码和文档均推送 `origin/mac`。** 分支从 `e844fcd` 建立；Windows 的 `codex/windows-polish` 已按用户授权合入 `mac`；后续按已整合提交协调，不覆盖彼此分支。
+- **今日与 DDL，同屏看清。** 小窗上方是今天的安排，下方是截止任务，可按日期或重要程度排序。
+- **同一件事，勾选一次。** 今日与 DDL 关联同一项任务，完成或撤销会同步更新；移出今日保留任务和截止日期。
+- **想到就加。** 点击今日计划旁的＋，直接在小窗输入并加入今日，保存后可连续添加。
+- **小窗随手用，大窗集中管。** 控制台负责完整编辑、搜索、回收站和设置；关闭大窗后，小窗仍可使用。
+- **按习惯摆，按喜好选。** 调整边缘位置、尺寸和两区比例，选择纸笺、霜序、暖刊或极简，明暗独立设置。
+- **任务保存在本机。** 核心使用无需账号，支持任务备份、导入恢复和误删后的单项恢复。
 
-**当前阶段：功能完善与内部试用验收。** 使用 Tauri 2 + React/TypeScript + Rust + SQLite 自建精简核心。备份与坏库启动恢复、固定 DDL、退出草稿保护、全局搜索、大列表和今日整理已实现；回收站与单项恢复已落地，正在完成集成和原生验收。第一版同时面向 macOS / Windows，双平台、多屏和发布验收尚未完成。实际测试及构建结果见 [STATUS](docs/delivery/STATUS.md)。
+默认单击把手展开，也可主动选择悬停模式。Mac 使用真实外点收起路径；Windows 当前仍有失焦收起和输入保护差异，完整外点与多屏体验继续验收。第一版只管理独立任务，没有子任务或部分完成进度；Mac 与 Windows 之间没有云同步。
 
-## 从这里开始
+## 下载与安装
 
-| 想了解什么 | 文档 |
+这批安装包来自[已通过检查的 CI](https://github.com/zhouchji-ops/Sidetask/actions/runs/36134425027)，对应检查头 `a1b30d6`。
+
+| 平台 | 下载 | 文件 |
+| --- | --- | --- |
+| Mac · Apple Silicon / arm64 | [下载 Mac 内部试用包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36134425027/artifacts/10863930629) | `SideTask-macos.zip` 内的 `SideTask.app` |
+| Windows · x64 | [下载 Windows 内部安装包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36134425027/artifacts/10864491831) | `SideTask_0.1.0_x64-setup.exe` |
+
+先解压 GitHub 产物的外层 ZIP。Mac 再解压其中的 App 压缩包；Windows 在解压目录内找到安装器。完整步骤、包摘要、更新和首次启动见[使用说明书：安装与更新](docs/product/USER_GUIDE.md#安装与更新)。
+
+当前 Mac 包为临时签名、未公证，Windows 包未签名；没有正式 Release。这批 CI 产物保留 14 天，到期日为 **2026-10-09 UTC**。链接失效后以[项目状态](docs/delivery/STATUS.md)中的新交付记录为准，不把源码 ZIP 当作安装包。
+
+## 第一次使用
+
+1. 打开 SideTask，点击“新建任务”，填写名称并确认“安排到今日”已开启，点击“创建任务”。
+2. 点击“打开边缘小窗”，在今日计划中查看任务；之后也可从屏幕边缘把手展开。
+3. 做完后点击任务左侧勾选按钮，大小窗同步更新。
+4. 临时想到新任务，点击小窗今日标题旁的＋，输入后按 Enter 或点击“添加”。
+5. 需要备注、DDL 或整理任务，点击任务名称或“管理任务”进入控制台。
+
+关闭控制台只隐藏大窗，菜单栏／系统托盘可以恢复。要结束应用，选择“退出 SideTask”，按提示处理未保存草稿。
+
+## 完整使用说明
+
+[**阅读完整使用说明书 →**](docs/product/USER_GUIDE.md)
+
+| 想做什么 | 直接查看 |
 | --- | --- |
-| 有没有现成工具、哪些值得试 | [同类项目调研](docs/research/ALTERNATIVES.md) |
-| 大窗口与小窗参考了什么模式 | [成熟产品交互参考](docs/research/WINDOW_PATTERNS.md)、[双窗口决策](docs/decisions/0002-console-and-edge-panel.md) |
-| 四套 UI 风格如何切换 | [设计对比页](design/STYLE_GALLERY.html)、[设计规范](design/DESIGN_SYSTEM.md)；App 设置 → 界面风格 |
-| 第一版到底做什么 | [产品需求](docs/product/PRD.md) |
-| 项目有哪些创新点与产品价值 | [创新点说明](docs/product/INNOVATIONS.md) |
-| 怎样从用户痛点介绍这个产品 | [卖点与宣传文案](docs/product/SELLING_POINTS.md) |
-| 控制台和小窗怎么配合 | [交互设计](docs/product/UX.md) |
-| 跨平台、多屏怎么实现 | [技术架构](docs/engineering/ARCHITECTURE.md) |
-| 今日任务与 DDL 为什么能同步 | [数据模型](docs/engineering/DATA_MODEL.md) |
-| 正常开发一个 App 的流程 | [开发流程](docs/engineering/DEVELOPMENT.md) |
-| 先做哪一步 | [里程碑](docs/delivery/ROADMAP.md)、[待办](docs/delivery/BACKLOG.md) |
-| 下一阶段分配给谁 | [分工总单](docs/delivery/NEXT_STAGE.md)、[Mac任务单](docs/delivery/MAC_NEXT_STAGE.md)、[Windows任务单](docs/delivery/WINDOWS_NEXT_STAGE.md) |
-| Windows开发机如何接手 | [Windows交接](docs/delivery/WINDOWS_HANDOFF.md) |
-| 目前做到哪、下次接着做什么 | [项目状态](docs/delivery/STATUS.md)、[交接说明](docs/delivery/HANDOFF.md) |
-| 怎样判断真的做完 | [验收计划](docs/delivery/TEST_PLAN.md) |
-| AI / 开发者协作约定 | [AGENTS.md](AGENTS.md) |
+| 安装、启动或更新 | [安装与更新](docs/product/USER_GUIDE.md#安装与更新)、[第一次使用](docs/product/USER_GUIDE.md#第一次使用) |
+| 创建、编辑、完成或撤销任务 | [任务操作](docs/product/USER_GUIDE.md#创建与编辑任务)、[今日安排](docs/product/USER_GUIDE.md#安排今日与完成任务) |
+| 设置 DDL 与排序 | [截止日期与重要程度](docs/product/USER_GUIDE.md#截止日期与重要程度) |
+| 调整展开方式、位置、大小和外观 | [边缘小窗](docs/product/USER_GUIDE.md#使用边缘小窗)、[设置](docs/product/USER_GUIDE.md#外观与窗口设置) |
+| 查找任务、恢复误删 | [搜索与回收站](docs/product/USER_GUIDE.md#搜索与回收站) |
+| 导出备份或恢复数据 | [备份与恢复](docs/product/USER_GUIDE.md#备份与恢复) |
+| 关闭、退出、使用快捷键或排查问题 | [窗口与键盘](docs/product/USER_GUIDE.md#关闭退出与键盘操作)、[常见问题](docs/product/USER_GUIDE.md#常见问题) |
 
-## 建议方向
+## 开发与协作
 
-Todobar 的窗口隐藏、悬停和数据模型与需求有明显差距，因此本轮选择自建精简核心，UI 与窗口验证并行，见 [ADR-0003](docs/decisions/0003-prototype-implementation.md)。借鉴成熟产品的公开交互和用户指定设计站点的视觉原则，具体见 [UI 参考](docs/research/UI_REFERENCES.md) 与 [设计系统](design/DESIGN_SYSTEM.md)。
+采用 Tauri 2、React / TypeScript、Rust 和 SQLite。界面共用任务服务，平台窗口适配集中在 Rust 平台层；架构、验证和数据恢复资料见下方文档。
 
-「加入今日」是给同一任务建立今日计划引用，不是复制一条任务。任意位置完成或撤销完成，都更新同一个任务状态。
+新检出可从 `mac` 分支开始；需要 Node.js 24、Rust 与对应系统的 Tauri 构建环境，详情见[桌面客户端开发说明](apps/desktop/README.md)。
 
-小窗默认单击把手展开、点击其他位置收起；设置可切换“悬停展开”，仅此模式显示延迟。固定展开暂停自动收起，隐藏保留今日快速输入草稿。Mac 以真实外点收起并保草稿；Windows 当前保留失焦收起与输入保护，和仅外点收起/允许隐藏输入的目标仍有差异，B45 继续跟踪。整合版受影响原生行为必须分别复验。
-
-任务可移入回收站并恢复，保留原 ID、DDL、完成状态与所有日期的计划。正常搜索排除回收站，回收站有独立搜索；删除与恢复入口保留编辑草稿和冲突处理。当前 SQLite 为 schema5，便携任务备份为 v2，包含回收站记录；没有自动清空或永久删除。分区比例已支持操作结束后保存、取消和失败恢复；控制台位置/尺寸记忆已接入并在集成验收，首次常驻说明已接入，确认后隐藏且设置可再读，见[窗口偏好计划](docs/research/WINDOW_PREFERENCES.md)。
-
-## 目录
-
-```text
-任务弹窗/
-├── AGENTS.md                 协作规则、产品不变量、交接要求
-├── README.md                 项目入口与目录导航
-├── CHANGELOG.md              已交付变更；不把计划写成成果
-├── apps/desktop/             桌面客户端源码与构建配置
-│   ├── src/                  React 界面：surfaces、features、components、lib
-│   │   └── surfaces/         console 大窗与 edge-panel 小窗的布局入口
-│   └── src-tauri/            Rust 服务与原生系统能力
-│       ├── src/domain/       任务、计划、排序等业务规则
-│       ├── src/application/  用例与命令入口
-│       ├── src/infrastructure/ SQLite、备份等实现
-│       ├── src/platform/     macOS / Windows 窗口适配
-│       └── migrations/       有版本的数据迁移
-├── docs/
-│   ├── research/             一手来源、竞品与复用评估
-│   ├── product/              需求、交互、范围
-│   ├── engineering/          架构、数据模型、开发说明
-│   ├── decisions/            重要决策及变更理由（ADR）
-│   └── delivery/             状态、待办、交接、验收、里程碑
-├── design/                   原型、图标、设计源文件
-├── tests/                    集成测试、合成数据、手工验证证据
-└── scripts/                  以后实际使用的开发/打包脚本
+```sh
+git clone --branch mac https://github.com/zhouchji-ops/Sidetask.git
+cd Sidetask/apps/desktop
+npm ci
+npm run tauri -- dev
 ```
 
-运行入口在 [apps/desktop/README.md](apps/desktop/README.md)：进入该目录后 `npm ci`、`npm run dev` 可启动浏览器原型；原生开发使用 `npm run tauri -- dev`（需要 Rust 和平台构建环境）。浏览器只能验证布局和任务交互，不能证明真实多屏窗口能力。生成物与个人任务数据库不提交仓库。
+只查看浏览器交互原型时可运行 `npm run dev`。浏览器使用独立演示数据，不与原生任务库共用，也不能替代真实系统窗口验收。已有开发目录先读[仓库迁移与接续](docs/delivery/REPOSITORY_MIGRATION.md)，保留未提交工作，不直接合并旧身份历史。
 
-本轮 B43 已将 Windows `f099e3ad` 与 Mac `2798841` 合并为产品 `6d32d6c` 并推送新仓库 `mac`：统一小窗新增、schema5 和退出协议，纳入 Windows 首显与 WebView2 清理修复。交付检查头为 `a1b30d63dae6fe5d8aba66b040d1b071afcdec4b`，仅修正恢复测试时序，产品源码与工作流未变。本地全量检查、Mac 内部包及限定隔离原生冒烟已通过；最终 CI、包摘要与剩余平台验收见 [STATUS](docs/delivery/STATUS.md)，B43 仍在复验阶段。
+正式仓库为 [zhouchji-ops/Sidetask](https://github.com/zhouchji-ops/Sidetask)。Mac 后续代码和文档固定推送 `mac`；Windows 按[平台分工](docs/delivery/NEXT_STAGE.md)接续。旧仓库作为 `legacy-origin` 保留历史证据，协作规则见 [AGENTS.md](AGENTS.md)。
 
-Windows 开发机已有 0.1.0 x64 内部试用安装器，包含小窗「＋」与默认单击/可选悬停模式，源码、位置及SHA见 [STATUS](docs/delivery/STATUS.md)，真实步骤见[本次记录](tests/manual/2026-09-25-windows-panel-interactions.md)。包未签名、未公开发布。前一轮恢复/安装升级证据属于其对应源码；多屏/混合DPI、完整外部焦点/手势和3–7天连续使用仍待验收。该历史产品的 GitHub Actions 因旧仓库账号限制未执行；新仓库 CI 单独记录，不把本地通过写成云端或整合版原生通过。
+| 资料 | 内容 |
+| --- | --- |
+| [卖点与宣传文案](docs/product/SELLING_POINTS.md) / [创新点说明](docs/product/INNOVATIONS.md) | 用户痛点、产品价值、可用文案与实现依据 |
+| [产品需求](docs/product/PRD.md) / [交互设计](docs/product/UX.md) | 功能范围与交互契约 |
+| [技术架构](docs/engineering/ARCHITECTURE.md) / [数据模型](docs/engineering/DATA_MODEL.md) | 窗口、任务与持久化设计 |
+| [设计规范](design/DESIGN_SYSTEM.md) / [同类调研](docs/research/ALTERNATIVES.md) | 界面风格、参考与取舍 |
+| [状态](docs/delivery/STATUS.md) / [交接](docs/delivery/HANDOFF.md) / [待办](docs/delivery/BACKLOG.md) | 当前完成度、证据和下一步 |
+| [路线图](docs/delivery/ROADMAP.md) / [平台分工](docs/delivery/NEXT_STAGE.md) / [验收计划](docs/delivery/TEST_PLAN.md) | 后续工作和完成标准 |
+| [详细数据恢复](docs/engineering/DATA_RECOVERY.md) / [安全边界](SECURITY.md) | 备份、启动故障与已知限制 |
+| [变更记录](CHANGELOG.md) / [全部文档](docs/README.md) | 版本变化与导航 |
 
-文档索引见 [docs/README.md](docs/README.md)。调研记录日期：2026-09-24。
-
-安全边界与已知限制见[SECURITY](SECURITY.md)，数据恢复操作见[恢复说明](docs/engineering/DATA_RECOVERY.md)。
+反馈时附上系统、包版本和重现步骤，具体格式见[说明书](docs/product/USER_GUIDE.md#当前范围与反馈)。个人数据库、导出文件和本地备份不提交仓库。
