@@ -112,9 +112,13 @@ export async function attachNativeNavigation(): Promise<() => void> {
   });
 }
 
-export async function attachExitRequests(receive: (requestId: number) => void): Promise<() => void> {
+export async function attachExitRequests(receive: (requestId: number) => void, windowLabel = 'console'): Promise<() => void> {
   if (!isDesktop) return () => {};
-  const stop = await listen<{ requestId: number }>('sidetask:exit-requested', ({ payload }) => receive(payload.requestId));
+  const stop = await listen<{ requestId: number; windowLabel?: string }>('sidetask:exit-requested', ({ payload }) => {
+    // Event listeners may see another surface's notification. The payload is
+    // only a prompt; Rust separately authorizes the replying window and stage.
+    if (!payload.windowLabel || payload.windowLabel === windowLabel) receive(payload.requestId);
+  });
   try {
     const pending = await invoke<{ requestId: number } | null>('get_pending_exit');
     if (pending) receive(pending.requestId);

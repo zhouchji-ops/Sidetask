@@ -239,6 +239,8 @@ fn authorize_window_action(label: &str, action: &str) -> Result<(), String> {
         ]
         .contains(&action),
         "edge-panel" => [
+            "beginQuickAdd",
+            "endQuickAdd",
             "openConsole",
             "showPanel",
             "hidePanel",
@@ -269,6 +271,20 @@ fn authorize_window_action(label: &str, action: &str) -> Result<(), String> {
 fn window(app: &tauri::AppHandle, label: &str) -> Result<WebviewWindow, String> {
     app.get_webview_window(label)
         .ok_or_else(|| format!("找不到 {label} 窗口。"))
+}
+
+// Explicit editing is allowed to take focus; hover still uses the nonactivating
+// show path. No dock/service/exit lock is held while requesting native focus.
+pub(crate) fn focus_panel_input(app: &tauri::AppHandle) -> Result<(), String> {
+    {
+        let state = crate::task_state(app)?;
+        let mut dock = state.dock.lock().map_err(|_| "窗口服务不可用。")?;
+        let settings = settings(app)?;
+        show_panel(app, &mut dock, &settings)?;
+    }
+    let panel = window(app, "edge-panel")?;
+    panel.set_focusable(true).map_err(error)?;
+    panel.set_focus().map_err(error)
 }
 fn edge_monitor(monitor: &tauri::Monitor) -> Result<MonitorGeometry, String> {
     let area = monitor.work_area();
@@ -1348,6 +1364,19 @@ pub fn window_action(
         return open_console(app, payload);
     }
     crate::task_state(app)?;
+    if action == "beginQuickAdd" {
+        exit::set_panel_editing(app, true)?;
+        if let Err(reason) = focus_panel_input(app) {
+            let _ = exit::set_panel_editing(app, false);
+            let _ = caller.set_focusable(false);
+            return Err(reason);
+        }
+        return Ok(());
+    }
+    if action == "endQuickAdd" {
+        caller.set_focusable(false).map_err(error)?;
+        return exit::set_panel_editing(app, false);
+    }
     if action == "retryConsolePosition" {
         return console_window::retry(app);
     }

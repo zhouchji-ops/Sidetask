@@ -186,15 +186,13 @@ test('浏览器小窗预览支持悬停、自动收起与保持展开', async ({
   await expect(preview.locator('.edge-panel')).toHaveCount(0);
 });
 
-test('独立小窗的新建入口打开控制台创建对话框', async ({ page }) => {
+test('独立小窗的今日加号直接添加任务', async ({ page }) => {
   await page.goto('/?surface=edge-panel');
-  await page.getByRole('button', { name: '在控制台新建任务', exact: true }).click();
-  await expect(page).toHaveURL(/surface=console.*newTask=1/);
-  const dialog = page.getByRole('dialog', { name: '新建任务' });
-  await expect(dialog).toBeVisible();
-  await dialog.getByLabel('任务名称', { exact: true }).fill('从边缘开始的任务');
-  await dialog.getByRole('button', { name: '创建任务', exact: true }).click();
-  await expect(page.locator('.main-content').getByRole('button', { name: '完成：从边缘开始的任务', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '添加今日任务', exact: true }).click();
+  await page.getByRole('textbox', { name: '今日任务名称' }).fill('从边缘开始的任务');
+  await page.getByRole('button', { name: '添加', exact: true }).click();
+  await expect(page.locator('.edge-panel').getByRole('button', { name: '完成：从边缘开始的任务', exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/surface=edge-panel$/);
 });
 
 test('浏览器预览可拖动小窗尺寸，松手后设置保存', async ({ page }) => {

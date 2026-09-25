@@ -61,6 +61,11 @@ fn authorize_mutation(label: &str, action: &Action) -> Result<(), String> {
         return Ok(());
     }
     match action {
+        Action::CreateTask { task, .. }
+            if task.get("addToToday").and_then(Value::as_bool) == Some(true) =>
+        {
+            Ok(())
+        }
         Action::SetCompleted { .. } | Action::PlanTask { .. } => Ok(()),
         Action::UpdateSettings { changes }
             if changes.as_object().is_some_and(|object| {
@@ -189,8 +194,8 @@ fn get_pending_exit(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
 ) -> Result<Option<platform::exit::ExitRequest>, String> {
-    require_window(window.label(), &["console"])?;
-    platform::exit::pending(&app)
+    require_window(window.label(), &["console", "edge-panel"])?;
+    platform::exit::pending(&app, window.label())
 }
 
 #[tauri::command]
@@ -200,8 +205,8 @@ async fn resolve_exit(
     request_id: u64,
     allow: bool,
 ) -> Result<(), String> {
-    require_window(window.label(), &["console"])?;
-    platform::exit::resolve(&app, request_id, allow)
+    require_window(window.label(), &["console", "edge-panel"])?;
+    platform::exit::resolve(&app, window.label(), request_id, allow)
 }
 
 #[tauri::command]
@@ -428,6 +433,20 @@ mod security_tests {
             for label in ["edge-panel", "edge-handle", "unknown"] {
                 assert!(authorize_mutation(label, &action).is_err());
             }
+        }
+    }
+
+    #[test]
+    fn panel_can_create_planned_tasks_but_handle_cannot_create_any() {
+        for planned in [false, true] {
+            let action = Action::CreateTask {
+                task: serde_json::json!({"title":"今日快记", "addToToday":planned}),
+                date: "2026-09-25".into(),
+            };
+            assert_eq!(authorize_mutation("edge-panel", &action).is_ok(), planned);
+            assert!(authorize_mutation("edge-handle", &action).is_err());
+            assert!(authorize_mutation("unknown", &action).is_err());
+            assert!(authorize_mutation("console", &action).is_ok());
         }
     }
 
