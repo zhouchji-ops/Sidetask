@@ -23,6 +23,7 @@
 | 四套 UI 风格如何切换 | [设计对比页](design/STYLE_GALLERY.html)、[设计规范](design/DESIGN_SYSTEM.md)；App 设置 → 界面风格 |
 | 第一版到底做什么 | [产品需求](docs/product/PRD.md) |
 | 项目有哪些创新点与产品价值 | [创新点说明](docs/product/INNOVATIONS.md) |
+| 怎样从用户痛点介绍这个产品 | [卖点与宣传文案](docs/product/SELLING_POINTS.md) |
 | 控制台和小窗怎么配合 | [交互设计](docs/product/UX.md) |
 | 跨平台、多屏怎么实现 | [技术架构](docs/engineering/ARCHITECTURE.md) |
 | 今日任务与 DDL 为什么能同步 | [数据模型](docs/engineering/DATA_MODEL.md) |
