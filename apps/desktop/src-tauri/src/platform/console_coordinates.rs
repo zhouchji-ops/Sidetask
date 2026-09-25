@@ -49,7 +49,7 @@ pub fn frame_to_logical(frame: WindowFrame) -> Result<WindowFrame, String> {
         .height
         .checked_sub(frame.inner.height)
         .ok_or("控制台内外尺寸尚未稳定。")?;
-    if frame.top_inset > height_border {
+    if frame.top_inset > frame.outer.height {
         return Err("控制台标题栏尺寸尚未稳定。".into());
     }
     let scale = frame.window_scale;
@@ -76,6 +76,33 @@ pub fn frame_to_logical(frame: WindowFrame) -> Result<WindowFrame, String> {
     })
 }
 
+/// AppKit's contentLayoutRect is in window-local, bottom-up logical points.
+/// FullSizeContentView can make outer == inner while this real title clearance
+/// remains positive; it must not be inferred from the client-size difference.
+pub fn title_inset_from_layout(
+    outer_height: f64,
+    layout_y: f64,
+    layout_height: f64,
+    scale: f64,
+) -> Result<u32, String> {
+    valid_scale(scale)?;
+    let layout_top = layout_y + layout_height;
+    let inset = (outer_height - layout_top) * scale;
+    if !outer_height.is_finite()
+        || !layout_y.is_finite()
+        || !layout_height.is_finite()
+        || outer_height <= 0.
+        || layout_y < 0.
+        || layout_height <= 0.
+        || !inset.is_finite()
+        || inset.round() < 1.
+        || inset.round() > f64::from(u32::MAX)
+    {
+        return Err("控制台原生标题区域尚未就绪，未保存当前位置。".into());
+    }
+    Ok(inset.round() as u32)
+}
+
 pub fn monitor_to_logical(monitor: GeometryMonitor) -> Result<GeometryMonitor, String> {
     valid_scale(monitor.scale)?;
     let scale = monitor.scale;
@@ -97,6 +124,61 @@ mod tests {
     use crate::platform::console_geometry::{
         capture_normal, restore_plan, CloseSide, ConsolePlacement, Point,
     };
+
+    #[test]
+    fn full_size_content_uses_native_layout_clearance_without_shrinking_saved_client() {
+        let raw = WindowFrame {
+            outer: PhysicalRect {
+                x: 290,
+                y: 122,
+                width: 2360,
+                height: 1582,
+            },
+            inner: PixelSize {
+                width: 2360,
+                height: 1582,
+            },
+            window_scale: 2.,
+            top_inset: title_inset_from_layout(791., 0., 763., 2.).unwrap(),
+        };
+        let normalized = frame_to_logical(raw).unwrap();
+        assert_eq!(normalized.top_inset, 28);
+        assert_eq!(normalized.outer.height, normalized.inner.height);
+        assert_eq!(
+            normalized.inner,
+            PixelSize {
+                width: 1180,
+                height: 791
+            }
+        );
+        let screens = [monitor(0, 33, 1470, 849, 1.)];
+        let normal = capture_normal(&normalized, &screens).unwrap();
+        assert_eq!(normal.inner_height, 791.);
+        let saved = ConsolePlacement {
+            normal,
+            maximized: false,
+        };
+        let plan = restore_plan(&saved, &screens, &normalized, CloseSide::Left).unwrap();
+        assert_eq!(plan.outer, normalized.outer);
+        assert_eq!(plan.inner, normalized.inner);
+    }
+
+    #[test]
+    fn native_title_layout_rejects_unsettled_values_without_guessing_a_height() {
+        assert_eq!(title_inset_from_layout(700., 8., 662., 2.).unwrap(), 60);
+        for (outer, y, height, scale) in [
+            (700., 0., 700., 2.), // No measured title/control clearance yet.
+            (700., 0., 701., 2.),
+            (700., -1., 671., 2.),
+            (700., 0., 0., 2.),
+            (700., 0., 670., 0.),
+            (f64::NAN, 0., 670., 2.),
+            (700., f64::INFINITY, 670., 2.),
+            (700., 0., f64::NAN, 2.),
+        ] {
+            assert!(title_inset_from_layout(outer, y, height, scale).is_err());
+        }
+    }
 
     fn monitor(x: i32, y: i32, width: u32, height: u32, scale: f64) -> GeometryMonitor {
         GeometryMonitor {

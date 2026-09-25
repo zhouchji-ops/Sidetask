@@ -381,3 +381,20 @@ h1 { font-size: 27px; line-height: 1.3; font-weight: 600; letter-spacing: -.5px;
 .console-position-status { flex-wrap: wrap; }
 .console-position-message { display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
 .console-position-actions { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+
+/* Resident-app guidance stays in the document flow, apart from task drafts. */
+.usage-guide { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 0 0 20px; margin-bottom: 24px; border-bottom: 1px solid var(--line); }
+.usage-guide-copy { flex: 1 1 270px; min-width: 0; }
+.usage-guide h2 { margin: 0 0 6px; color: var(--ink); font-size: 13px; font-weight: 600; line-height: 1.5; }
+.usage-guide p { margin: 0; color: var(--secondary); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.usage-guide .usage-guide-paused { margin-top: 5px; }
+.usage-guide-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.usage-guide-actions .secondary-button { min-height: 32px; font-size: 12px; }
+.usage-guide .text-button, .usage-guide-status .text-button { padding: 7px 8px; min-height: 32px; border: 0; border-radius: 4px; background: transparent; color: var(--accent-text); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.usage-guide .text-button:hover, .usage-guide-status .text-button:hover { background: var(--subtle); }
+.usage-guide-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-bottom: 16px; color: var(--secondary); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.usage-guide > .usage-guide-status { flex-basis: 100%; margin: 0; }
+.usage-guide .usage-guide-error { flex-basis: 100%; color: var(--danger); }
+@media (max-width: 780px) {
+  .usage-guide-copy { flex-basis: 100%; }
+}

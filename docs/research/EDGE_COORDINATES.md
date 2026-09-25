@@ -63,3 +63,11 @@ Mac 使用 `LogicalPosition` / `LogicalSize`；Windows 使用严格转换后的 
 | 原生验收 | 尚未完成：Mac 锁屏；真实 Mac 混合 DPI 的显示/输入命中、异步定位、拖动接缝/拔插/睡眠/Spaces及 Windows 原生 DPI/托盘/焦点矩阵待执行。 |
 
 下一步按 [TEST_PLAN 的 M01–M11](../delivery/TEST_PLAN.md) 记录原生窗口框、输入区域及逐帧可见结果，尤其检查 Windows DPI 回调后的稳定显示，以及 WKWebView/WebView2 的实际 screenX/Y。数学、浏览器、编译和打包均不能替代这些结果。范围和顺序见 [BACKLOG](../delivery/BACKLOG.md) 与 [ROADMAP](../delivery/ROADMAP.md)。
+
+## Mac原生点网格修正（2026-09-25，mac分支）
+
+e844fcd在macOS26.4.1 / 内屏2×实测：期望y=125.5逻辑点，AppKit回读y=126，其他坐标和368×610尺寸一致；原严格差值比较反复失败并暂停小窗。此结果不是混合DPI或动画越界证据，而是单屏真实setter量化差异。
+
+保留局部物理像素算法和分数工作区；仅Mac在输出原生调用前通过`mac_native_rect`投影到整逻辑点：尺寸向下取整且不超过工作区可用整数范围，位置就近取整后限制在ceil(工作区起点)到floor(终点)-尺寸之间。偏好值不因投影被写回，严格边界、scale匹配、两次实际矩形采样继续保留，不以放大容差接受越屏。缓存仍使用实际确认框。Windows原生设置路径不变。
+
+纯回归覆盖观察到的125.5→126、下边界向内校准、负坐标/分数工作区、幂等和不足1点拒绝。当前最终原生与自动化证据见[Mac记录](../../tests/manual/2026-09-25-mac-branch.md)，不能沿用先前未实测结论。

@@ -188,7 +188,7 @@ placement 中的 console 可缺省，结构由 `ConsolePlacement` / `ConsoleNorm
 
 | JSON 字段 | 当前含义 |
 | --- | --- |
-| console.normal.innerWidth / innerHeight | 正常窗口客户区的逻辑宽高，有限正数；不含标题栏/边框 |
+| console.normal.innerWidth / innerHeight | Tauri内容区逻辑宽高，有限正数；Mac默认全尺寸内容可与标题区域重叠，标题可达高度独立实测 |
 | console.normal.monitorName | 可空的显示器名称；匹配失败回退有效屏幕 |
 | console.normal.monitorPosition | 可空原生原点 `{x,y}`，只作同名显示器匹配提示；不是工作区偏移 |
 | console.normal.outerOffsetX / outerOffsetY | 相对工作区的逻辑外框偏移，有限数，可为负以表达跨屏 |
@@ -196,10 +196,11 @@ placement 中的 console 可缺省，结构由 `ConsolePlacement` / `ConsoleNorm
 
 Mac 先把窗口和各工作区按各自来源 scale 转到统一 AppKit 逻辑平面，计算时 scale 为 1；Windows 在物理桌面坐标中计算，持久化与恢复时转换逻辑尺寸/偏移。原点和单位的转换只在平台层进行；不保存隐藏、焦点、最小化或全屏状态。无效 console 子对象作为独立位置错误处理，不丢弃可读取的小窗字段；不可解析的整个 placement 仍不能被合并写入静默覆盖。
 
-两种写入方法在同一个 SQLite 库内各自读取最新 placement：
+设备元数据写入在同一个 SQLite 库内各自读取最新 placement：
 
 | Repository 方法 | 同一 IMMEDIATE 事务内的行为 | 版本边界 |
 | --- | --- | --- |
+| acknowledge_usage_guide() | usageGuideSeen缺省false；只置true，已true不重复写；保留所有其他元数据，非法类型/存储失败返回错误 | 不读写snapshot，不改revision或任务比较基线；沿用schema4 |
 | save_console_placement(console_json) | 校验对象和大小，只替换 console；保留 edge 及其他字段值 | 不读取/重编码 snapshot，不改 Snapshot / Task revision，也不推进任务比较基线 |
 | save_placement(snapshot, edge_json) | 按既有任务比较基线验证并保存 snapshot，再只合并 monitorName / monitorPosition / offset；保留 console 和未提供字段 | 保留原任务保存协议，元数据错误使 snapshot 与 placement 一起回滚 |
 
@@ -207,4 +208,10 @@ Mac 先把窗口和各工作区按各自来源 scale 转到统一 AppKit 逻辑�
 
 位置候选/恢复错误/忽略状态只在 ConsoleRuntime 内，不加入任务草稿或 portable JSON。恢复失败阻止自动采样覆盖旧保存值；显式重试保存当前位置，丢弃先采样当前值后取消这次保存。便携任务格式继续为 v2，读取 v1/v2，任务恢复保留 Settings 与全部 placement；完整 SQLite 恢复包含备份时设备配置。启动候选扩展为 before-schema-2 / before-schema-3 / before-schema-4 / safety-backup。
 
-实现决策及固定许可参考见 [ADR-0006](../decisions/0006-console-window-preferences.md)。本轮 Mac 原生因锁屏未验，Windows 本轮 CI / 原生未执行；合成数据、几何与状态测试不能替代系统窗口或断电恢复证据。结果统一引用最新 STATUS。
+实现决策及固定许可参考见 [ADR-0006](../decisions/0006-console-window-preferences.md)。本阶段Mac已开始单屏原生复验，结果以最新STATUS为准；Windows由另一开发机负责。合成数据、几何与状态测试不能替代多屏窗口或断电恢复证据。
+
+## 首次使用说明状态
+
+`placement.usageGuideSeen` 为可缺省boolean，缺失视为false；不放在Settings、console子对象或Task内。`get_usage_guide_seen` / `acknowledge_usage_guide`仅控制台有权限；确认调用完成后才隐藏提示。读取失败显示重试，不把坏元数据当默认值覆盖。没有任务、已有任务、仅回收站均使用同一标记，不导入示例数据。
+
+确认事务与控制台、边缘位置事务合并最新字段；不发布任务变更事件，不中断尺寸设置会话或编辑草稿。便携JSON导出不包含标记，任务恢复保留它；整库备份包含当时标记，整库恢复到未确认版本后可再次显示。浏览器预览使用独立`sidetask-usage-guide-seen-v1`键，不能用预览localStorage证明原生SQLite写入。

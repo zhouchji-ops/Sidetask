@@ -51,7 +51,8 @@ pub struct WindowFrame {
     pub outer: PhysicalRect,
     pub inner: PixelSize,
     pub window_scale: f64,
-    /// Distance from outer top to client top, in the input coordinate plane.
+    /// Measured native title/control clearance from the outer top. On macOS
+    /// FullSizeContentView this can overlap the client, independent of borders.
     pub top_inset: u32,
 }
 
@@ -139,7 +140,7 @@ fn validate_frame(frame: &WindowFrame) -> Result<(), String> {
         || frame.outer.width < frame.inner.width
         || frame.outer.height < frame.inner.height
         || frame.top_inset == 0
-        || frame.top_inset > frame.outer.height - frame.inner.height
+        || frame.top_inset >= frame.outer.height
     {
         return Err("控制台普通窗口的边框或缩放测量尚未就绪。".into());
     }
@@ -246,6 +247,14 @@ fn reachable(
     };
     let border_width = outer.width - inner.width;
     let border_height = outer.height - inner.height;
+    let title_overlap = top_inset.saturating_sub(border_height);
+    let Some(client_height) = inner
+        .height
+        .checked_sub(title_overlap)
+        .filter(|height| *height > 0)
+    else {
+        return false;
+    };
     // Horizontal native borders are measured as a total; conservatively inset
     // both sides by that total when evaluating the usable content viewport.
     let Some(client_x) = i32::try_from(i64::from(outer.x) + i64::from(border_width)).ok() else {
@@ -258,7 +267,7 @@ fn reachable(
         x: client_x,
         y: client_y,
         width: inner.width.saturating_sub(border_width).max(1),
-        height: inner.height,
+        height: client_height,
     };
     monitors
         .iter()
@@ -269,14 +278,19 @@ fn reachable(
                 .width
                 .saturating_sub(border_width.saturating_mul(2))
                 .max(1);
-            let available_height = monitor.work.height.saturating_sub(border_height).max(1);
+            let available_height = monitor
+                .work
+                .height
+                .saturating_sub(border_height)
+                .saturating_sub(title_overlap)
+                .max(1);
             let needed_width = (320. * scale)
                 .ceil()
                 .min(f64::from(client.width.min(available_width)))
                 as u32;
             let needed_height = (180. * scale)
                 .ceil()
-                .min(f64::from(inner.height.min(available_height)))
+                .min(f64::from(client_height.min(available_height)))
                 as u32;
             let (width, height) = intersection(client, monitor.work);
             inside(title, monitor.work) && width >= needed_width && height >= needed_height
@@ -303,7 +317,7 @@ pub fn restore_plan(
         width: monitor.work.width.saturating_sub(border_width),
         height: monitor.work.height.saturating_sub(border_height),
     };
-    if available.width == 0 || available.height == 0 || top_inset > border_height {
+    if available.width == 0 || available.height == 0 || top_inset >= monitor.work.height {
         return Err("屏幕工作区不足以显示控制台标题栏和内容。".into());
     }
     let min_inner = PixelSize {
@@ -481,6 +495,35 @@ mod tests {
             normal,
             maximized: false,
         }
+    }
+
+    #[test]
+    fn full_size_content_title_is_reachable_and_repaired_without_inventing_borders() {
+        let screens = [monitor("display", 0, 33, 1470, 849, 1., true)];
+        let actual = WindowFrame {
+            outer: PhysicalRect {
+                x: 145,
+                y: 61,
+                width: 1180,
+                height: 791,
+            },
+            inner: PixelSize {
+                width: 1180,
+                height: 791,
+            },
+            window_scale: 1.,
+            top_inset: 28,
+        };
+        let mut placement = saved(capture_normal(&actual, &screens).unwrap());
+        placement.normal.outer_offset_y = -50.;
+        let plan = restore_plan(&placement, &screens, &actual, CloseSide::Left).unwrap();
+        assert_eq!(plan.outer.y, 33);
+        assert_eq!(plan.outer.height, plan.inner.height);
+        assert_eq!(plan.inner, actual.inner);
+        assert_eq!(placement.normal.outer_offset_y, -50.);
+        let short = [monitor("display", 0, 0, 1470, 20, 1., true)];
+        assert!(restore_plan(&placement, &short, &actual, CloseSide::Left).is_err());
+        assert!(emergency_position(&actual, &short, CloseSide::Left).is_err());
     }
 
     #[test]
@@ -718,7 +761,7 @@ mod tests {
         transient.inner.height = 0;
         assert!(capture_normal(&transient, &screens).is_err());
         transient = original;
-        transient.top_inset = 500;
+        transient.top_inset = transient.outer.height + 1;
         assert!(capture_normal(&transient, &screens).is_err());
         let mut placement = saved(capture_normal(&original, &screens).unwrap());
         placement.normal.outer_offset_x = f64::MAX;

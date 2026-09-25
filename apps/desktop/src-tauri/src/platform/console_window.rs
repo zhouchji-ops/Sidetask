@@ -127,10 +127,65 @@ fn err(reason: impl std::fmt::Display) -> String {
     reason.to_string()
 }
 fn frame(window: &WebviewWindow) -> Result<WindowFrame, String> {
+    #[cfg(target_os = "macos")]
+    {
+        if objc2::MainThreadMarker::new().is_some() {
+            return read_frame(window);
+        }
+        // One AppKit turn samples both native title layout and Tauri geometry.
+        // Callers hold no task/dock lock, and a busy event loop cannot block this
+        // worker forever. The queued operation is read-only if it arrives late.
+        let (tx, rx) = mpsc::channel();
+        let target = window.clone();
+        window
+            .run_on_main_thread(move || {
+                let _ = tx.send(read_frame(&target));
+            })
+            .map_err(err)?;
+        rx.recv_timeout(Duration::from_secs(2))
+            .map_err(|_| "控制台原生测量超时，未保存当前位置。".to_string())?
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        read_frame(window)
+    }
+}
+
+fn read_frame(window: &WebviewWindow) -> Result<WindowFrame, String> {
     let outer = window.outer_position().map_err(err)?;
     let outer_size = window.outer_size().map_err(err)?;
     let inner = window.inner_size().map_err(err)?;
+    let window_scale = window.scale_factor().map_err(err)?;
+    #[cfg(target_os = "macos")]
+    let top_inset = {
+        use objc2::{msg_send, runtime::AnyObject};
+        use objc2_foundation::NSRect;
+
+        if objc2::MainThreadMarker::new().is_none() {
+            return Err("控制台原生测量必须在主线程完成。".into());
+        }
+        let pointer = window.ns_window().map_err(err)?.cast::<AnyObject>();
+        // SAFETY: Tauri owns this live NSWindow; the cloned WebviewWindow keeps
+        // it alive during this main-thread sample. NSRect uses the existing
+        // objc2-foundation binding, including the platform's struct-return ABI.
+        let (native_frame, layout) = unsafe {
+            let native = pointer.as_ref().ok_or("找不到控制台原生窗口。")?;
+            let native_frame: NSRect = msg_send![native, frame];
+            let layout: NSRect = msg_send![native, contentLayoutRect];
+            (native_frame, layout)
+        };
+        super::console_coordinates::title_inset_from_layout(
+            native_frame.size.height,
+            layout.origin.y,
+            layout.size.height,
+            window_scale,
+        )?
+    };
+    #[cfg(not(target_os = "macos"))]
     let inner_position = window.inner_position().map_err(err)?;
+    #[cfg(not(target_os = "macos"))]
+    let top_inset = (i64::from(inner_position.y) - i64::from(outer.y))
+        .clamp(0, i64::from(outer_size.height)) as u32;
     let raw = WindowFrame {
         outer: PhysicalRect {
             x: outer.x,
@@ -142,9 +197,8 @@ fn frame(window: &WebviewWindow) -> Result<WindowFrame, String> {
             width: inner.width,
             height: inner.height,
         },
-        window_scale: window.scale_factor().map_err(err)?,
-        top_inset: (i64::from(inner_position.y) - i64::from(outer.y))
-            .clamp(0, i64::from(outer_size.height)) as u32,
+        window_scale,
+        top_inset,
     };
     // macOS origins use the window's backing scale, whereas monitor origins
     // use each screen's scale. Normalize before comparing desktop geometry.

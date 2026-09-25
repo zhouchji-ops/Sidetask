@@ -522,6 +522,11 @@ fn apply_geometry_inner(
         settings.edge == "left",
         dock.placement.offset,
     )?;
+    #[cfg(target_os = "macos")]
+    {
+        geometry.panel = edge_coordinates::mac_native_rect(geometry.panel, area.work)?;
+        geometry.handle = edge_coordinates::mac_native_rect(geometry.handle, area.work)?;
+    }
     let panel = window(app, "edge-panel")?;
     let handle = window(app, "edge-handle")?;
     // Hide before a geometry transition so automatic correction cannot reveal an

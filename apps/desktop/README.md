@@ -10,6 +10,8 @@ Tauri 2 + React / TypeScript + Rust + SQLite。任务、今日计划和设置共
 
 Windows后续由用户的Windows开发机负责，先读[Windows接手说明](../../docs/delivery/WINDOWS_HANDOFF.md)，包含PowerShell环境/检查/隔离原生流程、代码入口与优先验收项。本Mac任务不再代做Windows专项。
 
+Mac 开发与推送固定使用 `mac` → `origin/mac`；Windows接手基线仍在 `main`，具体协作规则见根 [AGENTS](../../AGENTS.md)。
+
 ## 开发
 
 需要 Node.js 24、npm、Rust stable 和相应系统的 Tauri 构建前置条件。当前 Mac 已安装 Rust 到 `~/.cargo/bin`；若终端找不到 cargo，将该目录加到当前终端 PATH。
@@ -61,4 +63,4 @@ cargo audit --file src-tauri/Cargo.lock # 需要cargo-audit；本轮使用0.22.2
 
 CI固定Node24.14.1/Rust1.98.1及官方Actions commit。上一阶段[fade1d6 CI36051857305](https://github.com/changjin-cpu/SideTask/actions/runs/36051857305)通过Mac99TS/121Rust/72UI、Windows99TS/119Rust/72UI与App/NSIS，最后仅artifact配额上传失败。本轮B33不能借用旧提交CI作为自身双平台通过。构建成功不表示有可下载安装包。
 
-隔离原生验收以临时Tauri配置覆盖productName/identifier，不向正式个人库注入fixture。分区比例和控制台几何已实现，小窗混合DPI/尺寸取消本轮修复；首次常驻说明尚未实现，见[路线图](../../docs/delivery/ROADMAP.md)。
+隔离原生验收以临时Tauri配置覆盖productName/identifier，不向正式个人库注入fixture。分区比例和控制台几何已实现，小窗混合DPI/尺寸取消本轮修复；首次常驻说明已接入，确认状态与任务快照分开保存，见[路线图](../../docs/delivery/ROADMAP.md)。

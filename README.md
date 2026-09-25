@@ -8,6 +8,8 @@
 
 项目仓库：[changjin-cpu/SideTask](https://github.com/changjin-cpu/SideTask)。后续代码与文档均在该仓库的本地工作目录中维护；当前本地目录名称仍为 `任务弹窗`。
 
+**Mac 开发固定使用 [`mac`](https://github.com/changjin-cpu/SideTask/tree/mac) 分支，后续 Mac 代码和文档均推送 `origin/mac`。** 分支从 `e844fcd` 建立；Windows 从 `main` 交接基线继续，共享修复按具体提交协调，不直接覆盖彼此分支。
+
 **当前阶段：功能完善与内部试用验收。** 使用 Tauri 2 + React/TypeScript + Rust + SQLite 自建精简核心。备份与坏库启动恢复、固定 DDL、退出草稿保护、全局搜索、大列表和今日整理已实现；回收站与单项恢复已落地，正在完成集成和原生验收。第一版同时面向 macOS / Windows，双平台、多屏和发布验收尚未完成。实际测试及构建结果见 [STATUS](docs/delivery/STATUS.md)。
 
 ## 从这里开始
@@ -34,7 +36,7 @@ Todobar 的窗口隐藏、悬停和数据模型与需求有明显差距，因此
 
 「加入今日」是给同一任务建立今日计划引用，不是复制一条任务。任意位置完成或撤销完成，都更新同一个任务状态。
 
-任务可移入回收站并恢复，保留原 ID、DDL、完成状态与所有日期的计划。正常搜索排除回收站，回收站有独立搜索；删除与恢复入口保留编辑草稿和冲突处理。当前 SQLite 为 schema4，便携任务备份为 v2，包含回收站记录；没有自动清空或永久删除。分区比例已支持操作结束后保存、取消和失败恢复；控制台位置/尺寸记忆已接入并在集成验收，首次说明待补，见[窗口偏好计划](docs/research/WINDOW_PREFERENCES.md)。
+任务可移入回收站并恢复，保留原 ID、DDL、完成状态与所有日期的计划。正常搜索排除回收站，回收站有独立搜索；删除与恢复入口保留编辑草稿和冲突处理。当前 SQLite 为 schema4，便携任务备份为 v2，包含回收站记录；没有自动清空或永久删除。分区比例已支持操作结束后保存、取消和失败恢复；控制台位置/尺寸记忆已接入并在集成验收，首次常驻说明已接入，确认后隐藏且设置可再读，见[窗口偏好计划](docs/research/WINDOW_PREFERENCES.md)。
 
 ## 目录
 
@@ -65,7 +67,7 @@ Todobar 的窗口隐藏、悬停和数据模型与需求有明显差距，因此
 
 运行入口在 [apps/desktop/README.md](apps/desktop/README.md)：进入该目录后 `npm ci`、`npm run dev` 可启动浏览器原型；原生开发使用 `npm run tauri -- dev`（需要 Rust 和平台构建环境）。浏览器只能验证布局和任务交互，不能证明真实多屏窗口能力。生成物与个人任务数据库不提交仓库。
 
-本地分支为`main`，origin连接用户指定仓库，已授权推送。[fade1d6 CI](https://github.com/changjin-cpu/SideTask/actions/runs/36051857305)的Mac99TS/121Rust/72UI与App、Windows99TS/119Rust/72UI与NSIS通过，两平台上传受账户artifact配额阻塞。本轮小窗修复在Mac本地99TS/138Rust/82UI及双包构建/验签通过；新提交自身CI需另查，不能沿用旧结果。
+本地分支为`mac`，跟踪`origin/mac`，origin连接用户指定仓库，已授权推送。[fade1d6 CI](https://github.com/changjin-cpu/SideTask/actions/runs/36051857305)的Mac99TS/121Rust/72UI与App、Windows99TS/119Rust/72UI与NSIS通过，两平台上传受账户artifact配额阻塞。本轮Mac首次说明和原生窗口修复在本地99TS/148Rust/90UI及双包构建/验签通过，单屏真实启动/常驻恢复/普通几何重启已复验；新提交自身CI需另查，不能沿用旧结果。
 
 用户已将Windows后续交给Windows开发机，本Mac任务提供源码和[完整接手说明](docs/delivery/WINDOWS_HANDOFF.md)。本轮未验证Windows真实窗口或安装升级；正式可运行Mac包和摘要见STATUS。
 

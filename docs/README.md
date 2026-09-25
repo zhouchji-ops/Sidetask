@@ -23,3 +23,5 @@ PRD 是产品行为的依据；ADR 是技术取舍的依据；BACKLOG 是事项�
 - [Windows真实App冒烟可行性与边界](research/WINDOWS_NATIVE_SMOKE.md)
 - [小窗尺寸与混合DPI集成记录](../tests/manual/2026-09-25-edge-resize.md)
 - [Windows开发机接手说明](delivery/WINDOWS_HANDOFF.md)
+
+- [Mac分支及首次说明、真实窗口修复记录](../tests/manual/2026-09-25-mac-branch.md)

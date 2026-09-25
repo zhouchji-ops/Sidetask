@@ -39,6 +39,8 @@ async function setup(page: Page, queryFailures = 0) {
           if (command === 'plugin:event|listen') { const id = ++sequence; listeners.set(id, args); return id; }
           if (command === 'plugin:event|unlisten') { listeners.delete(args.eventId); return; }
           if (command === 'get_startup_recovery' || command === 'get_pending_exit') return null;
+          if (command === 'get_usage_guide_seen') return true;
+          if (command === 'acknowledge_usage_guide') return;
           if (command === 'get_snapshot') return structuredClone(snapshot);
           if (command === 'get_window_status') return { pending: false, error: null };
           if (command === 'get_console_position_status') {

@@ -7,6 +7,8 @@ fn main() {
             "get_monitors",
             "get_window_status",
             "get_console_position_status",
+            "get_usage_guide_seen",
+            "acknowledge_usage_guide",
             "get_pending_exit",
             "resolve_exit",
             "export_backup",

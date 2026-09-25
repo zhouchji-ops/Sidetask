@@ -31,3 +31,11 @@
 合成测试覆盖旧库迁移/回滚、原 JSON 保留、两连接交错字段合并、元数据写失败和任务版本隔离；纯几何与状态测试覆盖恢复边界，浏览器测试覆盖状态反馈。具体执行结果仅引用最新 STATUS，纯状态测试不称为原生故障注入。
 
 本轮控制台几何的 Mac 原生验收因锁屏尚未执行；Windows 本轮新提交的 CI 与原生操作亦未执行。以前的 Mac 或 Windows 结果不能代替本轮验证。仍需重启尺寸、最大化恢复、负坐标和混合 DPI、断屏/睡眠/Spaces、焦点与关闭/退出，以及系统位置调用失败的真实验证。此 ADR 记录采用的实现，不表示双平台里程碑完成或无缺陷保证。
+
+## Mac真机补充（2026-09-25，mac分支）
+
+基线e844fcd实机启动暴露了outer==inner、top_inset==0时永久拒绝正常控制台的问题。锁定[tauri-runtime-wry2.11.4实现](https://github.com/tauri-apps/tauri/blob/ca90b46b2e2cbbc981dae1b809f4af4343fe0558/crates/tauri-runtime-wry/src/lib.rs#L1200-L1206)对默认Visible标题栏启用fullsize_content_view，因此内容区可以包含标题区域，不能要求标题高度小于外内高度差。
+
+Mac现由AppKit `contentLayoutRect`获取真实标题区域，同一主线程采样窗口外框、内容尺寸、scale和layout；工作线程等待有2秒上限，超时晚到操作仅只读，不持业务/dock锁。几何算法独立处理标题可达区域与边框厚度，不猜固定高度，不改变标题栏风格。直接声明原锁文件中已存在的objc2-foundation0.3.2，以绑定NSRect避免手写结构体ABI；固定commit `7b1abfd750a2cacaea71d6a56ecfb83cb7de560b`，[geometry类型](https://github.com/madsmtm/objc2/blob/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/framework-crates/objc2-foundation/src/geometry.rs)、[MIT许可](https://github.com/madsmtm/objc2/blob/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md)。未复制上游代码或升级依赖版本。
+
+同阶段首次说明使用placement根级usageGuideSeen字段，确认只置true，与console/edge互保，不重编码任务快照或提高revision。schema4和便携v2不变；缺省false、非法类型拒绝。具体执行证据见[Mac记录](../../tests/manual/2026-09-25-mac-branch.md)及最新STATUS；前文锁屏为当时限制，不覆盖这次真机结果。

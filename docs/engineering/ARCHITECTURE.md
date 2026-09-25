@@ -96,7 +96,7 @@ SQLite 是任务和持久化设置的事实来源，React 状态只是各窗口�
 
 `console_window.rs` 隐藏创建普通控制台，先应用并确认正常几何，再应用并确认可选最大化，最后由明确的启动意图显示和聚焦；失败保留旧记录并显示窗口及错误。原生事件只记代次/投递命令，工作线程在业务锁外采样与调用窗口，稳定变化合并保存，隐藏和批准退出前补一次 flush。部分恢复或最大化失败阻止自动采样覆盖旧记录；“重试保存位置”重新采集并保存当前位置，“不保存本次位置”先采集再忽略，均不回弹到旧目标。退出 flush 的元数据失败如实记录，但不阻止已完成草稿确认的退出；草稿保存失败仍受原退出协议保护。
 
-源码接线与自动化覆盖不等于系统行为通过。本轮 Mac 原生因锁屏未验，Windows 本轮 CI / 原生未执行；重启、混合 DPI、多屏变化、最大化和焦点/退出结果以最新 STATUS 为准。决定与固定一手参考见 ADR-0006。
+源码接线与自动化覆盖不等于系统行为通过。本阶段Mac已开始单屏原生复验；默认fullsize内容的标题区另用AppKit contentLayoutRect主线程实测，不从outer/inner高度差推断。Windows另由开发机负责；重启、混合 DPI、多屏变化、最大化和焦点/退出结果以最新 STATUS 为准。决定与固定一手参考见 ADR-0006。
 
 ### 按窗口限制系统能力
 
@@ -192,3 +192,7 @@ POC 确定最低 OS / CPU 架构矩阵。之后使用 macOS 与 Windows 各自�
 - [Apple windowWillResize](https://developer.apple.com/documentation/appkit/nswindowdelegate/windowwillresize(_:to:))、[Windows WM_SIZING](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-sizing)：可用于约束将应用的窗口尺寸。
 - [Apple 屏幕参数变化通知](https://developer.apple.com/documentation/appkit/nsapplication/didchangescreenparametersnotification)、[Windows WM_DPICHANGED](https://learn.microsoft.com/en-us/windows/win32/hidpi/wm-dpichanged)：屏幕环境变化需要处理。
 - [Apple nonactivatingPanel](https://developer.apple.com/documentation/appkit/nswindow/stylemask-swift.struct/nonactivatingpanel)、[fullScreenAuxiliary](https://developer.apple.com/documentation/appkit/nswindow/collectionbehavior-swift.struct/fullscreenauxiliary)：相关面板机制仍需结合具体系统版本测试。
+
+### 首次常驻说明
+
+说明确认状态属于本机设备元数据：`placement.usageGuideSeen`，专用console-only命令和Repository IMMEDIATE合并事务。不经业务mutate、不改Settings或任务revision，不因确认而重新应用窗口。前端hook独立处理读取/保存代次，慢读取不能撤回已完成确认；成功才隐藏，错误与重试不卸载任务/设置草稿。正常控制台内联提示，设置保留帮助；恢复模式没有正常AppState，不展示或调用该功能。

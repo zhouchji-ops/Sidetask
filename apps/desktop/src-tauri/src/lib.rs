@@ -146,6 +146,41 @@ fn get_console_position_status(
     platform::console_window::status(&app)
 }
 
+fn read_usage_guide_for_window(state: &AppState, label: &str) -> Result<bool, String> {
+    require_window(label, &["console"])?;
+    state
+        .service
+        .lock()
+        .map_err(|_| "任务服务暂不可用。")?
+        .repository
+        .read_usage_guide_seen()
+}
+
+fn acknowledge_usage_guide_for_window(state: &AppState, label: &str) -> Result<(), String> {
+    require_window(label, &["console"])?;
+    let mut service = state.service.lock().map_err(|_| "任务服务暂不可用。")?;
+    platform::exit::ensure_running(state)?;
+    service.repository.acknowledge_usage_guide()
+}
+
+#[tauri::command]
+async fn get_usage_guide_seen(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<bool, String> {
+    let state = task_state(&app)?;
+    read_usage_guide_for_window(&state, window.label())
+}
+
+#[tauri::command]
+async fn acknowledge_usage_guide(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<(), String> {
+    let state = task_state(&app)?;
+    acknowledge_usage_guide_for_window(&state, window.label())
+}
+
 #[tauri::command]
 fn get_pending_exit(
     app: tauri::AppHandle,
@@ -288,6 +323,8 @@ pub fn run() {
             get_monitors,
             get_window_status,
             get_console_position_status,
+            get_usage_guide_seen,
+            acknowledge_usage_guide,
             get_pending_exit,
             resolve_exit,
             export_backup,
@@ -335,6 +372,38 @@ pub fn run() {
 #[cfg(test)]
 mod security_tests {
     use super::*;
+
+    #[test]
+    fn usage_guide_command_handlers_reject_other_windows_without_changing_data() {
+        let directory = std::env::temp_dir().join(format!(
+            "sidetask-guide-command-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let state = initialize_task_state(&directory).unwrap();
+        let original = serde_json::to_value(&state.service.lock().unwrap().snapshot).unwrap();
+        assert!(!read_usage_guide_for_window(&state, "console").unwrap());
+        for label in ["edge-panel", "edge-handle", "unknown"] {
+            assert!(read_usage_guide_for_window(&state, label).is_err());
+            assert!(acknowledge_usage_guide_for_window(&state, label).is_err());
+        }
+        assert!(!read_usage_guide_for_window(&state, "console").unwrap());
+        assert!(state
+            .service
+            .lock()
+            .unwrap()
+            .repository
+            .load_placement()
+            .unwrap()
+            .is_none());
+        acknowledge_usage_guide_for_window(&state, "console").unwrap();
+        assert!(read_usage_guide_for_window(&state, "console").unwrap());
+        assert_eq!(
+            serde_json::to_value(&state.service.lock().unwrap().snapshot).unwrap(),
+            original
+        );
+        drop(state);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn lifecycle_mutations_are_console_only() {
@@ -534,6 +603,8 @@ mod security_tests {
             "allow-resolve-exit",
             "allow-get-startup-recovery",
             "allow-get-console-position-status",
+            "allow-get-usage-guide-seen",
+            "allow-acknowledge-usage-guide",
             "allow-recover-startup-backup",
             "allow-restart-after-recovery",
         ] {
@@ -545,6 +616,8 @@ mod security_tests {
         for command in [
             "allow-get-startup-recovery",
             "allow-get-console-position-status",
+            "allow-get-usage-guide-seen",
+            "allow-acknowledge-usage-guide",
             "allow-recover-startup-backup",
             "allow-restart-after-recovery",
         ] {

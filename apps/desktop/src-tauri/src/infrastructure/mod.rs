@@ -24,6 +24,12 @@ pub trait Repository: Send {
     fn save_console_placement(&mut self, _console_json: &str) -> Result<(), String> {
         Err("此存储不支持保存控制台位置。".into())
     }
+    fn read_usage_guide_seen(&self) -> Result<bool, String> {
+        Err("此存储不支持读取使用说明状态。".into())
+    }
+    fn acknowledge_usage_guide(&mut self) -> Result<(), String> {
+        Err("此存储不支持保存使用说明状态。".into())
+    }
     fn backup(&self) -> Result<PathBuf, String> {
         Err("此存储不支持安全备份；未恢复数据。".into())
     }
@@ -204,6 +210,13 @@ fn write_placement_object(
         )
         .map_err(|error| format!("无法保存窗口位置：{error}"))?;
     Ok(())
+}
+fn usage_guide_seen(placement: &Map<String, Value>) -> Result<bool, String> {
+    match placement.get("usageGuideSeen") {
+        None => Ok(false),
+        Some(Value::Bool(seen)) => Ok(*seen),
+        Some(_) => Err("使用说明状态格式无效，原设置未覆盖。".into()),
+    }
 }
 fn parent_directory(path: &Path) -> &Path {
     path.parent()
@@ -442,6 +455,25 @@ impl Repository for SqliteRepository {
             .map_err(|error| format!("无法保存控制台位置：{error}"))
         // Console-only metadata never reads or rewrites the task snapshot and
         // must not advance this repository's task compare-and-swap baseline.
+    }
+    fn read_usage_guide_seen(&self) -> Result<bool, String> {
+        usage_guide_seen(&read_placement_object(&self.connection)?)
+    }
+    fn acknowledge_usage_guide(&mut self) -> Result<(), String> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| format!("无法保存使用说明状态：{error}"))?;
+        let mut merged = read_placement_object(&transaction)?;
+        if !usage_guide_seen(&merged)? {
+            merged.insert("usageGuideSeen".into(), Value::Bool(true));
+            write_placement_object(&transaction, &merged)?;
+        }
+        // This is a device-only acknowledgement: no task snapshot read/write,
+        // revision increment, task baseline refresh, or geometry replacement.
+        transaction
+            .commit()
+            .map_err(|error| format!("无法保存使用说明状态：{error}"))
     }
     fn backup(&self) -> Result<PathBuf, String> {
         consistent_backup(
@@ -998,6 +1030,177 @@ mod tests {
         serde_json::from_str(&repo.load_placement().unwrap().unwrap()).unwrap()
     }
     #[test]
+    fn usage_guide_is_independent_of_tasks_and_preserves_raw_snapshot_on_acknowledgement() {
+        let mut trash = Snapshot::demo("2026-09-24");
+        for task in &mut trash.tasks {
+            task.deleted_at = Some("2026-09-24T00:00:00Z".into());
+        }
+        for snapshot in [Snapshot::empty(), Snapshot::demo("2026-09-24"), trash] {
+            let temp = TempDatabase::new();
+            let mut repo = SqliteRepository::open(&temp.path).unwrap();
+            let baseline = repo.baseline.borrow().clone();
+            let raw = format!("\n{}\n", serde_json::to_string_pretty(&snapshot).unwrap());
+            repo.connection
+                .execute("UPDATE app_state SET value=?1 WHERE key='snapshot'", [&raw])
+                .unwrap();
+            assert!(!repo.read_usage_guide_seen().unwrap());
+            assert!(repo.load_placement().unwrap().is_none());
+            repo.connection.execute_batch("CREATE TRIGGER reject_guide_snapshot_update BEFORE UPDATE ON app_state WHEN OLD.key='snapshot' BEGIN SELECT RAISE(ABORT,'guide must not update snapshot'); END;").unwrap();
+            repo.acknowledge_usage_guide().unwrap();
+            assert!(repo.read_usage_guide_seen().unwrap());
+            assert_eq!(read_snapshot(&repo.connection).unwrap().0, raw);
+            assert_eq!(
+                read_snapshot(&repo.connection).unwrap().1.revision,
+                snapshot.revision
+            );
+            assert_eq!(*repo.baseline.borrow(), baseline);
+            assert_eq!(
+                placement_value(&repo),
+                serde_json::json!({"usageGuideSeen":true})
+            );
+            assert_eq!(
+                repo.connection
+                    .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                4
+            );
+            // Repeated acknowledgement is a no-op, even if placement writes fail.
+            repo.connection.execute_batch("CREATE TRIGGER reject_guide_placement_insert BEFORE INSERT ON app_state WHEN NEW.key='placement' BEGIN SELECT RAISE(ABORT,'no repeated write'); END;").unwrap();
+            repo.acknowledge_usage_guide().unwrap();
+            repo.connection.execute_batch("DROP TRIGGER reject_guide_snapshot_update; DROP TRIGGER reject_guide_placement_insert;").unwrap();
+            drop(repo);
+            let reopened = SqliteRepository::open(&temp.path).unwrap();
+            assert!(reopened.read_usage_guide_seen().unwrap());
+            assert_eq!(read_snapshot(&reopened.connection).unwrap().0, raw);
+        }
+    }
+
+    #[test]
+    fn concurrent_usage_guide_console_and_edge_metadata_patches_preserve_each_other() {
+        use std::sync::{Arc, Barrier};
+
+        let temp = TempDatabase::new();
+        let mut guide = SqliteRepository::open(&temp.path).unwrap();
+        let snapshot = Snapshot::demo("2026-09-24");
+        guide.save(&snapshot).unwrap();
+        guide.connection.execute("INSERT INTO app_state(key,value) VALUES('placement',?1)",
+            [r#"{"usageGuideSeen":false,"monitorName":"original","offset":0.1,"futurePreference":{"keep":true}}"#]).unwrap();
+        let mut console = SqliteRepository::open(&temp.path).unwrap();
+        let mut edge = SqliteRepository::open(&temp.path).unwrap();
+        let raw = read_snapshot(&guide.connection).unwrap().0;
+        let barrier = Arc::new(Barrier::new(3));
+        let guide_barrier = barrier.clone();
+        let guide_writer = std::thread::spawn(move || {
+            guide_barrier.wait();
+            guide.acknowledge_usage_guide().unwrap();
+        });
+        let console_barrier = barrier.clone();
+        let console_writer = std::thread::spawn(move || {
+            console_barrier.wait();
+            console
+                .save_console_placement(r#"{"width":1100,"height":720,"maximized":true}"#)
+                .unwrap();
+        });
+        let edge_writer = std::thread::spawn(move || {
+            barrier.wait();
+            // A stale full placement input cannot clear another writer's guide.
+            edge.save_placement(&snapshot, r#"{"monitorName":"moved","offset":0.7,"usageGuideSeen":false,"console":{"width":2}}"#).unwrap();
+        });
+        guide_writer.join().unwrap();
+        console_writer.join().unwrap();
+        edge_writer.join().unwrap();
+        let reopened = SqliteRepository::open(&temp.path).unwrap();
+        assert_eq!(
+            placement_value(&reopened),
+            serde_json::json!({
+                "usageGuideSeen":true, "monitorName":"moved", "offset":0.7,
+                "futurePreference":{"keep":true}, "console":{"width":1100,"height":720,"maximized":true}
+            })
+        );
+        assert_eq!(read_snapshot(&reopened.connection).unwrap().0, raw);
+    }
+
+    #[test]
+    fn failed_usage_guide_acknowledgement_rolls_back_and_can_retry() {
+        for existing in [
+            None,
+            Some(r#"{ "usageGuideSeen": false, "console": {"width":1000}, "offset":0.4 }"#),
+        ] {
+            let mut repo = SqliteRepository::open(Path::new(":memory:")).unwrap();
+            if let Some(raw) = existing {
+                repo.connection
+                    .execute(
+                        "INSERT INTO app_state(key,value) VALUES('placement',?1)",
+                        [raw],
+                    )
+                    .unwrap();
+            }
+            let raw = read_snapshot(&repo.connection).unwrap().0;
+            let baseline = repo.baseline.borrow().clone();
+            // Abort after the write has been attempted, on both INSERT/UPDATE paths.
+            repo.connection.execute_batch("CREATE TRIGGER reject_guide_insert AFTER INSERT ON app_state WHEN NEW.key='placement' BEGIN SELECT RAISE(ABORT,'injected guide write failure'); END; CREATE TRIGGER reject_guide_update AFTER UPDATE ON app_state WHEN NEW.key='placement' BEGIN SELECT RAISE(ABORT,'injected guide write failure'); END;").unwrap();
+            assert!(repo.acknowledge_usage_guide().is_err());
+            assert!(!repo.read_usage_guide_seen().unwrap());
+            assert_eq!(repo.load_placement().unwrap().as_deref(), existing);
+            assert_eq!(read_snapshot(&repo.connection).unwrap().0, raw);
+            assert_eq!(*repo.baseline.borrow(), baseline);
+            repo.connection
+                .execute_batch(
+                    "DROP TRIGGER reject_guide_insert; DROP TRIGGER reject_guide_update;",
+                )
+                .unwrap();
+            repo.acknowledge_usage_guide().unwrap();
+            assert!(repo.read_usage_guide_seen().unwrap());
+            if existing.is_some() {
+                assert_eq!(
+                    placement_value(&repo)["console"],
+                    serde_json::json!({"width":1000})
+                );
+                assert_eq!(placement_value(&repo)["offset"], serde_json::json!(0.4));
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_usage_guide_metadata_is_not_silently_replaced() {
+        let mut repo = SqliteRepository::open(Path::new(":memory:")).unwrap();
+        let raw_snapshot = read_snapshot(&repo.connection).unwrap().0;
+        let mut invalid = vec!["[]".into(), "{broken".into()];
+        for value in [
+            Value::Null,
+            serde_json::json!(1),
+            serde_json::json!("true"),
+            serde_json::json!({}),
+        ] {
+            invalid.push(serde_json::json!({"usageGuideSeen":value,"offset":0.3}).to_string());
+        }
+        invalid.push(serde_json::json!({"padding":"x".repeat(MAX_PLACEMENT_BYTES)}).to_string());
+        for raw in invalid {
+            repo.connection.execute("INSERT INTO app_state(key,value) VALUES('placement',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [&raw]).unwrap();
+            assert!(repo.read_usage_guide_seen().is_err());
+            assert!(repo.acknowledge_usage_guide().is_err());
+            assert_eq!(repo.load_placement().unwrap().unwrap(), raw);
+            assert_eq!(read_snapshot(&repo.connection).unwrap().0, raw_snapshot);
+        }
+        // A valid old object may already fill the metadata capacity. The new
+        // flag must fail visibly rather than truncate or reset that object.
+        let overhead = serde_json::json!({"padding":""}).to_string().len();
+        let full =
+            serde_json::json!({"padding":"x".repeat(MAX_PLACEMENT_BYTES - overhead)}).to_string();
+        assert_eq!(full.len(), MAX_PLACEMENT_BYTES);
+        repo.connection
+            .execute(
+                "UPDATE app_state SET value=?1 WHERE key='placement'",
+                [&full],
+            )
+            .unwrap();
+        assert!(!repo.read_usage_guide_seen().unwrap());
+        assert!(repo.acknowledge_usage_guide().is_err());
+        assert_eq!(repo.load_placement().unwrap().unwrap(), full);
+        assert_eq!(read_snapshot(&repo.connection).unwrap().0, raw_snapshot);
+    }
+
+    #[test]
     fn console_metadata_does_not_touch_snapshot_bytes_revision_or_task_baseline() {
         let mut repo = SqliteRepository::open(Path::new(":memory:")).unwrap();
         let baseline = repo.baseline.borrow().clone();
@@ -1227,10 +1430,13 @@ mod tests {
         original.settings.theme = "dark".into();
         repo.save_placement(&original, r#"{"monitorName":"retained-screen-placement"}"#)
             .unwrap();
+        repo.acknowledge_usage_guide().unwrap();
+        let original_placement = repo.load_placement().unwrap().unwrap();
         let mut service = TaskService::new(Box::new(repo)).unwrap();
         let content = service.export_backup().unwrap();
         assert!(!content.contains("settings"));
         assert!(!content.contains("placement"));
+        assert!(!content.contains("usageGuideSeen"));
         let mut backup: serde_json::Value = serde_json::from_str(&content).unwrap();
         backup["tasks"][0]["title"] = serde_json::json!("Restored synthetic content");
         let content = serde_json::to_string(&backup).unwrap();
@@ -1240,8 +1446,11 @@ mod tests {
         assert_eq!(restored.snapshot.settings, original.settings);
         assert_eq!(
             service.repository.load_placement().unwrap().unwrap(),
-            r#"{"monitorName":"retained-screen-placement"}"#
+            original_placement
         );
+        assert!(service.repository.read_usage_guide_seen().unwrap());
+        let safety = SqliteRepository::open(Path::new(&restored.safety_backup_path)).unwrap();
+        assert!(safety.read_usage_guide_seen().unwrap());
         assert!(restored.snapshot.revision > original.revision);
         assert!(restored
             .snapshot

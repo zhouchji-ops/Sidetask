@@ -212,6 +212,32 @@ pub fn window_rect(
     normalize_rect(space, rect, window_scale)
 }
 
+/// AppKit can align a requested frame to whole logical points even on Retina.
+/// Quantize before setting/confirming a Mac frame, while keeping every actual
+/// edge inside the work area. This does not change the saved logical preference.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn mac_native_rect(rect: Rect, work: Rect) -> Result<Rect, String> {
+    validate_rect(rect)?;
+    validate_rect(work)?;
+    let left = work.x.ceil();
+    let top = work.y.ceil();
+    let right = (work.x + work.width).floor();
+    let bottom = (work.y + work.height).floor();
+    let width = rect.width.floor().min(right - left);
+    let height = rect.height.floor().min(bottom - top);
+    if width < 1. || height < 1. {
+        return Err(INVALID_GEOMETRY.into());
+    }
+    let result = Rect {
+        x: rect.x.round().clamp(left, right - width),
+        y: rect.y.round().clamp(top, bottom - height),
+        width,
+        height,
+    };
+    validate_rect(result)?;
+    Ok(result)
+}
+
 /// Half-open monitor bounds give a shared seam to the monitor on its right or
 /// below. For mirrored/overlapping displays, enumeration order breaks the tie;
 /// the caller decides its fallback when the point falls outside every display.
@@ -733,6 +759,84 @@ mod tests {
             monitor_at_point(&[target, other], Point { x: 0., y: 0. }),
             None
         );
+    }
+
+    #[test]
+    fn mac_native_frames_match_appkit_point_alignment_without_changing_saved_size() {
+        // Observed on macOS 26.4.1 at 2x: AppKit returns y=126 for y=125.5.
+        let work = Rect {
+            x: 0.,
+            y: 33.,
+            width: 1470.,
+            height: 849.,
+        };
+        let desired = Rect {
+            x: 1094.,
+            y: 125.5,
+            width: 368.,
+            height: 610.,
+        };
+        let actual = mac_native_rect(desired, work).unwrap();
+        assert_eq!(actual, Rect { y: 126., ..desired });
+        assert_eq!(mac_native_rect(actual, work).unwrap(), actual);
+        // Near a lower seam, rounding must move inward instead of crossing it.
+        let bottom = Rect {
+            y: 272.5,
+            ..desired
+        };
+        let fitted = mac_native_rect(bottom, work).unwrap();
+        assert_eq!(fitted.y, 272.);
+        assert_eq!(fitted.height, 610.);
+        assert_eq!(fitted.y + fitted.height, work.y + work.height);
+    }
+
+    #[test]
+    fn mac_native_frames_keep_fractional_negative_work_areas_strictly_contained() {
+        let work = Rect {
+            x: -1920.5,
+            y: -849.25,
+            width: 1910.75,
+            height: 840.75,
+        };
+        for desired in [
+            Rect {
+                x: work.x,
+                y: work.y,
+                width: work.width,
+                height: work.height,
+            },
+            Rect {
+                x: -309.9,
+                y: -389.1,
+                width: 300.25,
+                height: 380.5,
+            },
+            Rect {
+                x: -1920.25,
+                y: -848.5,
+                width: 18.5,
+                height: 92.5,
+            },
+        ] {
+            let fitted = mac_native_rect(desired, work).unwrap();
+            assert!(fitted.x >= work.x && fitted.y >= work.y);
+            assert!(fitted.x + fitted.width <= work.x + work.width);
+            assert!(fitted.y + fitted.height <= work.y + work.height);
+            assert!(fitted.width <= desired.width && fitted.height <= desired.height);
+            assert!([fitted.x, fitted.y, fitted.width, fitted.height]
+                .iter()
+                .all(|v| v.fract() == 0.));
+            assert_eq!(mac_native_rect(fitted, work).unwrap(), fitted);
+        }
+        assert!(mac_native_rect(work, Rect { width: 0.5, ..work }).is_err());
+        assert!(mac_native_rect(
+            Rect {
+                y: f64::NAN,
+                ..work
+            },
+            work
+        )
+        .is_err());
     }
 
     #[test]

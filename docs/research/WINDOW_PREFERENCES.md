@@ -1,6 +1,6 @@
 # 窗口偏好与首次说明：最小实施计划
 
-2026-09-25，方案及分阶段实现记录。**分区比例与控制台几何已实现；最新集成检查见STATUS，原生待验，首次说明未实现。未安装插件、未完成本阶段系统窗口操作**。接续 B09（分区/尺寸）、B19/B21（控制台恢复）、B25（首次使用）；当前生命周期验收与交付状态仍以 STATUS 为准。
+2026-09-25，方案及分阶段实现记录。**分区比例与控制台几何已实现；最新集成检查见STATUS，原生待验，首次说明本轮接入；最新检查与原生问题见STATUS。未安装插件**。接续 B09（分区/尺寸）、B19/B21（控制台恢复）、B25（首次使用）；当前生命周期验收与交付状态仍以 STATUS 为准。
 
 ## 结论与现状
 
@@ -9,7 +9,7 @@
 | 已核对源码 | 当前行为 | 最小接续 |
 | --- | --- | --- |
 | [EdgePanel.tsx](../../apps/desktop/src/surfaces/edge-panel/EdgePanel.tsx) | `split` 为内存状态，默认 54，范围 30–70；已有分隔条方向键、指针捕获和交互锁 | 分隔条拖动仍只更新页面；操作结束保存一个设置字段 |
-| [Settings](../../apps/desktop/src-tauri/src/domain/mod.rs)、[前端校验](../../apps/desktop/src/lib/domain.ts) | 设置在快照内；字段白名单和旧值兼容明确，任务备份恢复保留本机设置 | 加 `panelSplit` 与一次说明的 `usageGuideSeen`，两端默认及验证保持一致 |
+| [Settings](../../apps/desktop/src-tauri/src/domain/mod.rs)、[前端校验](../../apps/desktop/src/lib/domain.ts) | 设置在快照内；字段白名单和旧值兼容明确，任务备份恢复保留本机设置 | 仅加 `panelSplit`；一次说明状态修订为 placement 根字段，见阶段三 |
 | [platform/mod.rs](../../apps/desktop/src-tauri/src/platform/mod.rs) | 控制台启动固定 1180×790、最小 880×620、居中；`open_console` 主动显示并聚焦。小窗已有工作区、缩放、停靠位置与保存逻辑 | 控制台单独保存/恢复；复用屏幕枚举，不复用小窗贴边算法 |
 | [Repository](../../apps/desktop/src-tauri/src/infrastructure/mod.rs) | `app_state` 只有 snapshot / placement；`save_placement` 仍重写整份任务快照。Placement 当前只有小窗屏幕与 offset | 扩展现有 placement 设备记录；给控制台增加合并元数据的写入方法，避免窗口移动重写 10k 任务 |
 | [Console.tsx](../../apps/desktop/src/surfaces/console/Console.tsx) | 真空库已有菜单栏/托盘恢复说明；没有独立的一次说明状态 | 复用简短内联说明，不做强制向导 |
@@ -27,7 +27,7 @@
 
 ## 阶段一：小窗分区比例
 
-新增 `Settings.panelSplit`，整数百分比 30–70，缺省 54。Rust serde、设置白名单与校验，TS 类型/校验/旧预览默认同步补齐；只在正常写入时持久化缺省，不重写原任务。`same_window_layout` 继续只比较原生几何/显隐字段，**panelSplit 与 usageGuideSeen 都不能进入该比较**；成功应用这些字段只需已有 WebView 重新布局。
+新增 `Settings.panelSplit`，整数百分比 30–70，缺省 54。Rust serde、设置白名单与校验，TS 类型/校验/旧预览默认同步补齐；只在正常写入时持久化缺省，不重写原任务。`same_window_layout` 继续只比较原生几何/显隐字段，**panelSplit 不能进入该比较**；usageGuideSeen 不属于 Settings，不参与设置或尺寸会话比较。
 
 - 拖动开始记下已提交值，保持指针捕获与交互锁；move 只更新本地比例。pointerup 最多提交一次；cancel / 捕获丢失 / 卸载释放锁并取消尚未提交的预览。只接受主指针左键，避免重复 pointerup / lostcapture 双提交。
 - 方向键仍每次 5%，按键连发在 keyup / 失焦后合并保存；新快照仅在未拖动、无未提交预览时同步本地值。与设置页并发变化按字段核对，失败保留可重试的比例草稿，不覆盖别的设置。
@@ -51,15 +51,15 @@
 
 首次主动打开正常控制台，显示一条可关闭的内联说明：“任务可从屏幕边缘快速查看。关闭这个窗口后，侧笺仍在菜单栏或托盘运行；可从那里重新打开或退出。”配“打开边缘小窗”“知道了”，已有默认停靠可直接使用，不强制逐步配置。设置页保留同一段可再次找到的说明；有已有任务的升级用户也最多看一次，不遮挡任务列表。
 
-`Settings.usageGuideSeen` 缺省 false，用户确认后一次保存；失败不宣称已记住，下次仍可出现。不靠任务数量判断是否首次。普通关闭仍走既有行为，未保存草稿继续既有保护，不额外弹“是否真的关闭”。关闭后 WebView 已隐藏，在里面发 toast 用户看不到；首轮在关闭前的首次说明解释去向即可，必要时下一次主动重开补一句状态说明。不开系统通知、不请求新权限、不为了显示说明自动展开小窗或重新激活应用。损坏启动恢复页面不显示正常常驻说明。
+`placement.usageGuideSeen` 缺省 false，用户确认后专用 IMMEDIATE 事务只置 true、合并其他元数据；不放 Settings 或 placement.console，不改任务快照原字节、revision、比较基线，schema4及便携任务v2不变。已 true 幂等不写，非法类型返回可重试错误、不覆盖坏记录。任务JSON恢复保留该设备标记，整库恢复可能带回旧标记再展示一次。失败不宣称已记住，下次仍可出现。不靠任务数量判断是否首次。普通关闭仍走既有行为，未保存草稿继续既有保护，不额外弹“是否真的关闭”。关闭后 WebView 已隐藏，在里面发 toast 用户看不到；首轮在关闭前的首次说明解释去向即可，必要时下一次主动重开补一句状态说明。不开系统通知、不请求新权限、不为了显示说明自动展开小窗或重新激活应用。损坏启动恢复页面不显示正常常驻说明。
 
 ## 验收与拆分
 
-先做分区比例，再做纯几何计算/元数据合并，最后接原生恢复与首次说明；每步通过后复盘。实现时同步 PRD/UX、数据模型和 BACKLOG，本次不修改这些交付文件。
+先做分区比例，再做纯几何计算/元数据合并，最后接原生恢复与首次说明；每步通过后复盘。实现时同步 PRD/UX、数据模型和 BACKLOG，检查证据见STATUS。
 
 | 必须新增/复验 | 通过标准 |
 | --- | --- |
-| TS/Rust 设置兼容与过滤 | 缺字段得到 54/false；边界和非法值明确；任务、DDL、Plans 不变；设置页其他草稿保留 |
+| TS/Rust 设置兼容与说明元数据 | panelSplit缺省54、独立usageGuideSeen缺省false；边界和非法值明确；任务、DDL、Plans 不变；设置页其他草稿保留 |
 | 分隔条 UI | 拖动、键盘连发、cancel、错误重试、重载保存；一次动作最多一次最终提交；比例变化没有 resize/show/hide/focus 原生命令 |
 | 元数据并发与失败 | console 与小窗先后/交错提交都保留彼此字段；几何写入不改变任务快照和 revision；真实写失败可见 |
 | 几何纯函数 | 负坐标、相同屏名、断屏、混合 DPI、外框差、极小工作区、最大化/最小化正常矩形；有效跨屏位置不被贴边 |
@@ -101,3 +101,7 @@
 Windows 092cfa9 CI的午夜断言失败来自运行中的测试时钟跨过初始一秒，产品正确显示到期；按[Playwright官方Clock](https://playwright.dev/docs/api/class-clock#clock-pause-at)改成加载就绪后暂停到指定时刻，再显式推进，注入1.5秒慢加载重复3次通过。新CI仍须验证。
 
 本阶段检查、失败尝试、包和原生限制见 [控制台验收记录](../../tests/manual/2026-09-25-console-geometry.md) / [STATUS](../delivery/STATUS.md)。纯状态/故障回归不能当作原生故障注入成功，Mac锁屏及Windows/混DPI真机矩阵仍未闭合。
+
+## 首次说明的固定参考
+
+参考 VS Code 1.105.0 固定提交 `03c265b1adee71ac88f833e065f7bb956b60550a` 的[Getting Started入口](https://github.com/microsoft/vscode/blob/03c265b1adee71ac88f833e065f7bb956b60550a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts)和[已读状态处理](https://github.com/microsoft/vscode/blob/03c265b1adee71ac88f833e065f7bb956b60550a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.ts)，[MIT许可](https://github.com/microsoft/vscode/blob/03c265b1adee71ac88f833e065f7bb956b60550a/LICENSE.txt)。只借鉴独立说明状态及可再次找到的帮助入口，不复制代码或引入教程框架。SideTask采用正常文档流的一段说明，保留当前任务优先布局。

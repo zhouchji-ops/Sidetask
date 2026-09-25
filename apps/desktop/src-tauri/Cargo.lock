@@ -3182,6 +3182,7 @@ dependencies = [
  "chrono-tz",
  "iana-time-zone",
  "objc2",
+ "objc2-foundation",
  "rusqlite",
  "serde",
  "serde_json",
