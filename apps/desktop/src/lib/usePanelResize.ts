@@ -122,7 +122,8 @@ export function usePanelResize(settings: Settings | undefined, busy: boolean, on
     alive.current = true;
     const blur = () => cancel();
     window.addEventListener('blur', blur);
-    return () => { alive.current = false; window.removeEventListener('blur', blur); cancel(); };
+    window.addEventListener('sidetask:panel-hidden', blur);
+    return () => { alive.current = false; window.removeEventListener('blur', blur); window.removeEventListener('sidetask:panel-hidden', blur); cancel(); };
   }, []);
   useEffect(() => {
     if (!settings) return;

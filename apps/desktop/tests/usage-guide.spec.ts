@@ -95,7 +95,7 @@ for (const kind of ['empty', 'active', 'trash']) for (const seen of [false, true
     if (kind === 'trash') snapshot.tasks.forEach(task => { task.deletedAt = '2026-09-24T04:00:00.000Z'; });
     await preview(context, page, snapshot, seen);
     await expect(guide(page)).toHaveCount(seen ? 0 : 1);
-    await expect(page.locator('.edge-panel')).toHaveCount(0);
+    await expect(page.locator('.edge-panel')).toBeHidden();
     if (!seen) {
       await expect(guide(page)).toContainText('菜单栏或系统托盘');
       await acknowledge(page).focus();
@@ -230,12 +230,12 @@ test('边缘入口暂停时解释如何开启，确认与设置草稿都不擅�
   await expect(openPanel(page)).toBeDisabled();
   await page.getByRole('switch', { name: '启用边缘入口', exact: true }).click();
   await expect(openPanel(page)).toBeDisabled();
-  await expect(page.locator('.edge-panel')).toHaveCount(0);
+  await expect(page.locator('.edge-panel')).toBeHidden();
   expect((await stored(page)).settings.edgeEnabled).toBe(false);
   await page.getByRole('button', { name: '保存设置', exact: true }).click();
   await expect(openPanel(page)).toBeEnabled();
   await expect(guide(page)).not.toContainText('边缘入口已暂停');
-  await expect(page.locator('.edge-panel')).toHaveCount(0);
+  await expect(page.locator('.edge-panel')).toBeHidden();
   await openPanel(page).click();
   await expect(page.locator('.edge-panel')).toBeVisible();
   expect((await stored(page)).tasks).toEqual(snapshot.tasks);
@@ -266,11 +266,12 @@ test('浏览器标记写入失败不假装确认，重试成功只写独立标�
   expect(await stored(page)).toEqual(before);
 });
 
-test('四种风格与浅深色的窄窗说明保持正常文档流和可用按钮', async ({ page, context }, testInfo) => {
+// Give each visual configuration its own bounded test on slower CI runners.
+for (const uiStyle of ['paper', 'studio', 'editorial', 'mono'] as const) for (const theme of ['light', 'dark'] as const) {
+test(`窄窗说明保持正常文档流和可用按钮：${uiStyle}/${theme}`, async ({ page, context }, testInfo) => {
   const snapshot = seed(); snapshot.tasks = []; snapshot.plans = [];
   await page.setViewportSize({ width: 640, height: 480 });
   await preview(context, page, snapshot);
-  for (const uiStyle of ['paper', 'studio', 'editorial', 'mono'] as const) for (const theme of ['light', 'dark'] as const) {
     await page.evaluate(({ key, uiStyle, theme }) => {
       const snapshot = JSON.parse(localStorage.getItem(key)!);
       snapshot.settings.uiStyle = uiStyle; snapshot.settings.theme = theme;
@@ -289,5 +290,5 @@ test('四种风格与浅深色的窄窗说明保持正常文档流和可用按�
     await expect(acknowledge(page)).toBeFocused();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`guide-${uiStyle}-${theme}-640x480.png`) });
-  }
 });
+}

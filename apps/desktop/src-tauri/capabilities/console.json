@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "console",
-  "description": "Only the management console may inspect displays, acknowledge the usage guide, export/restore data and resolve explicit application exit requests.",
+  "description": "Only the management console may inspect displays, acknowledge the usage guide and export/restore data. Task surfaces resolve their own native exit stage.",
   "windows": ["console"],
-  "permissions": ["allow-get-monitors", "allow-get-window-status", "allow-get-console-position-status", "allow-get-usage-guide-seen", "allow-acknowledge-usage-guide", "allow-get-pending-exit", "allow-resolve-exit", "allow-export-backup", "allow-preview-restore", "allow-restore-backup", "allow-get-startup-recovery", "allow-recover-startup-backup", "allow-restart-after-recovery"]
+  "permissions": ["allow-get-monitors", "allow-get-window-status", "allow-get-console-position-status", "allow-get-usage-guide-seen", "allow-acknowledge-usage-guide", "allow-export-backup", "allow-preview-restore", "allow-restore-backup", "allow-get-startup-recovery", "allow-recover-startup-backup", "allow-restart-after-recovery"]
 }

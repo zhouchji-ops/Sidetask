@@ -176,25 +176,27 @@ test('浏览器小窗预览支持悬停、自动收起与保持展开', async ({
   await preview.getByRole('button', { name: '展开侧笺；按住拖动可调整位置' }).hover();
   await expect(preview.getByRole('heading', { name: '今日计划', exact: true })).toBeVisible();
   await page.mouse.move(400, 100);
-  await expect(preview.locator('.edge-panel')).toHaveCount(0);
+  await expect(preview.locator('.edge-panel')).toBeHidden();
   await preview.getByRole('button', { name: '展开侧笺；按住拖动可调整位置' }).hover();
   await preview.getByRole('button', { name: '保持展开', exact: true }).click();
   await page.mouse.move(400, 100);
   await expect(preview.getByRole('button', { name: '取消保持展开', exact: true })).toBeVisible();
   await preview.getByRole('button', { name: '收起小窗', exact: true }).click();
   await page.mouse.move(400, 100);
-  await expect(preview.locator('.edge-panel')).toHaveCount(0);
+  await expect(preview.locator('.edge-panel')).toBeHidden();
 });
 
-test('独立小窗的新建入口打开控制台创建对话框', async ({ page }) => {
+test('独立小窗的新建入口原地添加今日任务', async ({ page }) => {
   await page.goto('/?surface=edge-panel');
-  await page.getByRole('button', { name: '在控制台新建任务', exact: true }).click();
-  await expect(page).toHaveURL(/surface=console.*newTask=1/);
-  const dialog = page.getByRole('dialog', { name: '新建任务' });
-  await expect(dialog).toBeVisible();
-  await dialog.getByLabel('任务名称', { exact: true }).fill('从边缘开始的任务');
-  await dialog.getByRole('button', { name: '创建任务', exact: true }).click();
-  await expect(page.locator('.main-content').getByRole('button', { name: '完成：从边缘开始的任务', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '快速添加今日任务', exact: true }).click();
+  await expect(page).toHaveURL(/surface=edge-panel$/);
+  const title = page.getByRole('textbox', { name: '今日任务名称', exact: true });
+  await expect(title).toBeFocused();
+  await title.fill('从边缘开始的任务');
+  await page.getByRole('button', { name: '添加到今日', exact: true }).click();
+  await expect(title).toHaveValue('');
+  await expect(page.getByRole('button', { name: '完成：从边缘开始的任务', exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: '新建任务', exact: true })).toHaveCount(0);
 });
 
 test('浏览器预览可拖动小窗尺寸，松手后设置保存', async ({ page }) => {

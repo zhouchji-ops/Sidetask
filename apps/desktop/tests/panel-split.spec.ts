@@ -68,6 +68,7 @@ async function nativeHarness(page: Page) {
           if (command === 'plugin:event|listen') { const id = ++next; listeners.set(id, args); return id; }
           if (command === 'plugin:event|unlisten') { listeners.delete(args.eventId); return; }
           if (command === 'get_snapshot') return structuredClone(current);
+          if (command === 'get_pending_exit') return null;
           if (command === 'window_action') return;
           if (command === 'mutate') {
             if (probe.delayMutation) await new Promise<void>(resolve => { probe.releaseMutation = resolve; });
@@ -94,6 +95,25 @@ async function assertOnlyInteraction(page: Page, explicitPointer = false) {
   expect(calls.every((call: any) => call.args.action === 'interaction' || (explicitPointer && call.args.action === 'focusPanel'))).toBe(true);
   expect(calls.at(-1).args.payload.locked).toBe(false);
 }
+
+test('保留挂载的小窗隐藏取消未松开的分区键盘调整，重新显示仍是已存比例', async ({ page, context }) => {
+  const before = await preview(context, page);
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.goto('/?surface=console');
+  await page.locator('.sidebar').getByRole('button', { name: '打开边缘小窗', exact: true }).click();
+  const panel = page.getByTestId('browser-edge-preview');
+  const divider = panel.getByRole('separator', { name: label, exact: true });
+  await divider.focus();
+  await page.keyboard.down('ArrowDown');
+  await expect(divider).toHaveAttribute('aria-valuenow', '59');
+  await panel.getByRole('button', { name: '收起小窗', exact: true }).evaluate(element => (element as HTMLButtonElement).click());
+  await expect(divider).toBeHidden();
+  await page.keyboard.up('ArrowDown');
+  await page.locator('.sidebar').getByRole('button', { name: '打开边缘小窗', exact: true }).click();
+  await expect(divider).toHaveAttribute('aria-valuenow', '54');
+  expect(await writes(page)).toEqual([]);
+  expect(await stored(page)).toEqual(before);
+});
 
 test('拖动仅在松手保存一次，重载和另一窗口恢复比例且任务计划不变', async ({ page, context }) => {
   const before = await preview(context, page);

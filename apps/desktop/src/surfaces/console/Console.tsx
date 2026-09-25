@@ -46,32 +46,71 @@ function ConsoleContent() {
   const [toast, setToast] = useState<{ message: string; undo?: () => Promise<void>; actionLabel?: string; successMessage?: string | false } | null>(null);
   const { dirty: draftDirty, saveAll, discardAll } = useDrafts();
   const [exitRequest, setExitRequest] = useState<number | null>(null);
+  const exitRequestRef = useRef<number | null>(null);
+  const resolvingExitRef = useRef<number | null>(null);
   const [resolving, setResolving] = useState(false);
   const [exitFailure, setExitFailure] = useState('');
   useEffect(() => {
     let disposed = false;
     let stop: (() => void) | undefined;
-    void attachExitRequests(setExitRequest).then(cleanup => { if (disposed) cleanup(); else stop = cleanup; }).catch(reason => setExitFailure(String(reason)));
+    void attachExitRequests(requestId => {
+      if (disposed || exitRequestRef.current === requestId) return;
+      exitRequestRef.current = requestId; resolvingExitRef.current = null;
+      setExitRequest(requestId); setResolving(false); setExitFailure('');
+    }, requestId => {
+      if (disposed || exitRequestRef.current !== requestId) return;
+      exitRequestRef.current = null; resolvingExitRef.current = null;
+      setExitRequest(null); setResolving(false); setExitFailure('');
+    }).then(cleanup => { if (disposed) cleanup(); else stop = cleanup; }).catch(reason => setExitFailure(String(reason)));
     return () => { disposed = true; stop?.(); };
   }, []);
   useEffect(() => {
     if (exitRequest === null || draftDirty || busy || resolving) return;
+    const requestId = exitRequest;
+    resolvingExitRef.current = requestId;
     setResolving(true);
-    void resolveExit(exitRequest, true).then(() => setExitRequest(null)).catch(reason => { setExitFailure(String(reason)); setExitRequest(null); }).finally(() => setResolving(false));
+    void resolveExit(requestId, true).then(() => {
+      if (exitRequestRef.current !== requestId) return;
+      exitRequestRef.current = null; setExitRequest(null);
+    }).catch(reason => {
+      if (exitRequestRef.current !== requestId) return;
+      exitRequestRef.current = null; setExitFailure(String(reason)); setExitRequest(null);
+    }).finally(() => {
+      if (resolvingExitRef.current !== requestId) return;
+      resolvingExitRef.current = null; setResolving(false);
+    });
   }, [exitRequest, draftDirty, busy, resolving]);
   async function finishExit(save: boolean) {
-    if (exitRequest === null || busy || resolving) return;
+    const requestId = exitRequestRef.current;
+    if (requestId === null || busy || resolvingExitRef.current !== null) return;
+    resolvingExitRef.current = requestId;
     setResolving(true); setExitFailure('');
     try {
-      if (save && !await saveAll()) { setExitFailure('保存未完成，请继续编辑并核对输入或冲突。'); return; }
-      await resolveExit(exitRequest, true);
+      if (save) {
+        const saved = await saveAll();
+        if (exitRequestRef.current !== requestId) return;
+        if (!saved) { setExitFailure('保存未完成，请继续编辑并核对输入或冲突。'); return; }
+      }
+      await resolveExit(requestId, true);
+      if (exitRequestRef.current !== requestId) return;
       if (!save) discardAll();
-      setExitRequest(null);
-    } catch (reason) { setExitFailure(String(reason)); } finally { setResolving(false); }
+      exitRequestRef.current = null; setExitRequest(null);
+    } catch (reason) { if (exitRequestRef.current === requestId) setExitFailure(String(reason)); }
+    finally {
+      if (resolvingExitRef.current === requestId) { resolvingExitRef.current = null; setResolving(false); }
+    }
   }
   async function cancelExit() {
-    if (exitRequest === null || resolving) return;
-    try { await resolveExit(exitRequest, false); setExitRequest(null); setExitFailure(''); } catch (reason) { setExitFailure(String(reason)); }
+    const requestId = exitRequestRef.current;
+    if (requestId === null || resolvingExitRef.current !== null) return;
+    resolvingExitRef.current = requestId; setResolving(true);
+    try {
+      await resolveExit(requestId, false);
+      if (exitRequestRef.current === requestId) { exitRequestRef.current = null; setExitRequest(null); setExitFailure(''); }
+    } catch (reason) { if (exitRequestRef.current === requestId) setExitFailure(String(reason)); }
+    finally {
+      if (resolvingExitRef.current === requestId) { resolvingExitRef.current = null; setResolving(false); }
+    }
   }
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -108,6 +147,7 @@ function ConsoleContent() {
       // A confirmation owns keyboard input until it closes. Background
       // shortcuts must not move focus out of it or open another editor.
       if (event.defaultPrevented || isInputMethodKey(event) || modalStack.length || busy || resolving) return;
+      if (event.target instanceof Element && event.target.closest('.browser-edge-preview')) return;
       const input = event.target instanceof HTMLElement && (event.target.matches('input,textarea,select') || event.target.isContentEditable);
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); setNewTask(true); }
       else if (event.key === '/' && !input && !newTask) { event.preventDefault(); searchRef.current?.focus(); }

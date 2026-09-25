@@ -3,5 +3,5 @@
   "identifier": "tasks",
   "description": "Only task surfaces may request task mutations; Rust further limits the edge panel to its supported intents.",
   "windows": ["console", "edge-panel"],
-  "permissions": ["allow-mutate"]
+  "permissions": ["allow-mutate", "allow-get-pending-exit", "allow-resolve-exit"]
 }

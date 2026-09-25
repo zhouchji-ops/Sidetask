@@ -112,14 +112,17 @@ export async function attachNativeNavigation(): Promise<() => void> {
   });
 }
 
-export async function attachExitRequests(receive: (requestId: number) => void): Promise<() => void> {
+export async function attachExitRequests(receive: (requestId: number, stage?: string) => void, cancelled?: (requestId: number) => void): Promise<() => void> {
   if (!isDesktop) return () => {};
-  const stop = await listen<{ requestId: number }>('sidetask:exit-requested', ({ payload }) => receive(payload.requestId));
+  const cancelledIds = new Set<number>();
+  const stopCancel = cancelled ? await listen<{ requestId: number }>('sidetask:exit-cancelled', ({ payload }) => { cancelledIds.add(payload.requestId); cancelled(payload.requestId); }) : () => {};
+  let stopRequest = () => {};
   try {
-    const pending = await invoke<{ requestId: number } | null>('get_pending_exit');
-    if (pending) receive(pending.requestId);
-    return stop;
-  } catch (error) { stop(); throw error; }
+    stopRequest = await listen<{ requestId: number; window?: string }>('sidetask:exit-requested', ({ payload }) => { if (!cancelledIds.has(payload.requestId)) receive(payload.requestId, payload.window); });
+    const pending = await invoke<{ requestId: number; window?: string } | null>('get_pending_exit');
+    if (pending && !cancelledIds.has(pending.requestId)) receive(pending.requestId, pending.window);
+    return () => { stopRequest(); stopCancel(); };
+  } catch (error) { stopRequest(); stopCancel(); throw error; }
 }
 export async function resolveExit(requestId: number, allow: boolean): Promise<void> {
   if (isDesktop) await invoke('resolve_exit', { requestId, allow });

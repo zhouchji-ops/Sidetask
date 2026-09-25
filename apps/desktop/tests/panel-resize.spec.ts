@@ -41,6 +41,7 @@ async function native(page: Page) {
           if (command === 'plugin:event|listen') { const id = ++sequence; listeners.set(id, args); return id; }
           if (command === 'plugin:event|unlisten') { listeners.delete(args.eventId); return; }
           if (command === 'get_snapshot') { const value = h.nextRead ?? current; h.nextRead = null; return structuredClone(value); }
+          if (command === 'get_pending_exit') return null;
           if (command === 'window_action') {
             if (args.action !== 'resizePanel') return;
             const p = args.payload;
@@ -289,7 +290,7 @@ test('浏览器预览取消零写入，卸载握柄也取消而不把实际小�
   await page.mouse.move(next.x + 8, next.y + 8); await page.mouse.down(); await page.mouse.move(next.x - 30, next.y - 30);
   await expect.poll(() => page.evaluate(() => (window as any).previewResize.phases.filter((phase: string) => phase === 'start').length)).toBe(2);
   await preview.getByRole('button', { name: '收起小窗', exact: true }).evaluate(element => (element as HTMLButtonElement).click());
-  await expect(grip(page)).toHaveCount(0);
+  await expect(grip(page)).toBeHidden();
   await expect.poll(() => page.evaluate(() => (window as any).previewResize.phases.filter((phase: string) => phase === 'cancel').length)).toBe(2);
   await page.mouse.up();
   expect(await page.evaluate(() => (window as any).previewResize.writes)).toBe(0);

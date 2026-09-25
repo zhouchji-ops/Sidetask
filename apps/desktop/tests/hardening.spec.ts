@@ -13,6 +13,9 @@ async function nativeHarness(page: Page) {
       failMutation: false,
       delayMutation: false,
       releaseMutation: () => {},
+      delayExit: false,
+      releaseExit: () => {},
+      rejectExit: () => {},
       calls: [] as { command: string; args: Record<string, any> }[],
       emit(event: string, payload: unknown) {
         for (const [id, listener] of listeners) if (listener.event === event) callbacks.get(listener.handler)?.({ id, event, payload });
@@ -35,7 +38,11 @@ async function nativeHarness(page: Page) {
           if (command === 'get_startup_recovery') return null;
           if (command === 'get_pending_exit') return null;
           if (command === 'get_window_status' || command === 'get_console_position_status') return { pending: false, error: null };
-          if (command === 'resolve_exit' || command === 'window_action') return;
+          if (command === 'resolve_exit') {
+            if (args.allow && harness.delayExit) await new Promise<void>((resolve, reject) => { harness.releaseExit = resolve; harness.rejectExit = () => reject(new Error('旧退出回执失败')); });
+            return;
+          }
+          if (command === 'window_action') return;
           if (command === 'mutate') {
             if (harness.failMutation) throw new Error('模拟磁盘写入失败');
             if (harness.delayMutation) await new Promise<void>(resolve => { harness.releaseMutation = resolve; });
@@ -65,6 +72,40 @@ async function quit(page: Page, requestId: number) {
 }
 async function approvals(page: Page) {
   return page.evaluate(() => (window as any).__harness.calls.filter((call: any) => call.command === 'resolve_exit'));
+}
+
+for (const scenario of [
+  { name: '无草稿自动批准的成功回执', discard: false, reject: false },
+  { name: '无草稿自动批准的失败回执', discard: false, reject: true },
+  { name: '放弃草稿的成功回执', discard: true, reject: false },
+]) {
+  test(`旧退出取消后${scenario.name}不清除新请求或新草稿`, async ({ page }) => {
+    await nativeHarness(page);
+    if (scenario.discard) {
+      await page.getByRole('button', { name: '新建任务', exact: true }).click();
+      await page.getByRole('dialog', { name: '新建任务', exact: true }).getByLabel('任务名称', { exact: true }).fill('旧请求草稿');
+    }
+    await page.evaluate(() => { (window as any).__harness.delayExit = true; });
+    await quit(page, 201);
+    if (scenario.discard) await page.getByRole('dialog', { name: '退出前保存修改？' }).getByRole('button', { name: '放弃并退出', exact: true }).click();
+    await expect.poll(() => approvals(page)).toContainEqual({ command: 'resolve_exit', args: { requestId: 201, allow: true } });
+    await page.evaluate(() => {
+      (window as any).__harness.emit('sidetask:exit-cancelled', { requestId: 201 });
+      (window as any).__harness.delayExit = false;
+    });
+    if (!scenario.discard) await page.getByRole('button', { name: '新建任务', exact: true }).click();
+    const create = page.getByRole('dialog', { name: '新建任务', exact: true });
+    await create.getByLabel('任务名称', { exact: true }).fill('新退出请求中的草稿');
+    await quit(page, 202);
+    const exit = page.getByRole('dialog', { name: '退出前保存修改？' });
+    await expect(exit).toBeVisible();
+    await page.evaluate(reject => { const harness = (window as any).__harness; if (reject) harness.rejectExit(); else harness.releaseExit(); }, scenario.reject);
+    await expect(exit).toBeVisible();
+    await expect(create.getByLabel('任务名称', { exact: true })).toHaveValue('新退出请求中的草稿');
+    await expect(exit.getByRole('alert')).toHaveCount(0);
+    await exit.getByRole('button', { name: '取消退出', exact: true }).click();
+    expect((await approvals(page)).at(-1)).toEqual({ command: 'resolve_exit', args: { requestId: 202, allow: false } });
+  });
 }
 
 test('新任务取消与嵌套 Esc 保留草稿，状态栏反映尚未保存', async ({ page }) => {

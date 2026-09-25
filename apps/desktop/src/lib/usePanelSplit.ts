@@ -185,8 +185,12 @@ export function usePanelSplit(saved: number, busy: boolean, commit: (value: numb
   blurAction.current = () => { if (gesture.current?.type === 'pointer') discard(); else finishKeyboard(); };
   useEffect(() => {
     const blur = () => blurAction.current();
+    // Hiding a retained panel cancels both pointer and keyboard previews. It
+    // must not use the ordinary keyboard blur path, which commits on focus move.
+    const hidden = () => { if (gesture.current) discard(); };
     window.addEventListener('blur', blur);
-    return () => window.removeEventListener('blur', blur);
+    window.addEventListener('sidetask:panel-hidden', hidden);
+    return () => { window.removeEventListener('blur', blur); window.removeEventListener('sidetask:panel-hidden', hidden); };
   }, []);
 
   return {

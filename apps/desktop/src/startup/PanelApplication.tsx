@@ -3,6 +3,8 @@ import { createPreviewResizeHandler, isDesktop } from '../lib/native';
 import { useAppStore } from '../lib/store';
 import EdgePanel from '../surfaces/edge-panel/EdgePanel';
 import NativeApplication from './NativeApplication';
+import { DraftProvider } from '../lib/drafts';
+import PanelExitGuard from '../components/PanelExitGuard';
 
 function Panel() {
   const { mutate, snapshot } = useAppStore();
@@ -22,5 +24,5 @@ function Panel() {
 }
 
 export default function PanelApplication() {
-  return <NativeApplication><Panel /></NativeApplication>;
+  return <NativeApplication><DraftProvider><PanelExitGuard><Panel /></PanelExitGuard></DraftProvider></NativeApplication>;
 }

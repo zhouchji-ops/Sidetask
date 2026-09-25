@@ -58,6 +58,34 @@ fn authorize_mutation(label: &str, action: &Action) -> Result<(), String> {
         return Ok(());
     }
     match action {
+        Action::CreateTask { task, .. }
+            if task.as_object().is_some_and(|fields| {
+                fields.get("addToToday").and_then(Value::as_bool) == Some(true)
+                    && fields.keys().all(|key| {
+                        [
+                            "title",
+                            "notes",
+                            "priority",
+                            "dueDate",
+                            "dueTime",
+                            "dueTimezone",
+                            "addToToday",
+                        ]
+                        .contains(&key.as_str())
+                    })
+                    && fields
+                        .get("notes")
+                        .is_none_or(|value| value.as_str() == Some(""))
+                    && fields
+                        .get("priority")
+                        .is_none_or(|value| value.as_str() == Some("normal"))
+                    && ["dueDate", "dueTime", "dueTimezone"]
+                        .iter()
+                        .all(|key| fields.get(*key).is_none_or(Value::is_null))
+            }) =>
+        {
+            Ok(())
+        }
         Action::SetCompleted { .. } | Action::PlanTask { .. } => Ok(()),
         Action::UpdateSettings { changes }
             if changes.as_object().is_some_and(|object| {
@@ -186,8 +214,8 @@ fn get_pending_exit(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
 ) -> Result<Option<platform::exit::ExitRequest>, String> {
-    require_window(window.label(), &["console"])?;
-    platform::exit::pending(&app)
+    require_window(window.label(), &["console", "edge-panel"])?;
+    platform::exit::pending(&app, window.label())
 }
 
 #[tauri::command]
@@ -197,8 +225,8 @@ async fn resolve_exit(
     request_id: u64,
     allow: bool,
 ) -> Result<(), String> {
-    require_window(window.label(), &["console"])?;
-    platform::exit::resolve(&app, request_id, allow)
+    require_window(window.label(), &["console", "edge-panel"])?;
+    platform::exit::resolve(&app, window.label(), request_id, allow)
 }
 
 #[tauri::command]
@@ -403,6 +431,39 @@ mod security_tests {
         );
         drop(state);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn edge_panel_can_create_only_a_simple_today_task() {
+        for task in [
+            serde_json::json!({"title":"快速任务", "addToToday":true}),
+            serde_json::json!({"title":"快速任务", "notes":"", "priority":"normal", "dueDate":null, "dueTime":null, "dueTimezone":null, "addToToday":true}),
+        ] {
+            let action = Action::CreateTask {
+                task,
+                date: "2026-09-25".into(),
+            };
+            assert!(authorize_mutation("edge-panel", &action).is_ok());
+            assert!(authorize_mutation("console", &action).is_ok());
+            assert!(authorize_mutation("edge-handle", &action).is_err());
+            assert!(authorize_mutation("unknown", &action).is_err());
+        }
+        for task in [
+            serde_json::json!({"title":"任务", "addToToday":false}),
+            serde_json::json!({"title":"任务"}),
+            serde_json::json!({"title":"任务", "addToToday":true, "dueDate":"2026-10-01"}),
+            serde_json::json!({"title":"任务", "addToToday":true, "dueTimezone":"Asia/Shanghai"}),
+            serde_json::json!({"title":"任务", "addToToday":true, "priority":"high"}),
+            serde_json::json!({"title":"任务", "addToToday":true, "notes":"完整编辑"}),
+            serde_json::json!({"title":"任务", "addToToday":true, "completed":true}),
+        ] {
+            let action = Action::CreateTask {
+                task,
+                date: "2026-09-25".into(),
+            };
+            assert!(authorize_mutation("edge-panel", &action).is_err());
+            assert!(authorize_mutation("console", &action).is_ok());
+        }
     }
 
     #[test]

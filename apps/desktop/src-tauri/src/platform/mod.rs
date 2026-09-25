@@ -250,6 +250,7 @@ fn authorize_window_action(label: &str, action: &str) -> Result<(), String> {
         "edge-panel" => [
             "openConsole",
             "focusPanel",
+            "showPanelExit",
             "showPanel",
             "hidePanel",
             "togglePanel",
@@ -484,6 +485,7 @@ fn focus_panel(
     panel: &WebviewWindow,
     dock: &DockRuntime,
     settings: &Settings,
+    input_intent: bool,
 ) -> Result<(), String> {
     // An IPC can arrive after its click has hidden/moved away from the panel.
     // Never re-show a window or steal focus for such an obsolete request.
@@ -494,19 +496,28 @@ fn focus_panel(
     {
         return Ok(());
     }
-    let cursor = edge_cursor(panel)?;
-    if !dock
-        .geometry
-        .is_some_and(|geometry| geometry.panel.contains(cursor.x, cursor.y))
-    {
-        return Ok(());
+    // Keyboard and accessibility activation of a text editor need not move
+    // the pointer. Its explicit click intent still passes all visibility gates.
+    if !input_intent {
+        let cursor = edge_cursor(panel)?;
+        if !dock
+            .geometry
+            .is_some_and(|geometry| geometry.panel.contains(cursor.x, cursor.y))
+        {
+            return Ok(());
+        }
     }
+    focus_panel_explicitly(panel)
+}
+
+#[cfg(target_os = "macos")]
+fn focus_panel_explicitly(panel: &WebviewWindow) -> Result<(), String> {
     panel.set_focusable(true).map_err(error)?;
     let focused = panel.set_focus().map_err(error).and_then(|()| {
         if panel.is_focused().map_err(error)? {
             Ok(())
         } else {
-            Err("未能把键盘焦点交给小窗，请再次点击调整控件。".into())
+            Err("未能把键盘焦点交给小窗，请再次点击输入或调整控件。".into())
         }
     });
     if let Err(reason) = focused {
@@ -523,6 +534,7 @@ fn focus_panel(
     _panel: &WebviewWindow,
     _dock: &DockRuntime,
     _settings: &Settings,
+    _input_intent: bool,
 ) -> Result<(), String> {
     // Windows activation requires its own native validation and implementation.
     Ok(())
@@ -823,13 +835,18 @@ pub fn open_console(app: &tauri::AppHandle, payload: Value) -> Result<(), String
     Ok(())
 }
 fn settings(app: &tauri::AppHandle) -> Result<Settings, String> {
-    Ok(crate::task_state(app)?
+    let state = crate::task_state(app)?;
+    let mut settings = state
         .service
         .lock()
         .map_err(|_| "任务服务不可用。")?
         .snapshot
         .settings
-        .clone())
+        .clone();
+    if exit::panel_prompt_visible(&state)? {
+        settings.edge_enabled = true;
+    }
+    Ok(settings)
 }
 
 pub fn get_window_status(app: &tauri::AppHandle) -> Result<WindowStatus, String> {
@@ -1449,6 +1466,21 @@ pub fn window_action(
     if action == "discardConsolePosition" {
         return console_window::discard(app);
     }
+    if action == "showPanelExit" {
+        let request_id = payload
+            .get("requestId")
+            .and_then(Value::as_u64)
+            .ok_or("缺少有效的退出请求编号。")?;
+        exit::prepare_panel_prompt(app, request_id)?;
+        let state = crate::task_state(app)?;
+        let mut dock = state.dock.lock().map_err(|_| "窗口服务不可用。")?;
+        show_panel(app, &mut dock, &settings(app)?)?;
+        // Unlike hover, the user's explicit quit request may reveal and focus
+        // a hidden draft even when the cursor is on the application menu.
+        #[cfg(target_os = "macos")]
+        focus_panel_explicitly(caller)?;
+        return Ok(());
+    }
     if action == "startDrag" {
         if !["edge-handle", "edge-panel"].contains(&caller.label()) {
             return Err("此窗口不能停靠。".into());
@@ -1522,7 +1554,12 @@ pub fn window_action(
         return Err("不能结束其他窗口的拖动。".into());
     }
     match action {
-        "focusPanel" => focus_panel(caller, &dock, &settings),
+        "focusPanel" => focus_panel(
+            caller,
+            &dock,
+            &settings,
+            payload.get("reason").and_then(Value::as_str) == Some("input"),
+        ),
         "showPanel" => show_panel(app, &mut dock, &settings),
         "hidePanel" => hide_panel(app, &mut dock, &settings, true),
         "togglePanel" => {
@@ -1804,6 +1841,9 @@ mod tests {
         assert!(authorize_window_action("edge-handle", "focusPanel").is_err());
         assert!(authorize_window_action("console", "focusPanel").is_err());
         assert!(authorize_window_action("edge-panel", "focusPanel").is_ok());
+        assert!(authorize_window_action("edge-panel", "showPanelExit").is_ok());
+        assert!(authorize_window_action("console", "showPanelExit").is_err());
+        assert!(authorize_window_action("edge-handle", "showPanelExit").is_err());
         assert!(authorize_window_action("console", "startDrag").is_err());
         for action in ["retryConsolePosition", "discardConsolePosition"] {
             assert!(authorize_window_action("console", action).is_ok());

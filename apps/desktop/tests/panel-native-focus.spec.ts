@@ -20,6 +20,7 @@ async function ready(page: Page) {
           if (command === 'plugin:event|listen') return ++sequence;
           if (command === 'plugin:event|unlisten') return;
           if (command === 'get_snapshot') return structuredClone(snapshot);
+          if (command === 'get_pending_exit') return null;
           if (command === 'window_action') {
             if (args.action === 'focusPanel') {
               if (probe.hold) await new Promise<void>(resolve => { probe.release = resolve; });
@@ -40,6 +41,21 @@ async function ready(page: Page) {
 async function actions(page: Page) {
   return page.evaluate(() => (window as any).focusProbe.calls.filter((call: any) => call.command === 'window_action').map((call: any) => call.args));
 }
+
+test('保留的新增输入再次点按会重新请求原生键盘焦点，悬停输入不请求', async ({ page }) => {
+  await ready(page);
+  await page.getByRole('button', { name: '添加今日任务', exact: true }).click();
+  await expect.poll(async () => (await actions(page)).filter(action => action.action === 'focusPanel').length).toBe(1);
+  const input = page.getByRole('textbox', { name: '今日任务名称' });
+  await input.fill('隐藏后保留的草稿');
+  await page.getByRole('button', { name: '收起小窗', exact: true }).click();
+  await input.hover();
+  expect((await actions(page)).filter(action => action.action === 'focusPanel')).toHaveLength(1);
+  await input.click();
+  await expect.poll(async () => (await actions(page)).filter(action => action.action === 'focusPanel').length).toBe(2);
+  await expect(input).toHaveValue('隐藏后保留的草稿');
+  expect((await actions(page)).filter(action => action.action === 'focusPanel').map(action => action.payload)).toEqual([{ reason: 'input' }, { reason: 'input' }]);
+});
 
 test('悬停与标题点击不请求焦点，分区和尺寸主指针明确操作才请求', async ({ page }) => {
   await ready(page);
