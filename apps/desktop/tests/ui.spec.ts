@@ -172,6 +172,10 @@ test('设置保存主题、尺寸与停靠方向，重载后保留', async ({ pa
 
 test('浏览器小窗预览支持悬停、自动收起与保持展开', async ({ page }) => {
   await openConsole(page);
+  await page.locator('.sidebar').getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByRole('button', { name: '悬停展开', exact: true }).click();
+  await page.getByRole('button', { name: '保存设置', exact: true }).click();
+  await expect(page.getByRole('button', { name: '保存设置', exact: true })).toBeDisabled();
   const preview = page.getByTestId('browser-edge-preview');
   await preview.getByRole('button', { name: '展开侧笺；按住拖动可调整位置' }).hover();
   await expect(preview.getByRole('heading', { name: '今日计划', exact: true })).toBeVisible();
@@ -198,7 +202,7 @@ test('独立小窗的今日加号直接添加任务', async ({ page }) => {
 test('浏览器预览可拖动小窗尺寸，松手后设置保存', async ({ page }) => {
   await openConsole(page);
   const preview = page.getByTestId('browser-edge-preview');
-  await preview.getByRole('button', { name: '展开侧笺；按住拖动可调整位置' }).hover();
+  await preview.getByRole('button', { name: '展开侧笺；按住拖动可调整位置' }).click();
   await preview.getByRole('button', { name: '保持展开', exact: true }).click();
   const grip = preview.getByRole('button', { name: '调整小窗宽度和高度', exact: true });
   const bounds = await grip.boundingBox();

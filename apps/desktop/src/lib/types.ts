@@ -26,6 +26,7 @@ export interface Settings {
   panelHeight: number;
   /** Percentage of the edge panel's content area reserved for today's tasks. */
   panelSplit: number;
+  revealMode: 'click' | 'hover';
   revealDelay: number;
   hideDelay: number;
   pinned: boolean;

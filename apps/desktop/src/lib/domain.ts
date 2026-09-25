@@ -11,6 +11,7 @@ export function normalizePreviewSnapshot(value: unknown): Snapshot {
   const result = structuredClone(parsed);
   if (result.settings.uiStyle === undefined) result.settings.uiStyle = 'paper';
   if (result.settings.panelSplit === undefined) result.settings.panelSplit = 54;
+  if (result.settings.revealMode === undefined) result.settings.revealMode = 'click';
   validateSnapshot(result);
   return result;
 }
@@ -105,11 +106,11 @@ export function createSeed(date = localDate()): Snapshot {
       task('demo-portfolio', '更新个人作品集', '选择最能代表自己的作品，讲清每个设计决定。', 'normal', dateOffset(date, 8)),
     ],
     plans: ['demo-design', 'demo-read', 'demo-paper', 'demo-review'].map((taskId, sortOrder) => ({ taskId, date, sortOrder })),
-    settings: { edge: 'right', panelWidth: 368, panelHeight: 610, panelSplit: 54, revealDelay: 180, hideDelay: 450, pinned: false, edgeEnabled: true, theme: 'light', uiStyle: 'paper', ddlSort: 'date' },
+    settings: { edge: 'right', panelWidth: 368, panelHeight: 610, panelSplit: 54, revealMode: 'click', revealDelay: 180, hideDelay: 450, pinned: false, edgeEnabled: true, theme: 'light', uiStyle: 'paper', ddlSort: 'date' },
   };
 }
 const taskFields = ['title', 'notes', 'priority', 'dueDate', 'dueTime', 'dueTimezone'];
-const settingsFields = ['edge', 'panelWidth', 'panelHeight', 'panelSplit', 'revealDelay', 'hideDelay', 'pinned', 'edgeEnabled', 'theme', 'uiStyle', 'ddlSort'];
+const settingsFields = ['edge', 'panelWidth', 'panelHeight', 'panelSplit', 'revealMode', 'revealDelay', 'hideDelay', 'pinned', 'edgeEnabled', 'theme', 'uiStyle', 'ddlSort'];
 function assertKnown(value: unknown, allowed: readonly string[]): asserts value is Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !allowed.includes(key))) throw new Error('更改内容包含不支持的字段');
 }
@@ -123,6 +124,7 @@ function validateTask(task: Task): void {
 }
 function validateSettings(s: Settings): void {
   assertKnown(s, settingsFields);
+  if (!['click', 'hover'].includes(s.revealMode)) throw new Error('小窗展开方式无效');
   if (!['left', 'right'].includes(s.edge) || !['light', 'dark', 'system'].includes(s.theme) || !['date', 'priority'].includes(s.ddlSort) || !uiStyles.includes(s.uiStyle) || typeof s.pinned !== 'boolean' || typeof s.edgeEnabled !== 'boolean') throw new Error('设置选项无效');
   if (!Number.isFinite(s.panelWidth) || !Number.isFinite(s.panelHeight) || s.panelWidth < 300 || s.panelWidth > 640 || s.panelHeight < 380 || s.panelHeight > 1000) throw new Error('小窗尺寸超出可用范围');
   if (!Number.isInteger(s.panelSplit) || s.panelSplit < 30 || s.panelSplit > 70) throw new Error('小窗分区比例须为 30 至 70 的整数');

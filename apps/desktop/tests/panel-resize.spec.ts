@@ -41,6 +41,7 @@ async function native(page: Page) {
           if (command === 'plugin:event|listen') { const id = ++sequence; listeners.set(id, args); return id; }
           if (command === 'plugin:event|unlisten') { listeners.delete(args.eventId); return; }
           if (command === 'get_snapshot') { const value = h.nextRead ?? current; h.nextRead = null; return structuredClone(value); }
+          if (command === 'get_pending_exit') return null;
           if (command === 'window_action') {
             if (args.action !== 'resizePanel') return;
             const p = args.payload;
@@ -275,7 +276,7 @@ test('浏览器预览取消零写入，卸载握柄也取消而不把实际小�
   await page.setViewportSize({ width: 1000, height: 700 });
   await page.goto('/?surface=console');
   const preview = page.getByTestId('browser-edge-preview');
-  await preview.getByRole('button', { name: '展开侧笺；按住拖动可调整位置' }).hover();
+  await preview.getByRole('button', { name: '展开侧笺；按住拖动可调整位置' }).click();
   await expect(grip(page)).toBeVisible();
   const box = (await grip(page).boundingBox())!;
   await page.mouse.move(box.x + 8, box.y + 8); await page.mouse.down(); await page.mouse.move(box.x - 30, box.y - 30);

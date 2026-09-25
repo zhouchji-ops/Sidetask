@@ -709,6 +709,13 @@ fn show_panel(
     dock.entered = None;
     dock.left = None;
     dock.suppressed = false;
+    if settings.reveal_mode == "click" {
+        // A deliberate click opens an ordinary focusable popover. Focus loss
+        // observes even very short outside clicks without a global mouse hook.
+        let panel = window(app, "edge-panel")?;
+        panel.set_focusable(true).map_err(error)?;
+        panel.set_focus().map_err(error)?;
+    }
     let _ = app.emit_to("edge-panel", "sidetask:shown", ());
     Ok(())
 }
@@ -719,6 +726,9 @@ fn hide_panel(
     suppress: bool,
 ) -> Result<(), String> {
     window(app, "edge-panel")?.hide().map_err(error)?;
+    window(app, "edge-panel")?
+        .set_focusable(false)
+        .map_err(error)?;
     if settings.edge_enabled {
         let result = (|| {
             let monitor = choose_monitor(app, &dock.placement)?;
@@ -1117,6 +1127,16 @@ fn tick(app: &tauri::AppHandle) -> Result<(), String> {
         dock.left = None;
         return Ok(());
     }
+    if settings.reveal_mode == "click" {
+        dock.entered = None;
+        dock.left = None;
+        // Moving the pointer alone never closes click mode. Pinned panels and
+        // active edits/drags keep their existing independent protections.
+        if dock.visible && !settings.pinned && !panel.is_focused().map_err(error)? {
+            hide_panel(app, &mut dock, &settings, false)?;
+        }
+        return Ok(());
+    }
     if dock.visible {
         if settings.pinned || over_panel || over_handle || primary_button_down() {
             dock.left = None;
@@ -1374,7 +1394,9 @@ pub fn window_action(
         return Ok(());
     }
     if action == "endQuickAdd" {
-        caller.set_focusable(false).map_err(error)?;
+        caller
+            .set_focusable(settings(app)?.reveal_mode == "click")
+            .map_err(error)?;
         return exit::set_panel_editing(app, false);
     }
     if action == "retryConsolePosition" {

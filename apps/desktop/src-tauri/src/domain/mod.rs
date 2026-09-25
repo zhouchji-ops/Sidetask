@@ -41,6 +41,8 @@ pub struct Settings {
     pub panel_height: f64,
     #[serde(default = "default_panel_split")]
     pub panel_split: u8,
+    #[serde(default = "default_reveal_mode")]
+    pub reveal_mode: String,
     pub reveal_delay: u64,
     pub hide_delay: u64,
     pub pinned: bool,
@@ -56,6 +58,9 @@ fn default_ui_style() -> String {
 fn default_panel_split() -> u8 {
     54
 }
+fn default_reveal_mode() -> String {
+    "click".into()
+}
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -63,6 +68,7 @@ impl Default for Settings {
             panel_width: 368.,
             panel_height: 610.,
             panel_split: default_panel_split(),
+            reveal_mode: default_reveal_mode(),
             reveal_delay: 180,
             hide_delay: 450,
             pinned: false,
@@ -144,6 +150,7 @@ fn validate_settings(settings: &Settings) -> Result<(), String> {
         || !["light", "dark", "system"].contains(&settings.theme.as_str())
         || !["paper", "studio", "editorial", "mono"].contains(&settings.ui_style.as_str())
         || !["date", "priority"].contains(&settings.ddl_sort.as_str())
+        || !["click", "hover"].contains(&settings.reveal_mode.as_str())
     {
         return Err("设置选项无效。".into());
     }
@@ -517,6 +524,7 @@ impl Snapshot {
                         "panelWidth",
                         "panelHeight",
                         "panelSplit",
+                        "revealMode",
                         "revealDelay",
                         "hideDelay",
                         "pinned",
@@ -545,6 +553,55 @@ impl Snapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reveal_mode_defaults_legacy_data_to_click_and_preserves_tasks_and_timing() {
+        let original = Snapshot::demo("2026-09-25");
+        assert_eq!(original.settings.reveal_mode, "click");
+        let mut legacy = serde_json::to_value(&original).unwrap();
+        legacy["settings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("revealMode");
+        legacy["settings"]["revealDelay"] = serde_json::json!(320);
+        let restored: Snapshot = serde_json::from_value(legacy.clone()).unwrap();
+        restored.validate().unwrap();
+        legacy["settings"]["revealMode"] = serde_json::json!("click");
+        assert_eq!(serde_json::to_value(restored).unwrap(), legacy);
+    }
+
+    #[test]
+    fn reveal_mode_changes_preserve_data_and_reject_unknown_modes() {
+        let original = Snapshot::demo("2026-09-25");
+        let changed = original
+            .apply(
+                Action::UpdateSettings {
+                    changes: serde_json::json!({"revealMode": "hover"}),
+                },
+                original.revision,
+            )
+            .unwrap();
+        let mut expected = serde_json::to_value(&original).unwrap();
+        expected["settings"]["revealMode"] = serde_json::json!("hover");
+        expected["revision"] = serde_json::json!(original.revision + 1);
+        assert_eq!(serde_json::to_value(&changed).unwrap(), expected);
+        for mode in [
+            serde_json::json!("auto"),
+            serde_json::json!(""),
+            serde_json::json!(null),
+            serde_json::json!(1),
+        ] {
+            assert!(changed
+                .apply(
+                    Action::UpdateSettings {
+                        changes: serde_json::json!({"revealMode": mode})
+                    },
+                    changed.revision
+                )
+                .is_err());
+            assert_eq!(serde_json::to_value(&changed).unwrap(), expected);
+        }
+    }
 
     fn active_plan_ids(snapshot: &Snapshot, date: &str) -> Vec<String> {
         let active: HashSet<_> = snapshot

@@ -50,7 +50,7 @@
 
 | 设置组 | 持久化内容 |
 | --- | --- |
-| edge_panel | 边缘入口启用/暂停、最近停靠显示器、边缘、沿边相对偏移、逻辑宽高、分区比例、展开/收起延迟、固定展开偏好、置顶和 DDL 排序 |
+| edge_panel | 边缘入口启用/暂停、最近停靠显示器、边缘、沿边相对偏移、逻辑宽高、分区比例、展开模式、内部悬停节奏、固定展开偏好、置顶和 DDL 排序 |
 | console | 普通窗口的逻辑尺寸、恢复位置及最大化偏好；与小窗几何独立 |
 | system | 快捷键、登录启动偏好 |
 | appearance | uiStyle：paper / studio / editorial / mono；独立系统/浅色/深色偏好、减少动态效果等已确定的展示设置 |
@@ -175,6 +175,10 @@ reorderToday 的精确集合只包括当天未删除、未完成任务；已删�
 便携 JSON 的 schemaVersion 与 SQLite 版本独立：新导出 v2，导入接受 v1/v2，均包含完整 tasks/plans；v1 缺失或 null 的 deletedAt 作为未删除，v1 携带非空删除状态则拒绝。预览提供 taskCount、trashedTaskCount、planCount 和 exportedAt。整份恢复先备份当前库，再替换任务及回收站、保留设备设置，并将全局及所有导入任务 revision 提高到已见值以上；当前没有 dataset_epoch 字段。旧备份按备份时的完整集合恢复，不与现有回收站合并。回收站仍计入现有容量限制，元数据增长超限时保持原已提交状态并提示失败。
 
 本节任务规则在 schema 4 继续有效，不将自动化测试、文档同步或 Mac 证据写成双平台验收完成。来源与分阶段检查见 [TASK_LIFECYCLE](../research/TASK_LIFECYCLE.md)，最终证据统一见 [STATUS](../delivery/STATUS.md)。
+
+## 展开模式偏好（2026-09-25）
+
+Settings新增 `revealMode`（Rust `reveal_mode`），只接受 `click` / `hover`；新建与旧记录缺失时均默认 `click`，满足用户最新默认行为。旧 `revealDelay` / `hideDelay` 保留读取和校验，悬停模式继续采用已保存值，界面不再暴露毫秒输入。只读补默认不重写旧原文，下一次合法事务保存新字段；模式更新不改Task/Plan、几何或其他偏好。schema仍4，便携任务备份v2不带设备偏好；不支持旧程序降级读取新增字段后继续编辑。
 
 ## 分区偏好的当前扩展
 

@@ -327,6 +327,32 @@ describe('deadline calendar boundaries and stable ordering', () => {
   });
 });
 
+describe('edge reveal mode', () => {
+  it('defaults old and new snapshots to click without changing tasks or old timing preferences', () => {
+    const initial = createSeed(today);
+    expect(initial.settings.revealMode).toBe('click');
+    expect(createEmptySnapshot().settings.revealMode).toBe('click');
+    const legacy = structuredClone(initial) as Omit<Snapshot, 'settings'> & { settings: Record<string, unknown> };
+    delete legacy.settings.revealMode;
+    legacy.settings.revealDelay = 320;
+    const before = structuredClone(legacy);
+    expect(normalizePreviewSnapshot(legacy)).toEqual({ ...before, settings: { ...before.settings, revealMode: 'click' } });
+    expect(legacy).toEqual(before);
+  });
+  it('persists an explicit hover choice and rejects unknown modes atomically', () => {
+    const initial = createSeed(today);
+    const changed = apply(initial, { type: 'updateSettings', changes: { revealMode: 'hover' } });
+    expect(normalizePreviewSnapshot(changed)).toEqual(changed);
+    expect(changed.settings).toEqual({ ...initial.settings, revealMode: 'hover' });
+    expect(changed.tasks).toEqual(initial.tasks);
+    expect(changed.plans).toEqual(initial.plans);
+    for (const revealMode of ['auto', '', null, 1]) {
+      expect(() => apply(changed, { type: 'updateSettings', changes: { revealMode } } as unknown as Action)).toThrow();
+      expect(changed.settings.revealMode).toBe('hover');
+    }
+  });
+});
+
 describe('appearance preferences preserve task data', () => {
   it.each(['paper', 'studio', 'editorial', 'mono'] as const)('selecting %s preserves task identity, plans, theme and window preferences', (uiStyle) => {
     const initial = createSeed(today);

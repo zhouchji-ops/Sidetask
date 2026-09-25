@@ -76,6 +76,7 @@ async function nativeHarness(page: Page) {
             current = domain.applyPreviewAction(current, args.action, args.expectedRevision);
             return structuredClone(current);
           }
+          if (command === 'get_pending_exit') return null;
           throw new Error(`Unexpected IPC: ${command}`);
         },
       },
