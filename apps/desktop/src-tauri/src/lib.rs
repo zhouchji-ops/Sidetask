@@ -2,6 +2,9 @@ mod application;
 mod domain;
 mod infrastructure;
 mod platform;
+#[cfg(target_os = "windows")]
+#[path = "platform/windows_webview_shutdown.rs"]
+mod windows_webview_shutdown;
 
 use application::TaskService;
 use domain::{Action, Snapshot};
@@ -360,6 +363,10 @@ pub fn run() {
             if let Err(error) = platform::exit::request(app) {
                 eprintln!("exit request: {error}");
             }
+        }
+        #[cfg(target_os = "windows")]
+        tauri::RunEvent::Exit => {
+            windows_webview_shutdown::close_after_exit_authorized(app);
         }
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { .. } => {
