@@ -8,6 +8,7 @@
 | decisions | [ADR-0001 平台与复用](decisions/0001-platform-and-reuse.md)、[ADR-0002 控制台与小窗](decisions/0002-console-and-edge-panel.md)、[ADR-0003 原型](decisions/0003-prototype-implementation.md) | 重要选择及其原因改变 |
 | delivery | [路线图](delivery/ROADMAP.md)、[待办](delivery/BACKLOG.md)、[验收](delivery/TEST_PLAN.md) | 排期、范围、完成标准改变 |
 | delivery | [状态](delivery/STATUS.md)、[交接](delivery/HANDOFF.md) | 每次完成一段工作 |
+| delivery | [下一阶段分工](delivery/NEXT_STAGE.md)、[Mac任务单](delivery/MAC_NEXT_STAGE.md)、[Windows任务单](delivery/WINDOWS_NEXT_STAGE.md) | 平台任务分发、依赖或验收门槛改变 |
 
 PRD 是产品行为的依据；ADR 是技术取舍的依据；BACKLOG 是事项状态的依据；STATUS / HANDOFF 是下一次工作的入口。发现冲突时修正文档，不以重复复制增加新的事实来源。
 
