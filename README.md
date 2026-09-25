@@ -23,12 +23,12 @@ Windows 最新修复及内部安装包记录见[本轮收尾](tests/manual/2026-
 
 ## 下载与安装
 
-这批安装包来自[已通过检查的 CI](https://github.com/zhouchji-ops/Sidetask/actions/runs/36134425027)，对应检查头 `a1b30d6`。
+这批安装包来自[已通过检查的 CI](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605)，对应产品提交 `065aa67`，包含 Windows 最新收尾修复。
 
 | 平台 | 下载 | 文件 |
 | --- | --- | --- |
-| Mac · Apple Silicon / arm64 | [下载 Mac 内部试用包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36134425027/artifacts/10863930629) | `SideTask-macos.zip` 内的 `SideTask.app` |
-| Windows · x64 | [下载 Windows 内部安装包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36134425027/artifacts/10864491831) | `SideTask_0.1.0_x64-setup.exe` |
+| Mac · Apple Silicon / arm64 | [下载 Mac 内部试用包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605/artifacts/10871746097) | `SideTask-macos.zip` 内的 `SideTask.app` |
+| Windows · x64 | [下载 Windows 内部安装包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605/artifacts/10871976501) | `SideTask_0.1.0_x64-setup.exe` |
 
 先解压 GitHub 产物的外层 ZIP。Mac 再解压其中的 App 压缩包；Windows 在解压目录内找到安装器。完整步骤、包摘要、更新和首次启动见[使用说明书：安装与更新](docs/product/USER_GUIDE.md#安装与更新)。
 
@@ -62,7 +62,7 @@ Windows 最新修复及内部安装包记录见[本轮收尾](tests/manual/2026-
 
 采用 Tauri 2、React / TypeScript、Rust 和 SQLite。界面共用任务服务，平台窗口适配集中在 Rust 平台层；架构、验证和数据恢复资料见下方文档。
 
-新检出可从 `mac` 分支开始；需要 Node.js 24、Rust 与对应系统的 Tauri 构建环境，详情见[桌面客户端开发说明](apps/desktop/README.md)。
+Windows 最新收尾在 `codex/windows-next-stage`，Mac 协作分支为 `mac`；接续前先核对[项目状态](docs/delivery/STATUS.md)与远端增量。需要 Node.js 24、Rust 与对应系统的 Tauri 构建环境，详情见[桌面客户端开发说明](apps/desktop/README.md)。
 
 ```sh
 git clone --branch mac https://github.com/zhouchji-ops/Sidetask.git

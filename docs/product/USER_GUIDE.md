@@ -26,12 +26,12 @@
 
 ### 获取内部试用包
 
-当前版本来自[已通过检查的构建](https://github.com/zhouchji-ops/Sidetask/actions/runs/36134425027)，对应检查头 `a1b30d6`。以下是实际生成的包，不是源码压缩包。
+当前版本来自[已通过检查的构建](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605)，对应产品提交 `065aa67`，包含 Windows 最新收尾修复。以下是实际生成的包，不是源码压缩包。
 
 | 平台 | 下载入口 | 解压后要使用的文件 |
 | --- | --- | --- |
-| Mac，Apple Silicon / arm64 | [Mac 试用包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36134425027/artifacts/10863930629) | `SideTask-macos.zip` 内的 `SideTask.app` |
-| Windows，x64 | [Windows 安装包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36134425027/artifacts/10864491831) | 解压目录下 `src-tauri/target/release/bundle/nsis/SideTask_0.1.0_x64-setup.exe` |
+| Mac，Apple Silicon / arm64 | [Mac 试用包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605/artifacts/10871746097) | `SideTask-macos.zip` 内的 `SideTask.app` |
+| Windows，x64 | [Windows 安装包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605/artifacts/10871976501) | 解压目录下 `src-tauri/target/release/bundle/nsis/SideTask_0.1.0_x64-setup.exe` |
 
 GitHub 下载的产物可能还有一层 ZIP，先解压外层；Mac 再解压里面的 `SideTask-macos.zip`。若 GitHub 要求登录，先登录后下载。此批产物保留 14 天，当前到期日为 **2026-10-09 UTC**；失效后查看 [STATUS](../delivery/STATUS.md) 的最新下载入口，或联系维护者获取新包。当前没有正式 Release 下载渠道。
 
@@ -66,8 +66,8 @@ GitHub 下载的产物可能还有一层 ZIP，先解压外层；Mac 再解压�
 
 | 文件 | SHA-256 |
 | --- | --- |
-| `SideTask-macos.zip` | `abd05aa60e57edafd0830efea26d343ed2b1a616e5df84869949d3b1fd9faa07` |
-| `SideTask_0.1.0_x64-setup.exe` | `ee4562479093437186825c455c16f582a959fe6481113b887525d41411b442be` |
+| `SideTask-macos.zip` | `ae9c6ee8a081d872d30a6a7e571aaca7f8d1675db8a6cbf0cc01328689cbcbf0` |
+| `SideTask_0.1.0_x64-setup.exe` | `83c57b2bd0945095ea17bd8496681836543d631a9d09fb15d35b7b6c9961ea78` |
 
 ## 第一次使用
 

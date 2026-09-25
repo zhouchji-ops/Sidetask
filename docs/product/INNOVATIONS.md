@@ -1,6 +1,6 @@
 # 侧笺 · SideTask：项目创新点与产品价值
 
-整理日期：2026-09-25。依据：已合并的产品源码 `6d32d6c`、通过双平台 CI 的检查头 `a1b30d6`，以及仓库内的需求、源码和验收记录。当前为功能完善与内部试用阶段，实际交付状态见 [STATUS](../delivery/STATUS.md)。
+整理日期：2026-09-25。依据：已合并的产品源码 `6d32d6c` 及后续 Windows 收尾产品 `065aa67`，以及仓库内的需求、源码和验收记录；最新产品已通过双平台 CI。当前为功能完善与内部试用阶段，实际交付状态见 [STATUS](../delivery/STATUS.md)。
 
 面向用户的表达另见[卖点与宣传文案](SELLING_POINTS.md)：从原始需求和后续提示词出发，提供痛点对应、主卖点、首页及介绍文案。
 
@@ -90,7 +90,7 @@
 | 四风格与工作连续性 | [设计规范](../../design/DESIGN_SYSTEM.md)、[风格样式](../../apps/desktop/src/styles/variants.css) | [风格回归](../../apps/desktop/tests/styles.spec.ts)、[Mac 风格记录](../../tests/manual/2026-09-25-ui-styles.md) |
 | 本地一致性与恢复 | [任务服务](../../apps/desktop/src-tauri/src/application/mod.rs)、[存储实现](../../apps/desktop/src-tauri/src/infrastructure/mod.rs)、[启动恢复](../../apps/desktop/src-tauri/src/infrastructure/recovery.rs) | [生命周期回归](../../apps/desktop/tests/lifecycle.spec.ts)、[恢复回归](../../apps/desktop/tests/recovery.spec.ts)、[恢复说明](../engineering/DATA_RECOVERY.md) |
 
-同一检查头的 [CI 36134425027](https://github.com/zhouchji-ops/Sidetask/actions/runs/36134425027) 已通过 Mac、Windows 与 Rust 审计三个作业，并生成两平台内部包。浏览器回归、构建通过和旧分支原生记录各有覆盖范围，不能替代整合版的全部真机验收；当前差距以 [B43–B45](../delivery/BACKLOG.md) 与 [STATUS](../delivery/STATUS.md) 为准。
+最新产品 `065aa67` 的 [CI 36148843605](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605) 已通过 Mac、Windows 与 Rust 审计三个作业，并生成两平台内部包。浏览器回归、构建通过和原生记录各有覆盖范围，不能替代全部真机验收；多屏真机本轮按用户要求豁免、保持未验证，当前差距以 [B43–B45](../delivery/BACKLOG.md) 与 [STATUS](../delivery/STATUS.md) 为准。
 
 ## 可用于项目介绍的简版
 
