@@ -6,7 +6,7 @@
 
 一个 App、两种界面：**大窗口控制台**集中管理任务和设置，**边缘小窗**用于学习时快速查看和勾选，也可点击“今日计划”旁的＋直接添加今日任务。第一版只做独立的大任务，不做拆解或子任务。
 
-项目仓库：[zhouchji-ops/Sidetask](https://github.com/zhouchji-ops/Sidetask)。用户要求将两平台成果整合后迁入该仓库，代码与文档继续在同一仓库维护；旧仓库保留为 `legacy-origin` 追溯历史，接续步骤见[仓库迁移](docs/delivery/REPOSITORY_MIGRATION.md)。Mac 开发目录为 `任务弹窗`，Windows 本阶段使用 `E:\A_项目\SideTask-next-stage`，原 `E:\A_项目\SideTask` 及历史产物保留。
+项目仓库：[zhouchji-ops/Sidetask](https://github.com/zhouchji-ops/Sidetask)。两平台成果已按用户要求合并并推送该仓库，代码与文档继续在同一仓库维护；旧仓库保留为 `legacy-origin` 追溯历史，接续步骤见[仓库迁移](docs/delivery/REPOSITORY_MIGRATION.md)。Mac 开发目录为 `任务弹窗`，Windows 本阶段使用 `E:\A_项目\SideTask-next-stage`，原 `E:\A_项目\SideTask` 及历史产物保留。
 
 2026-09-25 按用户要求修复历史提交作者，三个分支的提交编号随之变化，原有代码和提交关系保留。**已有检出先读[历史身份迁移与 Windows 接续](docs/delivery/GIT_IDENTITY_MIGRATION.md)，不要直接合并旧历史。** 下文旧 SHA 用于描述迁移前的分工，当前编号见该对照表。
 
@@ -72,7 +72,7 @@ Todobar 的窗口隐藏、悬停和数据模型与需求有明显差距，因此
 
 运行入口在 [apps/desktop/README.md](apps/desktop/README.md)：进入该目录后 `npm ci`、`npm run dev` 可启动浏览器原型；原生开发使用 `npm run tauri -- dev`（需要 Rust 和平台构建环境）。浏览器只能验证布局和任务交互，不能证明真实多屏窗口能力。生成物与个人任务数据库不提交仓库。
 
-本轮 B43 在 `mac` 整合 Windows 分支 `f099e3ad` 与 Mac 分支 `2798841` 的成果：统一小窗新增、展开模式、schema5 和退出协议，纳入 Windows 首显与 WebView2 清理修复。推送新仓库后的精确源码、检查与 CI 结果统一登记在 [STATUS](docs/delivery/STATUS.md)；旧分支证据不替代整合版复验。
+本轮 B43 已将 Windows `f099e3ad` 与 Mac `2798841` 合并为产品 `6d32d6c` 并推送新仓库 `mac`：统一小窗新增、schema5 和退出协议，纳入 Windows 首显与 WebView2 清理修复。交付检查头为 `a1b30d63dae6fe5d8aba66b040d1b071afcdec4b`，仅修正恢复测试时序，产品源码与工作流未变。本地全量检查、Mac 内部包及限定隔离原生冒烟已通过；最终 CI、包摘要与剩余平台验收见 [STATUS](docs/delivery/STATUS.md)，B43 仍在复验阶段。
 
 Windows 开发机已有 0.1.0 x64 内部试用安装器，包含小窗「＋」与默认单击/可选悬停模式，源码、位置及SHA见 [STATUS](docs/delivery/STATUS.md)，真实步骤见[本次记录](tests/manual/2026-09-25-windows-panel-interactions.md)。包未签名、未公开发布。前一轮恢复/安装升级证据属于其对应源码；多屏/混合DPI、完整外部焦点/手势和3–7天连续使用仍待验收。该历史产品的 GitHub Actions 因旧仓库账号限制未执行；新仓库 CI 单独记录，不把本地通过写成云端或整合版原生通过。
 
