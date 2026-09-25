@@ -220,14 +220,14 @@ async function sqliteCheck(expected, name) {
   let state;
   try {
     assert.equal(db.prepare('PRAGMA quick_check').get().quick_check, 'ok');
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 4);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 5);
     assert.equal(db.prepare('PRAGMA application_id').get().application_id, 0x5344544b);
     state = JSON.parse(db.prepare("SELECT value FROM app_state WHERE key='snapshot'").get().value);
     assert.deepEqual(state.tasks, expected.tasks);
     assert.deepEqual(state.plans, expected.plans);
     assert.equal(state.revision, expected.revision);
   } finally { db.close(); }
-  event('sqlite-readonly-integrity-and-content', 'pass', { schema: 4, revision: state.revision, taskId: state.tasks[0]?.id, snapshotSha256: sha(JSON.stringify(state)), databaseSha256: sha(readFileSync(path)) });
+  event('sqlite-readonly-integrity-and-content', 'pass', { schema: 5, revision: state.revision, taskId: state.tasks[0]?.id, snapshotSha256: sha(JSON.stringify(state)), databaseSha256: sha(readFileSync(path)) });
   return state;
 }
 async function diagnostics() {

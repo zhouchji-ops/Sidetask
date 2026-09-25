@@ -44,7 +44,7 @@ Mac 的小窗和把手显示时保持非激活；用户明确点击快速添加�
 
 `Settings.revealMode` 为 click（默认）/hover；只有 hover 使用原生悬停计时。Mac 使用 AppKit NSEvent 的 local/global mouse-down monitor，覆盖左/右/其他键；local 判定目标是否为 panel/handle 或其附属窗口，global 观察其他应用。事件原样交还，不拦截输入，不通过窗口失焦推测点击，不使用需要权限的键盘监控或事件 tap。回调只向协调线程发带时间的消息；显隐/手势/模式的边界挡住迟到事件，固定、拖动、缩放与退出确认不收起。主线程退出时移除 monitor。
 
-Mac 外点隐藏只改窗口运行态，任务与快速输入组件保留。Windows 当前保留原分支已做单屏验证的原生焦点路径：单击显式打开可聚焦，失焦时尝试收起，输入/固定/手势/退出保护优先；悬停不激活。它可能在纯焦点切换时收起、输入时外点不隐藏，与真实外点/隐藏保草稿的完整目标仍有差异。本次未以可能漏短点击的80ms按钮采样替换，也未增加未经 Windows 原生验证的新Hook；由 Windows 接续修正与复验，见[B45](../delivery/BACKLOG.md)与[ADR-0007](../decisions/0007-panel-reveal-mode.md)。
+外点隐藏只改窗口运行态，任务与快速输入组件保留。Windows 通过独立消息线程的 WH_MOUSE_LL 观察真实按钮按下，经物理事件点、原生 child/root/owner 与 capture/menu 路由区分内外；回调始终放行原点击，只经 channel 唤醒协调器。事件时间戳保留排队年龄，统一状态机保护固定、手势、退出和较新的展开；输入锁仍保护 hover，但不挡显式外点。纯失焦不收起，悬停不激活。生命周期、API/许可及系统边界见[Windows 外点说明](../research/WINDOWS_OUTSIDE_CLICK.md)；单屏验证不关闭完整多屏门槛。
 
 ### 小窗快速新增与退出协作
 

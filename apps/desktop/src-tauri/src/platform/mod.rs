@@ -13,6 +13,8 @@ pub mod startup_recovery;
 #[cfg(any(target_os = "windows", test))]
 mod windows_input;
 #[cfg(target_os = "windows")]
+mod windows_pointer;
+#[cfg(target_os = "windows")]
 mod windows_visibility;
 use crate::{
     domain::{Action, Settings},
@@ -71,7 +73,7 @@ struct Resize {
     top: f64,
     monitor_signature: String,
 }
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 struct OutsideClick {
     observed_at: Instant,
 }
@@ -172,7 +174,7 @@ impl DockRuntime {
             || self.resize.is_some()
     }
 
-    #[cfg(any(target_os = "macos", test))]
+    #[cfg(any(target_os = "macos", target_os = "windows", test))]
     fn outside_click_hides(
         &self,
         settings: &Settings,
@@ -892,9 +894,8 @@ fn show_panel(
     dock.suppressed = false;
     #[cfg(target_os = "windows")]
     if settings.reveal_mode == "click" {
-        // Preserve Windows' explicit click activation; hover never requests it.
-        // Its existing dismissal path observes focus loss while no editor or
-        // gesture owns an interaction lock; see the Windows-only tick branch.
+        // Explicit click activation permits keyboard input. Dismissal observes
+        // mouse-down events independently; losing focus is not an outside click.
         focus_panel_explicitly(&window(app, "edge-panel")?)?;
     }
     let _ = app.emit_to("edge-panel", "sidetask:shown", ());
@@ -1005,6 +1006,8 @@ pub fn setup_recovery(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Er
 pub fn cleanup() {
     #[cfg(target_os = "macos")]
     macos_pointer::stop();
+    #[cfg(target_os = "windows")]
+    windows_pointer::stop();
 }
 
 fn setup_console(app: &mut tauri::App, recovery: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -1157,10 +1160,13 @@ fn setup_auxiliary(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
             })
     };
     tray.build(app)?;
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     let pointer_events = {
         let (sender, receiver) = std::sync::mpsc::channel();
+        #[cfg(target_os = "macos")]
         macos_pointer::install(app.handle(), sender)?;
+        #[cfg(target_os = "windows")]
+        windows_pointer::install(app.handle(), sender)?;
         receiver
     };
     let app_handle = app.handle().clone();
@@ -1175,13 +1181,13 @@ fn setup_auxiliary(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
                     .lock()
                     .map(|d| d.poll_interval())
                     .unwrap_or(Duration::from_millis(160));
-                #[cfg(target_os = "macos")]
+                #[cfg(any(target_os = "macos", target_os = "windows"))]
                 let clicked = match pointer_events.recv_timeout(interval) {
                     Ok(click) => outside_click(&app_handle, click),
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Ok(()),
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                 };
-                #[cfg(not(target_os = "macos"))]
+                #[cfg(not(any(target_os = "macos", target_os = "windows")))]
                 let clicked = {
                     std::thread::sleep(interval);
                     Ok::<(), String>(())
@@ -1266,7 +1272,7 @@ fn install_application_menu(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn outside_click(app: &tauri::AppHandle, click: OutsideClick) -> Result<(), String> {
     let state = app.state::<AppState>();
     let mut dock = state.dock.lock().map_err(|_| "窗口服务不可用。")?;
@@ -1339,20 +1345,6 @@ fn tick(app: &tauri::AppHandle) -> Result<(), String> {
         },
         exiting,
     );
-    #[cfg(target_os = "windows")]
-    if settings.reveal_mode == "click"
-        && dock.visible
-        && !settings.pinned
-        && !dock.locked()
-        && !exiting
-        && !panel.is_focused().map_err(error)?
-    {
-        // Preserve the Windows branch's focus-based dismissal and input locks.
-        // Unlike Mac's actual mouse-down events, blur alone may dismiss this
-        // panel and an open quick-add editor prevents outside dismissal. These
-        // known differences still require Windows-native follow-up validation.
-        hide_panel(app, &mut dock, &settings, false)?;
-    }
     match change {
         Some(VisibilityChange::Show) => show_panel(app, &mut dock, &settings)?,
         Some(VisibilityChange::Hide { suppress }) => {
