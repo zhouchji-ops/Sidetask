@@ -50,6 +50,8 @@ Mac 的小窗和把手显示时保持非激活；用户明确点击快速添加�
 
 今日标题与底部的＋共用 `QuickTodayAdd`；只发送既有 `createTask(addToToday=true)`，不增加持久化字段或第二份任务库。草稿按窗口在内存注册到 `DraftProvider`；浏览器预览隐藏后保留挂载。退出运行态携带 requestId 与当前处理窗口，按 edge-panel→console 的顺序批准，同一请求两处均完成后才授权退出。小窗批准后保持冻结，任一处取消通过受限原生事件解除冻结；失效请求、越阶段批准被拒绝。
 
+退出请求的前端监听必须指定对应窗口标签：Tauri全局`Any`监听仍会接收`emit_to`，只限定发送目标不能保证阶段隔离。`get_pending_exit`继续由Rust按实际调用方补齐遗漏请求；取消事件全局广播以解冻两窗。该规则的原生复现与回归见[Windows收尾](../../tests/manual/2026-09-25-windows-closeout.md)。
+
 ## 分层与依赖方向
 
 ```mermaid
