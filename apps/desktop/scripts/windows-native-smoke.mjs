@@ -241,31 +241,73 @@ async function diagnostics() {
 }
 async function cleanup() {
   // Cleanup is recorded separately and can never satisfy the product-exit test.
+  const errors = [];
+  const attempt = async (step, operation) => {
+    try { return await operation(); }
+    catch (error) {
+      const failure = { step, message: String(error.message || error).slice(0, 4000) };
+      errors.push(failure);
+      try { event('cleanup-error', 'fail', failure); }
+      catch (logError) { errors.push({ step: 'write-cleanup-evidence', message: String(logError.message || logError).slice(0, 4000) }); }
+      return undefined;
+    }
+  };
   if (appStarted && exe) {
-    try { for (const p of await processes(true)) { await shell('taskkill.exe', ['/PID', String(p.ProcessId), '/T', '/F'], 5000, true); event('forced-cleanup', 'info', { pid: p.ProcessId }); } } catch {}
+    const owned = await attempt('enumerate-application', () => processes(true));
+    for (const p of owned || []) {
+      await attempt(`terminate-application-${p.ProcessId}`, async () => {
+        await shell('taskkill.exe', ['/PID', String(p.ProcessId), '/T', '/F'], 5000, true);
+        event('forced-cleanup', 'info', { pid: p.ProcessId });
+      });
+    }
   }
-  if (driver?.pid && driver.exitCode === null) { try { await shell('taskkill.exe', ['/PID', String(driver.pid), '/T', '/F'], 5000, true); } catch {} }
-  if (logFd !== undefined) { closeSync(logFd); logFd = undefined; }
+  if (driver?.pid && driver.exitCode === null && driver.signalCode === null) {
+    await attempt('terminate-driver', () => shell('taskkill.exe', ['/PID', String(driver.pid), '/T', '/F'], 5000, true));
+  }
+  // A successful taskkill invocation is not proof that all owned processes ended.
+  // Reuse the exact executable-path probe; never broaden cleanup by image name.
+  if (appStarted && exe) {
+    await attempt('confirm-application-exit', async () => {
+      const remaining = await processes(true);
+      assert.equal(remaining.length, 0, `Smoke application processes remain: ${remaining.map(p => p.ProcessId).join(', ')}`);
+    });
+  }
+  if (driver?.pid) {
+    await attempt('confirm-driver-exit', async () => {
+      const deadline = Date.now() + 5000;
+      while (driver.exitCode === null && driver.signalCode === null && Date.now() < deadline) await delay(100);
+      assert.ok(driver.exitCode !== null || driver.signalCode !== null, 'Owned tauri-driver did not exit within 5000ms');
+    });
+  }
+  if (logFd !== undefined) {
+    await attempt('close-driver-log', () => { closeSync(logFd); logFd = undefined; });
+  }
+  return { ok: errors.length === 0, errors };
 }
 async function finish(error) {
   if (finalizing) return;
   finalizing = true;
+  // Unexpected failures while writing final evidence must not fall through as 0.
+  process.exitCode = 1;
   runAbort.abort(new Error('Native smoke is stopping'));
   clearTimeout(watchdog);
+  report.businessOutcome = error ? 'fail' : completed ? 'pass' : 'session-only-pass';
+  report.outcome = report.businessOutcome;
   // A second deadline prevents diagnostics/cleanup from extending the run forever.
   const cleanupDeadline = setTimeout(() => { report.outcome = 'fail'; report.cleanupTimeout = true; saveReport(); process.exit(1); }, 45_000);
-  if (error) { report.outcome = 'fail'; report.failure = { phase, message: String(error.stack || error).slice(0, 12_000) }; event('run', 'fail', { message: error.message }); await diagnostics(); }
-  else report.outcome = completed ? 'pass' : 'session-only-pass';
-  await cleanup();
+  if (error) { report.failure = { phase, message: String(error.stack || error).slice(0, 12_000) }; event('run', 'fail', { message: error.message }); await diagnostics(); }
+  try { report.cleanup = await cleanup(); }
+  catch (cleanupError) { report.cleanup = { ok: false, errors: [{ step: 'cleanup', message: String(cleanupError.message || cleanupError).slice(0, 4000) }] }; }
+  if (!report.cleanup.ok) report.outcome = 'fail';
   report.finishedAt = new Date().toISOString();
   report.elapsedMs = Date.now() - started;
   report.unverified = ['tray menu interaction', 'IME', 'mixed-DPI multi-monitor geometry', 'sleep/resume', 'installer/upgrade', 'sustained performance'];
   if (!report.assertions.some(a => a.name === 'real-two-window-completion-sync' && a.status === 'pass')) report.unverified.push('edge-panel cross-view UI');
   saveReport();
-  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n### Windows native smoke: ${report.outcome}\n\n- Commit: \`${report.commit || 'unknown'}\`\n- EXE SHA-256: \`${report.exeSha256 || 'unknown'}\`\n- PIDs: ${report.pid1 || 'none'} / ${report.pid2 || 'none'}\n- Evidence: \`${outputDir}\`\n- Failure: ${report.failure?.message.split('\n')[0] || 'none'}\n- Scope: ${report.scope}; listed manual acceptance scenarios remain unverified.\n`);
-  console.log(JSON.stringify({ outcome: report.outcome, report: join(outputDir, 'report.json'), elapsedMs: report.elapsedMs }));
+  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n### Windows native smoke: ${report.outcome}\n\n- Business checks: ${report.businessOutcome}\n- Cleanup: ${report.cleanup.ok ? 'pass' : 'fail'}\n- Commit: \`${report.commit || 'unknown'}\`\n- EXE SHA-256: \`${report.exeSha256 || 'unknown'}\`\n- PIDs: ${report.pid1 || 'none'} / ${report.pid2 || 'none'}\n- Evidence: \`${outputDir}\`\n- Failure: ${report.failure?.message.split('\n')[0] || report.cleanup.errors.map(error => `${error.step}: ${error.message}`).join('; ') || 'none'}\n- Scope: ${report.scope}; listed manual acceptance scenarios remain unverified.\n`);
+  console.log(JSON.stringify({ outcome: report.outcome, businessOutcome: report.businessOutcome, cleanup: report.cleanup.ok, report: join(outputDir, 'report.json'), elapsedMs: report.elapsedMs }));
   clearTimeout(cleanupDeadline);
-  process.exit(error ? 1 : 0);
+  process.exit(report.outcome === 'fail' ? 1 : 0);
 }
 const watchdog = setTimeout(() => { void finish(new Error('Global native smoke deadline exceeded')); }, bounds.total);
 process.once('SIGINT', () => { void finish(new Error('Interrupted')); });

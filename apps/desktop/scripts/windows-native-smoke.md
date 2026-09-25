@@ -38,7 +38,7 @@ if ($LASTEXITCODE -ne 0) { throw '原生冒烟失败，查看 evidence' }
 - Win32 `WM_CLOSE` 触发真实宿主窗口关闭流程，核验窗口隐藏且进程存活，再以现有 `openConsole` IPC 恢复并核验唯一可见原生 HWND。这不验收托盘点击。
 - 现有 `window_action('quit')` 触发与托盘相同的退出服务；有草稿时点击真实“保存并退出”，观察主进程结束，再用 Node 内置 SQLite **只读**检查 schema4、application ID、完整性及内容。重启必须新 PID 并保留同 Task ID / DDL / 计划；再次明确退出后再核验数据库。`driver.quit` 或强杀不能算产品退出通过。
 - 单请求通常 15 秒，会话 90 秒，控制台 30 秒，退出 30 秒，总段 15 分钟；超时诊断/清理另有 45 秒硬上限。失败保留驱动日志、可获得的 HTML/截图、结构化报告和隔离数据库。不会无限重试会话。
-- 收尾只强制回收本工具本次独有 EXE 路径的进程和本次 driver 进程树，记录为 cleanup；绝不按 `sidetask` 名称批量结束进程，绝不删除应用数据库。准备构建目录应专用于该次运行。
+- 收尾只强制回收本工具本次独有 EXE 路径的进程和本次 driver 进程树，并确认退出；绝不按 `sidetask` 名称批量结束进程，绝不删除应用数据库。探测、结束或退出确认失败会记录 `cleanup.errors`，即使业务检查通过，最终仍为失败/退出码1；`businessOutcome`独立保留业务结果。准备构建目录应专用于该次运行。
 
 `CARGO_TARGET_DIR` 仅用于当前终端的隔离构建，正式构建前清除或恢复原值。tauri-driver 2.0.6 不提供 `--version`，工具读取其 `bin/` 相邻 Cargo `.crates2.json` 安装回执并记录二进制 SHA；请保留 Cargo 安装位置，不单独复制这个 EXE。
 
