@@ -6,7 +6,7 @@
 
 一个 App、两种界面：**大窗口控制台**集中管理任务和设置，**边缘小窗**用于学习时快速查看和勾选。第一版只做独立的大任务，不做拆解或子任务。
 
-项目仓库：[changjin-cpu/SideTask](https://github.com/changjin-cpu/SideTask)。代码与文档均在该仓库维护；Mac 开发目录为 `任务弹窗`，Windows 开发目录为 `E:\A_项目\SideTask`。
+项目仓库：[changjin-cpu/SideTask](https://github.com/changjin-cpu/SideTask)。代码与文档均在该仓库维护；Mac 开发目录为 `任务弹窗`，Windows 本阶段使用 `E:\A_项目\SideTask-next-stage`，原 `E:\A_项目\SideTask` 及历史产物保留。
 
 2026-09-25 按用户要求修复历史提交作者，三个分支的提交编号随之变化，原有代码和提交关系保留。**已有检出先读[历史身份迁移与 Windows 接续](docs/delivery/GIT_IDENTITY_MIGRATION.md)，不要直接合并旧历史。** 下文旧 SHA 用于描述迁移前的分工，当前编号见该对照表。
 
@@ -70,9 +70,9 @@ Todobar 的窗口隐藏、悬停和数据模型与需求有明显差距，因此
 
 运行入口在 [apps/desktop/README.md](apps/desktop/README.md)：进入该目录后 `npm ci`、`npm run dev` 可启动浏览器原型；原生开发使用 `npm run tauri -- dev`（需要 Rust 和平台构建环境）。浏览器只能验证布局和任务交互，不能证明真实多屏窗口能力。生成物与个人任务数据库不提交仓库。
 
-两平台成果现已整合到 `mac`，保留 Mac 首次使用说明与原生几何修复、Windows 窗口/托盘适配，以及按窗口拆分加载和设置滚动修复。合并后的检查与产物以 [STATUS](docs/delivery/STATUS.md) 为准；原分支结果只作为历史证据。
+上一阶段两平台成果已整合到 `mac`，保留 Mac 首次使用说明与原生几何修复、Windows 窗口/托盘适配，以及按窗口拆分加载和设置滚动修复。本轮 Windows 的首显框与退出修复已推到 `codex/windows-next-stage`，产品提交为 `e4217f4b8d57172105184b30bec5046e84b77912`；尚需按 B43 协調新一轮双平台整合。实际检查与产物以 [STATUS](docs/delivery/STATUS.md) 为准；原分支结果只作为历史证据。
 
-Windows 开发机已有其原分支的 x64 内部试用安装器，文件位置与校验值见 [STATUS](docs/delivery/STATUS.md)。该包未签名，隔离同版本安装/重装/卸载保留数据已验；旧版本升级、多屏、IME、休眠和连续使用等仍待验收，详见 [Windows 记录](tests/manual/2026-09-25-windows-native.md)。Mac 首次使用说明已整合；两平台 CI 构建产物的远端上传仍受账户配额限制。
+Windows 开发机已从本轮源码生成可取得的 0.1.0 x64 内部试用 NSIS，文件位置、源码与校验值见 [STATUS](docs/delivery/STATUS.md)。该包未签名、未公开发布；同源码隔离包的新装、固定旧 schema 测试版升级、重装、卸载保数据再装和真实启动均通过，坏库恢复、原生 JSON 文件选择器与控制台中文 IME 也已有本轮证据。真实鼠标/托盘、部分恢复失败入口、多屏/混合DPI、休眠和实际3–7天连续使用仍待验收，详见 [Windows 本轮记录](tests/manual/2026-09-25-windows-next-stage.md)。远端 CI 的构建与产物上传分别记录，不以本地有包代替云端上传成功。
 
 文档索引见 [docs/README.md](docs/README.md)。调研记录日期：2026-09-24。
 
