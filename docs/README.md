@@ -3,7 +3,7 @@
 | 目录 | 内容 | 更新时机 |
 | --- | --- | --- |
 | research | [同类调研](research/ALTERNATIVES.md)、[窗口模式参考](research/WINDOW_PATTERNS.md)、[UI 参考](research/UI_REFERENCES.md) | 新证据、复用试验、版本变化 |
-| product | [PRD](product/PRD.md)、[UX](product/UX.md) | 需求或交互改变 |
+| product | [PRD](product/PRD.md)、[UX](product/UX.md)、[创新点与产品价值](product/INNOVATIONS.md) | 需求、交互或产品介绍改变 |
 | engineering | [架构](engineering/ARCHITECTURE.md)、[数据模型](engineering/DATA_MODEL.md)、[开发流程](engineering/DEVELOPMENT.md) | 技术实现、约束或命令改变 |
 | decisions | [ADR-0001 平台与复用](decisions/0001-platform-and-reuse.md)、[ADR-0002 控制台与小窗](decisions/0002-console-and-edge-panel.md)、[ADR-0003 原型](decisions/0003-prototype-implementation.md) | 重要选择及其原因改变 |
 | delivery | [路线图](delivery/ROADMAP.md)、[待办](delivery/BACKLOG.md)、[验收](delivery/TEST_PLAN.md) | 排期、范围、完成标准改变 |
