@@ -23,6 +23,10 @@ test('小窗连续新建直接加入今日，同事务保留原任务并同步�
   await expect(input).toBeFocused();
   await input.fill('小窗阅读练习');
   await page.getByRole('button', { name: '添加', exact: true }).click();
+  // Clicking dispatches the async transaction; wait for its committed UI before
+  // reading storage, including on runners where navigator.locks resolves later.
+  await expect(page.getByRole('button', { name: '完成：小窗阅读练习', exact: true })).toBeVisible();
+  await expect(consolePage.locator('.main-content').getByRole('button', { name: '完成：小窗阅读练习', exact: true })).toBeVisible();
   const next = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), storageKey);
   expect(next.tasks.slice(0, initial.tasks.length)).toEqual(initial.tasks);
   expect(next.revision).toBe(initial.revision + 2);
