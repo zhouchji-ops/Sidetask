@@ -53,7 +53,7 @@ function ConsoleContent() {
   useEffect(() => {
     let disposed = false;
     let stop: (() => void) | undefined;
-    void attachExitRequests(requestId => {
+    void attachExitRequests('console', requestId => {
       if (disposed || exitRequestRef.current === requestId) return;
       exitRequestRef.current = requestId; resolvingExitRef.current = null;
       setExitRequest(requestId); setResolving(false); setExitFailure('');

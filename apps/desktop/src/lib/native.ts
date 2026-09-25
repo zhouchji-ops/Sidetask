@@ -105,13 +105,16 @@ export async function attachNativeNavigation(): Promise<() => void> {
   });
 }
 
-export async function attachExitRequests(receive: (requestId: number, stage?: string) => void, cancelled?: (requestId: number) => void): Promise<() => void> {
+export async function attachExitRequests(windowLabel: 'console' | 'edge-panel', receive: (requestId: number, stage?: string) => void, cancelled?: (requestId: number) => void): Promise<() => void> {
   if (!isDesktop) return () => {};
   const cancelledIds = new Set<number>();
   const stopCancel = cancelled ? await listen<{ requestId: number }>('sidetask:exit-cancelled', ({ payload }) => { cancelledIds.add(payload.requestId); cancelled(payload.requestId); }) : () => {};
   let stopRequest = () => {};
   try {
-    stopRequest = await listen<{ requestId: number; window?: string }>('sidetask:exit-requested', ({ payload }) => { if (!cancelledIds.has(payload.requestId)) receive(payload.requestId, payload.window); });
+    // Global Tauri listeners also receive emit_to events. Scope requests to
+    // this surface so the console cannot answer the panel's earlier stage.
+    // Cancellation stays global: either surface must unfreeze both drafts.
+    stopRequest = await listen<{ requestId: number; window?: string }>('sidetask:exit-requested', ({ payload }) => { if (!cancelledIds.has(payload.requestId)) receive(payload.requestId, payload.window); }, { target: windowLabel });
     const pending = await invoke<{ requestId: number; window?: string } | null>('get_pending_exit');
     if (pending && !cancelledIds.has(pending.requestId)) receive(pending.requestId, pending.window);
     return () => { stopRequest(); stopCancel(); };

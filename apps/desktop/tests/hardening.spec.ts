@@ -8,7 +8,8 @@ async function nativeHarness(page: Page) {
     let snapshot = initial;
     let sequence = 0;
     const callbacks = new Map<number, (value: unknown) => void>();
-    const listeners = new Map<number, { event: string; handler: number }>();
+    type Listener = { event: string; handler: number; target?: { kind: string; label?: string } };
+    const listeners = new Map<number, Listener>();
     const harness = {
       failMutation: false,
       delayMutation: false,
@@ -17,8 +18,10 @@ async function nativeHarness(page: Page) {
       releaseExit: () => {},
       rejectExit: () => {},
       calls: [] as { command: string; args: Record<string, any> }[],
-      emit(event: string, payload: unknown) {
-        for (const [id, listener] of listeners) if (listener.event === event) callbacks.get(listener.handler)?.({ id, event, payload });
+      emit(event: string, payload: unknown, target?: string) {
+        // Tauri's global (Any) listeners also receive emit_to events. Merely
+        // emitting to a label does not isolate a globally registered listener.
+        for (const [id, listener] of listeners) if (listener.event === event && (!target || !listener.target || listener.target.kind === 'Any' || listener.target.label === target)) callbacks.get(listener.handler)?.({ id, event, payload });
       },
       advance() { snapshot = { ...snapshot, revision: snapshot.revision + 1 }; harness.emit('sidetask:changed', {}); },
       snapshot: () => structuredClone(snapshot),
@@ -30,7 +33,7 @@ async function nativeHarness(page: Page) {
         transformCallback(callback: (value: unknown) => void) { const id = ++sequence; callbacks.set(id, callback); return id; },
         async invoke(command: string, args: Record<string, any> = {}) {
           harness.calls.push({ command, args });
-          if (command === 'plugin:event|listen') { const id = ++sequence; listeners.set(id, args as { event: string; handler: number }); return id; }
+          if (command === 'plugin:event|listen') { const id = ++sequence; listeners.set(id, args as Listener); return id; }
           if (command === 'plugin:event|unlisten') { listeners.delete(args.eventId); return; }
           if (command === 'get_snapshot') return structuredClone(snapshot);
           if (command === 'get_usage_guide_seen') return true;
@@ -68,10 +71,34 @@ async function nativeHarness(page: Page) {
   await expect(page.locator('.console-shell')).toBeVisible();
 }
 async function quit(page: Page, requestId: number) {
-  await page.evaluate(id => (window as any).__harness.emit('sidetask:exit-requested', { requestId: id }), requestId);
+  await page.evaluate(id => (window as any).__harness.emit('sidetask:exit-requested', { requestId: id, window: 'console' }, 'console'), requestId);
 }
 async function approvals(page: Page) {
   return page.evaluate(() => (window as any).__harness.calls.filter((call: any) => call.command === 'resolve_exit'));
+}
+
+for (const dirty of [false, true]) {
+  test(`小窗确认阶段不触发${dirty ? '有草稿' : '无草稿'}控制台退出，轮到控制台后才处理`, async ({ page }) => {
+    await nativeHarness(page);
+    if (dirty) {
+      await page.getByRole('button', { name: '新建任务', exact: true }).click();
+      await page.getByRole('dialog', { name: '新建任务', exact: true }).getByLabel('任务名称', { exact: true }).fill('控制台还不能处理的草稿');
+    }
+    await page.evaluate(() => {
+      (window as any).__harness.emit('sidetask:exit-requested', { requestId: 301, window: 'edge-panel' }, 'edge-panel');
+      return new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    });
+    expect(await approvals(page)).toEqual([]);
+    await expect(page.getByRole('dialog', { name: '退出前保存修改？' })).toHaveCount(0);
+    await quit(page, 301);
+    if (dirty) {
+      const exit = page.getByRole('dialog', { name: '退出前保存修改？' });
+      await expect(exit).toBeVisible();
+      await exit.getByRole('button', { name: '取消退出', exact: true }).click();
+      await expect(page.getByRole('dialog', { name: '新建任务', exact: true }).getByLabel('任务名称', { exact: true })).toHaveValue('控制台还不能处理的草稿');
+    }
+    await expect.poll(() => approvals(page)).toEqual([{ command: 'resolve_exit', args: { requestId: 301, allow: !dirty } }]);
+  });
 }
 
 for (const scenario of [

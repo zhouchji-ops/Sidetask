@@ -25,7 +25,7 @@ export default function PanelExitGuard({ children }: { children: ReactNode }) {
   useEffect(() => {
     let disposed = false;
     let stop: (() => void) | undefined;
-    void attachExitRequests((id, stage) => {
+    void attachExitRequests('edge-panel', (id, stage) => {
       if (disposed) return;
       if (requestRef.current !== id) {
         previousFocus.current = document.activeElement as HTMLElement | null;
