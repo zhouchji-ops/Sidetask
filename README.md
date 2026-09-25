@@ -4,7 +4,7 @@
 
 把今日计划和截止日期放在屏幕边缘。随手查看、直接添加、勾选完成，需要集中整理时再打开完整控制台。
 
-[**完整使用说明书**](docs/product/USER_GUIDE.md) · [下载与安装](#下载与安装) · [产品卖点](docs/product/SELLING_POINTS.md) · [创新点](docs/product/INNOVATIONS.md) · [项目状态](docs/delivery/STATUS.md)
+[**完整使用说明书**](docs/product/USER_GUIDE.md) · [下载与安装](#下载与安装) · [产品卖点](docs/product/SELLING_POINTS.md) · [创新点](docs/product/INNOVATIONS.md) · [一期交付](docs/delivery/PHASE_1_CLOSEOUT.md)
 
 当前版本为 **0.1.0 内部试用版**，已有 Mac arm64 App 和 Windows x64 安装包。两平台自动化检查和构建已通过；原生交互、完整系统兼容、多屏与签名分发仍在完善。
 
@@ -62,7 +62,7 @@ Windows 最新修复及内部安装包记录见[本轮收尾](tests/manual/2026-
 
 采用 Tauri 2、React / TypeScript、Rust 和 SQLite。界面共用任务服务，平台窗口适配集中在 Rust 平台层；架构、验证和数据恢复资料见下方文档。
 
-Windows 最新收尾在 `codex/windows-next-stage`，Mac 协作分支为 `mac`；接续前先核对[项目状态](docs/delivery/STATUS.md)与远端增量。需要 Node.js 24、Rust 与对应系统的 Tauri 构建环境，详情见[桌面客户端开发说明](apps/desktop/README.md)。
+Windows 收尾已整合至 `mac`，这是当前统一接续入口；Mac 后续仍推 `mac`，Windows 在自己的分支开发。接续前先核对[项目状态](docs/delivery/STATUS.md)与远端增量。需要 Node.js 24、Rust 与对应系统的 Tauri 构建环境，详情见[桌面客户端开发说明](apps/desktop/README.md)。
 
 ```sh
 git clone --branch mac https://github.com/zhouchji-ops/Sidetask.git
