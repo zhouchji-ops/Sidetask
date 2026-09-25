@@ -176,6 +176,10 @@ reorderToday 的精确集合只包括当天未删除、未完成任务；已删�
 
 本节任务规则在 schema 5 继续有效，不将自动化测试、文档同步或 Mac 证据写成双平台验收完成。来源与分阶段检查见 [TASK_LIFECYCLE](../research/TASK_LIFECYCLE.md)，最终证据统一见 [STATUS](../delivery/STATUS.md)。
 
+## 展开模式偏好（2026-09-25）
+
+Settings新增 `revealMode`（Rust `reveal_mode`），只接受 `click` / `hover`；新建与旧记录缺失时均默认 `click`。旧 `revealDelay` / `hideDelay` 保留读取和校验，悬停模式继续采用已保存值且仅该模式显示延迟设置。只读补默认不重写旧原文，下一次合法事务保存新字段；模式更新不改Task/Plan、几何或其他偏好。当前采用下述 schema5 兼容边界，便携任务备份v2不带设备偏好。Windows旧分支曾在schema4只读补默认，其原生/安装证据仍按旧SHA保留，不能据此省略整合版升级与降级拒绝验收。
+
 ## 分区偏好的当前扩展
 
 Settings新增panelSplit（Rust panel_split:u8），缺省54，只接受30–70整数；属于本机偏好，便携任务备份不携带，整份任务恢复保留本机值。比例修改沿用统一设置事务，不改Task/Plan字段；同一设置冲突由版本及前端的初始比例核对处理。旧快照缺字段只读补默认，不重编码原文；正常提交后保存。分区比例单独落地时保持schema3，与uiStyle一样只支持新程序读旧库；旧schema3程序可能因未知设置字段拒绝读取。当时控制台placement扩展采用下述schema4备份迁移，当前由schema5继承，不支持降级继续编辑。分阶段记录见[窗口偏好计划](../research/WINDOW_PREFERENCES.md)。

@@ -6,11 +6,11 @@
 
 一个 App、两种界面：**大窗口控制台**集中管理任务和设置，**边缘小窗**用于学习时快速查看和勾选，也可点击“今日计划”旁的＋直接添加今日任务。第一版只做独立的大任务，不做拆解或子任务。
 
-项目仓库：[changjin-cpu/SideTask](https://github.com/changjin-cpu/SideTask)。代码与文档均在该仓库维护；Mac 开发目录为 `任务弹窗`，Windows 开发目录为 `E:\A_项目\SideTask`。
+项目仓库：[zhouchji-ops/Sidetask](https://github.com/zhouchji-ops/Sidetask)。用户要求将两平台成果整合后迁入该仓库，代码与文档继续在同一仓库维护；旧仓库保留为 `legacy-origin` 追溯历史，接续步骤见[仓库迁移](docs/delivery/REPOSITORY_MIGRATION.md)。Mac 开发目录为 `任务弹窗`，Windows 本阶段使用 `E:\A_项目\SideTask-next-stage`，原 `E:\A_项目\SideTask` 及历史产物保留。
 
 2026-09-25 按用户要求修复历史提交作者，三个分支的提交编号随之变化，原有代码和提交关系保留。**已有检出先读[历史身份迁移与 Windows 接续](docs/delivery/GIT_IDENTITY_MIGRATION.md)，不要直接合并旧历史。** 下文旧 SHA 用于描述迁移前的分工，当前编号见该对照表。
 
-**Mac 开发固定使用 [`mac`](https://github.com/changjin-cpu/SideTask/tree/mac) 分支，后续 Mac 代码和文档均推送 `origin/mac`。** 分支从 `e844fcd` 建立；Windows 的 `codex/windows-polish` 已按用户授权合入 `mac`；后续按已整合提交协调，不覆盖彼此分支。
+**Mac 开发固定使用 [`mac`](https://github.com/zhouchji-ops/Sidetask/tree/mac) 分支，后续 Mac 代码和文档均推送 `origin/mac`。** 分支从 `e844fcd` 建立；Windows 的 `codex/windows-polish` 已按用户授权合入 `mac`；后续按已整合提交协调，不覆盖彼此分支。
 
 **当前阶段：功能完善与内部试用验收。** 使用 Tauri 2 + React/TypeScript + Rust + SQLite 自建精简核心。备份与坏库启动恢复、固定 DDL、退出草稿保护、全局搜索、大列表和今日整理已实现；回收站与单项恢复已落地，正在完成集成和原生验收。第一版同时面向 macOS / Windows，双平台、多屏和发布验收尚未完成。实际测试及构建结果见 [STATUS](docs/delivery/STATUS.md)。
 
@@ -39,7 +39,7 @@ Todobar 的窗口隐藏、悬停和数据模型与需求有明显差距，因此
 
 「加入今日」是给同一任务建立今日计划引用，不是复制一条任务。任意位置完成或撤销完成，都更新同一个任务状态。
 
-小窗默认单击把手展开、点击其他位置收起；设置可切换“悬停展开”，仅此模式显示延迟。固定展开暂停自动收起，隐藏保留今日快速输入草稿。Mac先行，Windows原生外部点击仍需接续。
+小窗默认单击把手展开、点击其他位置收起；设置可切换“悬停展开”，仅此模式显示延迟。固定展开暂停自动收起，隐藏保留今日快速输入草稿。Mac 以真实外点收起并保草稿；Windows 当前保留失焦收起与输入保护，和仅外点收起/允许隐藏输入的目标仍有差异，B45 继续跟踪。整合版受影响原生行为必须分别复验。
 
 任务可移入回收站并恢复，保留原 ID、DDL、完成状态与所有日期的计划。正常搜索排除回收站，回收站有独立搜索；删除与恢复入口保留编辑草稿和冲突处理。当前 SQLite 为 schema5，便携任务备份为 v2，包含回收站记录；没有自动清空或永久删除。分区比例已支持操作结束后保存、取消和失败恢复；控制台位置/尺寸记忆已接入并在集成验收，首次常驻说明已接入，确认后隐藏且设置可再读，见[窗口偏好计划](docs/research/WINDOW_PREFERENCES.md)。
 
@@ -72,9 +72,9 @@ Todobar 的窗口隐藏、悬停和数据模型与需求有明显差距，因此
 
 运行入口在 [apps/desktop/README.md](apps/desktop/README.md)：进入该目录后 `npm ci`、`npm run dev` 可启动浏览器原型；原生开发使用 `npm run tauri -- dev`（需要 Rust 和平台构建环境）。浏览器只能验证布局和任务交互，不能证明真实多屏窗口能力。生成物与个人任务数据库不提交仓库。
 
-两平台成果现已整合到 `mac`，保留 Mac 首次使用说明与原生几何修复、Windows 窗口/托盘适配，以及按窗口拆分加载和设置滚动修复。合并后的检查与产物以 [STATUS](docs/delivery/STATUS.md) 为准；原分支结果只作为历史证据。
+本轮 B43 在 `mac` 整合 Windows 分支 `f099e3ad` 与 Mac 分支 `2798841` 的成果：统一小窗新增、展开模式、schema5 和退出协议，纳入 Windows 首显与 WebView2 清理修复。推送新仓库后的精确源码、检查与 CI 结果统一登记在 [STATUS](docs/delivery/STATUS.md)；旧分支证据不替代整合版复验。
 
-Windows 开发机已有其原分支的 x64 内部试用安装器，文件位置与校验值见 [STATUS](docs/delivery/STATUS.md)。该包未签名，隔离同版本安装/重装/卸载保留数据已验；旧版本升级、多屏、IME、休眠和连续使用等仍待验收，详见 [Windows 记录](tests/manual/2026-09-25-windows-native.md)。Mac 首次使用说明已整合；两平台 CI 构建产物的远端上传仍受账户配额限制。
+Windows 开发机已有 0.1.0 x64 内部试用安装器，包含小窗「＋」与默认单击/可选悬停模式，源码、位置及SHA见 [STATUS](docs/delivery/STATUS.md)，真实步骤见[本次记录](tests/manual/2026-09-25-windows-panel-interactions.md)。包未签名、未公开发布。前一轮恢复/安装升级证据属于其对应源码；多屏/混合DPI、完整外部焦点/手势和3–7天连续使用仍待验收。该历史产品的 GitHub Actions 因旧仓库账号限制未执行；新仓库 CI 单独记录，不把本地通过写成云端或整合版原生通过。
 
 文档索引见 [docs/README.md](docs/README.md)。调研记录日期：2026-09-24。
 

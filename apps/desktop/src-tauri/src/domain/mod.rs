@@ -554,6 +554,55 @@ impl Snapshot {
 mod tests {
     use super::*;
 
+    #[test]
+    fn reveal_mode_defaults_legacy_data_to_click_and_preserves_tasks_and_timing() {
+        let original = Snapshot::demo("2026-09-25");
+        assert_eq!(original.settings.reveal_mode, "click");
+        let mut legacy = serde_json::to_value(&original).unwrap();
+        legacy["settings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("revealMode");
+        legacy["settings"]["revealDelay"] = serde_json::json!(320);
+        let restored: Snapshot = serde_json::from_value(legacy.clone()).unwrap();
+        restored.validate().unwrap();
+        legacy["settings"]["revealMode"] = serde_json::json!("click");
+        assert_eq!(serde_json::to_value(restored).unwrap(), legacy);
+    }
+
+    #[test]
+    fn reveal_mode_changes_preserve_data_and_reject_unknown_modes() {
+        let original = Snapshot::demo("2026-09-25");
+        let changed = original
+            .apply(
+                Action::UpdateSettings {
+                    changes: serde_json::json!({"revealMode": "hover"}),
+                },
+                original.revision,
+            )
+            .unwrap();
+        let mut expected = serde_json::to_value(&original).unwrap();
+        expected["settings"]["revealMode"] = serde_json::json!("hover");
+        expected["revision"] = serde_json::json!(original.revision + 1);
+        assert_eq!(serde_json::to_value(&changed).unwrap(), expected);
+        for mode in [
+            serde_json::json!("auto"),
+            serde_json::json!(""),
+            serde_json::json!(null),
+            serde_json::json!(1),
+        ] {
+            assert!(changed
+                .apply(
+                    Action::UpdateSettings {
+                        changes: serde_json::json!({"revealMode": mode})
+                    },
+                    changed.revision
+                )
+                .is_err());
+            assert_eq!(serde_json::to_value(&changed).unwrap(), expected);
+        }
+    }
+
     fn active_plan_ids(snapshot: &Snapshot, date: &str) -> Vec<String> {
         let active: HashSet<_> = snapshot
             .tasks

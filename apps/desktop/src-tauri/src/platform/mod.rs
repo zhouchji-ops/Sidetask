@@ -12,6 +12,8 @@ mod macos_pointer;
 pub mod startup_recovery;
 #[cfg(any(target_os = "windows", test))]
 mod windows_input;
+#[cfg(target_os = "windows")]
+mod windows_visibility;
 use crate::{
     domain::{Action, Settings},
     AppState,
@@ -548,7 +550,7 @@ fn show_verified_edge(
     window.show().map_err(error)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn hide_edge_window(window: &WebviewWindow) -> Result<(), String> {
     let reset = window.set_focusable(false).map_err(error);
     // Even a failed focus reset must not prevent the requested real hide.
@@ -560,12 +562,12 @@ fn hide_edge_window(window: &WebviewWindow) -> Result<(), String> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn hide_edge_window(window: &WebviewWindow) -> Result<(), String> {
     window.hide().map_err(error)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn focus_panel(
     panel: &WebviewWindow,
     dock: &DockRuntime,
@@ -595,7 +597,7 @@ fn focus_panel(
     focus_panel_explicitly(panel)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn focus_panel_explicitly(panel: &WebviewWindow) -> Result<(), String> {
     panel.set_focusable(true).map_err(error)?;
     let focused = panel.set_focus().map_err(error).and_then(|()| {
@@ -614,14 +616,13 @@ fn focus_panel_explicitly(panel: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn focus_panel(
     _panel: &WebviewWindow,
     _dock: &DockRuntime,
     _settings: &Settings,
     _input_intent: bool,
 ) -> Result<(), String> {
-    // Windows activation requires its own native validation and implementation.
     Ok(())
 }
 
@@ -631,13 +632,16 @@ fn show_verified_edge(
     rect: Rect,
     monitor: &MonitorGeometry,
 ) -> Result<(), String> {
+    // Explicit editing may have enabled activation. A geometry/display refresh
+    // and hover reveal must return to the nonactivating path before showing.
+    window.set_focusable(false).map_err(error)?;
     // A first Win32 show can reapply the creation-time minimum-track frame.
     // Keep recovery inside this operation: hide, reapply while hidden, and
     // retry once before surfacing an error. Never repair a visible rectangle.
     let attempts = 2;
     for attempt in 0..attempts {
         let result = (|| {
-            window.show().map_err(error)?;
+            windows_visibility::show_current_frame_then_sync(window)?;
             // Windows can enforce minimum tracking sizes during ShowWindow even
             // after hidden geometry was confirmed. Never cache a widened handle as
             // applied. Queries run on the worker/async IPC path, not a main callback.
@@ -886,6 +890,13 @@ fn show_panel(
     dock.entered = None;
     dock.left = None;
     dock.suppressed = false;
+    #[cfg(target_os = "windows")]
+    if settings.reveal_mode == "click" {
+        // Preserve Windows' explicit click activation; hover never requests it.
+        // Its existing dismissal path observes focus loss while no editor or
+        // gesture owns an interaction lock; see the Windows-only tick branch.
+        focus_panel_explicitly(&window(app, "edge-panel")?)?;
+    }
     let _ = app.emit_to("edge-panel", "sidetask:shown", ());
     Ok(())
 }
@@ -1172,8 +1183,6 @@ fn setup_auxiliary(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
                 };
                 #[cfg(not(target_os = "macos"))]
                 let clicked = {
-                    // Windows event delivery needs its own native implementation;
-                    // never infer an outside click from focus loss or hover.
                     std::thread::sleep(interval);
                     Ok::<(), String>(())
                 };
@@ -1318,6 +1327,7 @@ fn tick(app: &tauri::AppHandle) -> Result<(), String> {
     let over_handle = geometry.handle.contains(cursor.x, cursor.y);
     let over_panel = dock.visible && geometry.panel.contains(cursor.x, cursor.y);
     let console_focused = window(app, "console")?.is_focused().unwrap_or(false);
+    let exiting = exit::is_pending(&state)?;
     let change = dock.hover_change(
         &settings,
         HoverSample {
@@ -1327,8 +1337,22 @@ fn tick(app: &tauri::AppHandle) -> Result<(), String> {
             primary_down: primary_button_down(),
             now: Instant::now(),
         },
-        exit::is_pending(&state)?,
+        exiting,
     );
+    #[cfg(target_os = "windows")]
+    if settings.reveal_mode == "click"
+        && dock.visible
+        && !settings.pinned
+        && !dock.locked()
+        && !exiting
+        && !panel.is_focused().map_err(error)?
+    {
+        // Preserve the Windows branch's focus-based dismissal and input locks.
+        // Unlike Mac's actual mouse-down events, blur alone may dismiss this
+        // panel and an open quick-add editor prevents outside dismissal. These
+        // known differences still require Windows-native follow-up validation.
+        hide_panel(app, &mut dock, &settings, false)?;
+    }
     match change {
         Some(VisibilityChange::Show) => show_panel(app, &mut dock, &settings)?,
         Some(VisibilityChange::Hide { suppress }) => {
@@ -1590,7 +1614,7 @@ pub fn window_action(
         show_panel(app, &mut dock, &settings(app)?)?;
         // Unlike hover, the user's explicit quit request may reveal and focus
         // a hidden draft even when the cursor is on the application menu.
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         focus_panel_explicitly(caller)?;
         return Ok(());
     }

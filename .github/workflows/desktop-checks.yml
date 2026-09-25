@@ -64,6 +64,11 @@ jobs:
       - id: ui-tests
         run: npm run test:ui
       - run: npm run tauri build -- --bundles ${{ matrix.bundle }}
+      - name: Ad-hoc sign and verify Mac internal app
+        if: runner.os == 'macOS'
+        run: |
+          codesign --force --deep --sign - src-tauri/target/release/bundle/macos/SideTask.app
+          codesign --verify --deep --strict --verbose=2 src-tauri/target/release/bundle/macos/SideTask.app
       - name: Archive Mac app preserving bundle metadata
         if: runner.os == 'macOS'
         run: ditto -c -k --sequesterRsrc --keepParent src-tauri/target/release/bundle/macos/SideTask.app SideTask-macos.zip

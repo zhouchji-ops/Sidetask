@@ -1,6 +1,6 @@
 # ADR-0007：小窗默认单击与可选悬停
 
-日期：2026-09-25。状态：采用；Mac先行，Windows原生外部点击待接续。
+日期：2026-09-25。状态：目标契约采用；Mac 已有真实外点实现，Windows 整合暂保留失焦/输入保护路径，差异及最终原生复验由 B45/B43 跟踪。
 
 ## 用户要求与决定
 
@@ -14,7 +14,9 @@ Mac采用AppKit NSEvent local+global mouse-down monitor（left/right/other）。
 
 [Apple事件监听说明](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/EventOverview/MonitoringEvents/MonitoringEvents.html)说明两类monitor互补、回调在主线程；本实现只注册鼠标，不增加键盘或辅助功能权限。固定依赖 `block2=0.6.2` 原已在锁文件，本次直接引用其RcBlock管理ObjC block。参考[固定GitHub源码](https://github.com/madsmtm/objc2/blob/b4167b582b2f75f9a1be75495c41b765344fd03c/crates/block2/src/rc_block.rs)及[MIT许可](https://github.com/madsmtm/objc2/blob/b4167b582b2f75f9a1be75495c41b765344fd03c/LICENSE.md)；仅API使用，无第三方实现复制。
 
-Windows需要由开发机接入对应外部点击事件源并验证主鼠标键、WebView/菜单目标和手势，不能以Mac或浏览器证据宣称完成。
+Windows 分支 `d05684b` 已在单屏原生验证显式展开、外点/失焦关闭和输入保护。本轮整合保留该平台路径：单击模式显式打开时可聚焦，通过原生焦点离开收起，固定、输入与手势保护优先；悬停仍不激活。它可能在没有鼠标点击的焦点切换时收起，输入期间外点也不会隐藏，因此尚未满足本节“只因真实外点收起、可隐藏输入保草稿”的完整目标。
+
+不在本次 Mac 整合中用80ms按钮采样替换 Windows 原生路径（可能漏掉短点击），也不引入未经 Windows 原生验证的新Hook。后续由 Windows 开发机修正并分别验证所有鼠标键、WebView/菜单目标、单纯失焦、输入隐藏草稿与手势，保留当前可用路径和失败证据。B45 保持 In progress；旧分支或浏览器证据不能替代整合版通过。
 
 ## 数据兼容
 

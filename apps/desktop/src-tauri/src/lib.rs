@@ -2,6 +2,9 @@ mod application;
 mod domain;
 mod infrastructure;
 mod platform;
+#[cfg(target_os = "windows")]
+#[path = "platform/windows_webview_shutdown.rs"]
+mod windows_webview_shutdown;
 
 use application::TaskService;
 use domain::{Action, Snapshot};
@@ -383,7 +386,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("SideTask could not initialize; existing data has not been reset");
     app.run(|app, event| match event {
-        tauri::RunEvent::Exit => platform::cleanup(),
+        tauri::RunEvent::Exit => {
+            platform::cleanup();
+            #[cfg(target_os = "windows")]
+            windows_webview_shutdown::close_after_exit_authorized(app);
+        }
         tauri::RunEvent::ExitRequested { api, .. } if !platform::exit::is_authorized(app) => {
             api.prevent_exit();
             if let Err(error) = platform::exit::request(app) {

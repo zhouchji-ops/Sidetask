@@ -134,13 +134,14 @@ test('先订阅位置状态再查询，初始错误与后续事件可见且慢�
 });
 
 test('慢重试冻结重复入口但可继续编辑任务，失败可重试且不卸载草稿', async ({ page, browserName }) => {
+  const { snapshot, errors } = await setup(page);
+  const input = await editDraft(page, snapshot.tasks[0].title);
   if (browserName === 'chromium') {
-    // A slow React commit must not leave the re-enabled retry button unfocused.
+    // Stress the failed action's React commit, not Vite cold imports or setup.
+    // A slow commit must not leave the re-enabled retry button unfocused.
     const renderer = await page.context().newCDPSession(page);
     await renderer.send('Emulation.setCPUThrottlingRate', { rate: 4 });
   }
-  const { snapshot, errors } = await setup(page);
-  const input = await editDraft(page, snapshot.tasks[0].title);
   await page.evaluate(() => { const h = (window as any).__position; h.delayAction = true; h.failAction = true; });
   await retry(page).click();
   await expect(retry(page)).toBeDisabled();
