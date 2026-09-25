@@ -8,6 +8,8 @@
 
 项目仓库：[changjin-cpu/SideTask](https://github.com/changjin-cpu/SideTask)。代码与文档均在该仓库维护；Mac 开发目录为 `任务弹窗`，Windows 开发目录为 `E:\A_项目\SideTask`。
 
+2026-09-25 按用户要求修复历史提交作者，三个分支的提交编号随之变化，原有代码和提交关系保留。**已有检出先读[历史身份迁移与 Windows 接续](docs/delivery/GIT_IDENTITY_MIGRATION.md)，不要直接合并旧历史。** 下文旧 SHA 用于描述迁移前的分工，当前编号见该对照表。
+
 **Mac 开发固定使用 [`mac`](https://github.com/changjin-cpu/SideTask/tree/mac) 分支，后续 Mac 代码和文档均推送 `origin/mac`。** 分支从 `e844fcd` 建立；Windows 的 `codex/windows-polish` 已按用户授权合入 `mac`；后续按已整合提交协调，不覆盖彼此分支。
 
 **当前阶段：功能完善与内部试用验收。** 使用 Tauri 2 + React/TypeScript + Rust + SQLite 自建精简核心。备份与坏库启动恢复、固定 DDL、退出草稿保护、全局搜索、大列表和今日整理已实现；回收站与单项恢复已落地，正在完成集成和原生验收。第一版同时面向 macOS / Windows，双平台、多屏和发布验收尚未完成。实际测试及构建结果见 [STATUS](docs/delivery/STATUS.md)。
