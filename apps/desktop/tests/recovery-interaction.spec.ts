@@ -10,8 +10,8 @@ async function backupHarness(page: Page) {
     const callbacks = new Map<number, (value: unknown) => void>();
     const listeners = new Map<number, { event: string; handler: number }>();
     const harness = {
-      waitPreview: false, waitRestore: false, waitExport: false, failRestore: false, failExport: false,
-      releasePreview: () => {}, releaseRestore: () => {}, releaseExport: () => {},
+      waitPreview: false, waitRestore: false, waitExport: false, waitMutate: false, failRestore: false, failExport: false,
+      releasePreview: () => {}, releaseRestore: () => {}, releaseExport: () => {}, releaseMutate: () => {},
       calls: [] as { command: string; args: Record<string, any> }[],
       snapshot: () => structuredClone(snapshot),
       advance() {
@@ -34,6 +34,7 @@ async function backupHarness(page: Page) {
           if (command === 'get_window_status' || command === 'get_console_position_status') return { pending: false, error: null };
           if (command === 'window_action' || command === 'resolve_exit') return;
           if (command === 'mutate') {
+            if (harness.waitMutate) await new Promise<void>(resolve => { harness.releaseMutate = resolve; });
             const modulePath = '/src/lib/domain.ts';
             const { applyPreviewAction } = await import(modulePath);
             snapshot = applyPreviewAction(snapshot, args.action, args.expectedRevision);
@@ -82,9 +83,24 @@ test('慢预览完成时保留后来输入的设置草稿与焦点，可保存�
   await expect(page.getByRole('dialog', { name: '恢复这份任务备份？' })).toHaveCount(0);
   await expect(width).toHaveValue('417');
   await expect(width).toBeFocused();
-  await expect(page.getByRole('button', { name: '选择备份恢复', exact: true })).toBeDisabled();
+  const chooser = page.getByRole('button', { name: '选择备份恢复', exact: true });
+  await expect(chooser).toBeDisabled();
+  await page.evaluate(() => { (window as any).__backup.waitMutate = true; });
   await page.getByRole('button', { name: '保存设置', exact: true }).click();
-  await page.evaluate(() => { (window as any).__backup.waitPreview = false; });
+  await expect(width).toBeDisabled();
+  await expect(chooser).toBeDisabled();
+  // setInputFiles bypasses the visible disabled chooser. A save still in flight
+  // must reject that synthetic selection, just as it rejects a stale picker.
+  await chooseBackup(page);
+  expect(await page.evaluate(() => (window as any).__backup.calls.filter((call: any) => call.command === 'preview_restore').length)).toBe(1);
+  await page.evaluate(() => {
+    const harness = (window as any).__backup;
+    harness.waitPreview = false; harness.waitMutate = false; harness.releaseMutate();
+  });
+  // A completed click is not a completed save. Wait for the same entry point a
+  // user can operate; do not race React's committed snapshot/draft cleanup.
+  await expect(chooser).toBeEnabled();
+  expect(await page.evaluate(() => (window as any).__backup.snapshot().settings.panelWidth)).toBe(417);
   await chooseBackup(page);
   await expect(page.getByRole('dialog', { name: '恢复这份任务备份？' })).toBeVisible();
 });
