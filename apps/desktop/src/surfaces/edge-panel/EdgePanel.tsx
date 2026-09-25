@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ArrowDownWideNarrow, ArrowUpRight, Check, ChevronDown, GripHorizontal, LoaderCircle, Pin, Plus, Settings2, X } from 'lucide-react';
 import { useAppStore } from '../../lib/store';
 import type { Task } from '../../lib/types';
 import { currentTimeZone, indexSnapshot, localDate, selectDeadlines } from '../../lib/domain';
-import { openConsole, setInteractionLock, startWindowDrag, windowAction } from '../../lib/native';
+import { openConsole, startWindowDrag, windowAction } from '../../lib/native';
 import { TaskRow } from '../../components/TaskUI';
 import { VirtualTaskList } from '../../components/VirtualTaskList';
 import { usePanelSplit } from '../../lib/usePanelSplit';
+import { usePanelResize } from '../../lib/usePanelResize';
 
 export default function EdgePanel() {
   const { snapshot, loading, error, busy, mutate, clearError } = useAppStore();
@@ -23,38 +23,7 @@ export default function EdgePanel() {
   const zone = currentTimeZone();
   const view = useMemo(() => snapshot ? indexSnapshot(snapshot, day) : null, [snapshot, day]);
   const deadlines = useMemo(() => snapshot ? selectDeadlines(snapshot, zone) : [], [snapshot, zone]);
-  const resize = useRef<{ x: number; y: number; width: number; height: number; edge: 'left' | 'right'; nextWidth: number; nextHeight: number } | null>(null);
-  const resizeFrame = useRef<number | null>(null);
-  const resizeQueue = useRef<Promise<unknown>>(Promise.resolve());
-  const enqueueSize = (width: number, height: number, commit: boolean) => {
-    resizeQueue.current = resizeQueue.current.catch(() => {}).then(() => windowAction('resizePanel', { width, height, commit }));
-    return resizeQueue.current;
-  };
-  useEffect(() => () => { if (resizeFrame.current !== null) cancelAnimationFrame(resizeFrame.current); if (resize.current) void resizeQueue.current.finally(() => setInteractionLock(false)).catch(() => {}); }, []);
-  function beginResize(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (event.button !== 0 || !snapshot) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const bounds = event.currentTarget.parentElement!.getBoundingClientRect();
-    resize.current = { x: event.screenX, y: event.screenY, width: bounds.width, height: bounds.height, edge: snapshot.settings.edge, nextWidth: bounds.width, nextHeight: bounds.height };
-    resizeQueue.current = resizeQueue.current.catch(() => {}).then(() => setInteractionLock(true));
-  }
-  function updateResize(event: ReactPointerEvent<HTMLButtonElement>) {
-    const start = resize.current;
-    if (!start) return;
-    start.nextWidth = Math.round(Math.max(300, Math.min(640, start.width + (event.screenX - start.x) * (start.edge === 'right' ? -1 : 1))));
-    start.nextHeight = Math.round(Math.max(380, Math.min(1000, start.height + event.screenY - start.y)));
-    if (resizeFrame.current !== null) return;
-    resizeFrame.current = requestAnimationFrame(() => { resizeFrame.current = null; if (resize.current) void enqueueSize(resize.current.nextWidth, resize.current.nextHeight, false).catch(reason => setWindowError(String(reason))); });
-  }
-  function finishResize(event: ReactPointerEvent<HTMLButtonElement>, cancelled = false) {
-    const current = resize.current;
-    if (!current) return;
-    resize.current = null;
-    if (resizeFrame.current !== null) { cancelAnimationFrame(resizeFrame.current); resizeFrame.current = null; }
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    void perform(async () => { try { await enqueueSize(cancelled ? current.width : current.nextWidth, cancelled ? current.height : current.nextHeight, true); } finally { await setInteractionLock(false); } });
-  }
+  const resizeProps = usePanelResize(snapshot?.settings, busy, setWindowError);
   async function perform(action: () => Promise<unknown>) { try { await action(); } catch (reason) { setWindowError(reason instanceof Error ? reason.message : '操作未完成，请重试'); } }
   async function toggle(task: Task) { try { await mutate({ type: 'setCompleted', id: task.id, completed: !task.completed, expectedRevision: task.revision }); setFeedback({ message: task.completed ? '已恢复任务' : '已完成', task }); } catch { /* Shared store shows errors. */ } }
   async function removeToday(task: Task) {
@@ -75,6 +44,6 @@ export default function EdgePanel() {
       <section className="edge-zone"><div className="edge-section-heading"><div><h2>截止日期</h2><span>{deadlines.length}</span></div><button className="edge-sort" title="切换截止日期排序" aria-label={snapshot.settings.ddlSort === 'date' ? '当前按日期排序，点击按重要程度排序' : '当前按重要程度排序，点击按日期排序'} onClick={() => void perform(() => mutate({ type: 'updateSettings', changes: { ddlSort: snapshot.settings.ddlSort === 'date' ? 'priority' : 'date' } }))}><ArrowDownWideNarrow size={12}/>{snapshot.settings.ddlSort === 'date' ? '日期' : '重要程度'}</button></div><div ref={deadlineScroll} className="edge-scroll">{deadlines.length ? <VirtualTaskList items={deadlines} renderItem={task => row(task, true)} scrollRef={deadlineScroll} estimateSize={64} resetKey={snapshot.settings.ddlSort} label="截止日期任务" /> : <div className="edge-empty"><p>没有待办的截止日期</p><span>为任务设置截止日期后显示在此。</span></div>}</div></section></div>
     {feedback && <div className="edge-feedback" role="status"><Check size={12}/><span>{feedback.message}</span><button onClick={() => void perform(async () => { const current = view.byId.get(feedback.task.id); if (current) { if (feedback.removedDate) await mutate({ type: 'planTask', id: current.id, planned: true, date: feedback.removedDate }); else await mutate({ type: 'setCompleted', id: current.id, completed: feedback.task.completed, expectedRevision: current.revision }); } setFeedback(null); })}>{feedback.removedDate ? '重新加入' : '撤销'}</button><button aria-label="关闭完成提示" onClick={() => setFeedback(null)}><X size={12}/></button></div>}
     <footer className="edge-footer"><button className="manage-button" onClick={() => void perform(() => openConsole('today'))}>管理任务</button><div><button className="icon-button" title="新建任务" aria-label="在控制台新建任务" onClick={() => void perform(() => windowAction('newTask'))}><Plus size={18}/></button><button className="icon-button" title="设置" aria-label="打开设置" onClick={() => void perform(() => openConsole('settings'))}><Settings2 size={16}/></button></div></footer>
-    <button className="panel-size-grip" data-edge={snapshot.settings.edge} aria-label="调整小窗宽度和高度" title="拖动调整尺寸；方向键每次调整 10 像素" onPointerDown={beginResize} onPointerMove={updateResize} onPointerUp={event => finishResize(event)} onPointerCancel={event => finishResize(event, true)} onKeyDown={event => { if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return; event.preventDefault(); const direction = snapshot.settings.edge === 'right' ? -1 : 1; const width = Math.max(300, Math.min(640, snapshot.settings.panelWidth + (event.key === 'ArrowRight' ? 10 * direction : event.key === 'ArrowLeft' ? -10 * direction : 0))); const height = Math.max(380, Math.min(1000, snapshot.settings.panelHeight + (event.key === 'ArrowDown' ? 10 : event.key === 'ArrowUp' ? -10 : 0))); void perform(() => enqueueSize(width, height, true)); }}><svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="m5 12 7-7m-3 7 3-3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg></button>
+    <button className="panel-size-grip" data-edge={snapshot.settings.edge} aria-label="调整小窗宽度和高度" title="拖动调整尺寸；方向键每次调整 10 逻辑像素，松开保存，Esc 取消" {...resizeProps}><svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="m5 12 7-7m-3 7 3-3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg></button>
   </div>;
 }

@@ -2,6 +2,7 @@
 mod console_coordinates;
 mod console_geometry;
 pub mod console_window;
+mod edge_coordinates;
 pub mod exit;
 mod geometry;
 #[cfg(target_os = "macos")]
@@ -11,15 +12,22 @@ use crate::{
     domain::{Action, Settings},
     AppState,
 };
-use geometry::{dock_geometry, DockGeometry, PhysicalRect};
+use edge_coordinates::{CoordinateSpace, DockLayout, MonitorGeometry, Point, Rect};
+use geometry::PhysicalRect;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
-use tauri::{
-    Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder,
-};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+#[cfg(target_os = "macos")]
+use tauri::{LogicalPosition, LogicalSize};
+#[cfg(not(target_os = "macos"))]
+use tauri::{PhysicalPosition, PhysicalSize};
+
+#[cfg(target_os = "macos")]
+const EDGE_SPACE: CoordinateSpace = CoordinateSpace::MacLogical;
+#[cfg(not(target_os = "macos"))]
+const EDGE_SPACE: CoordinateSpace = CoordinateSpace::WindowsPhysical;
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,7 +38,7 @@ pub struct Placement {
     #[serde(default = "default_offset")]
     offset: f64,
 }
-#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 struct MonitorPosition {
     x: i32,
     y: i32,
@@ -46,16 +54,51 @@ struct Drag {
     cancelled: bool,
 }
 struct Resize {
+    session: String,
     settings: Settings,
     draft: Settings,
     placement: Placement,
-    top: i32,
+    // Global AppKit logical units on Mac; desktop physical pixels on Windows.
+    top: f64,
+    monitor_signature: String,
+}
+#[derive(Deserialize)]
+#[serde(tag = "phase", rename_all = "camelCase")]
+enum ResizeRequest {
+    Start {
+        session: String,
+        #[serde(rename = "expectedSettings")]
+        expected_settings: Settings,
+    },
+    Preview {
+        session: String,
+        width: f64,
+        height: f64,
+    },
+    Commit {
+        session: String,
+        width: f64,
+        height: f64,
+    },
+    Cancel {
+        session: String,
+    },
+}
+impl ResizeRequest {
+    fn session(&self) -> &str {
+        match self {
+            Self::Start { session, .. }
+            | Self::Preview { session, .. }
+            | Self::Commit { session, .. }
+            | Self::Cancel { session } => session,
+        }
+    }
 }
 pub struct DockRuntime {
     placement: Placement,
     visible: bool,
     interaction_owners: BTreeSet<String>,
-    geometry: Option<DockGeometry>,
+    geometry: Option<DockLayout>,
     applied_settings: Option<Settings>,
     signature: String,
     entered: Option<Instant>,
@@ -100,6 +143,39 @@ impl DockRuntime {
             || (self.console_focused && self.interaction_owners.contains("console"))
             || self.drag.is_some()
             || self.resize.is_some()
+    }
+
+    fn cancel_resize(&mut self, session: Option<&str>) -> bool {
+        if self
+            .resize
+            .as_ref()
+            .is_none_or(|resize| session.is_some_and(|id| id != resize.session))
+        {
+            return false;
+        }
+        let resize = self.resize.take().unwrap();
+        self.placement = resize.placement;
+        self.applied_settings = None;
+        self.left = None;
+        true
+    }
+
+    fn resize_invalidated(&self, settings: &Settings, signature: &str) -> Option<&'static str> {
+        let resize = self.resize.as_ref()?;
+        if resize.settings != *settings {
+            Some("缩放期间设置已更新，已恢复最新设置，请重新调整。")
+        } else if resize.monitor_signature != signature {
+            Some("缩放期间屏幕或缩放比例已改变，已恢复保存尺寸，请重新调整。")
+        } else {
+            None
+        }
+    }
+
+    fn require_resize_session(&self, session: &str) -> Result<&Resize, String> {
+        self.resize
+            .as_ref()
+            .filter(|resize| resize.session == session)
+            .ok_or_else(|| "这次缩放已结束，请重新调整。".into())
     }
 
     fn status(&self, desired: &Settings) -> WindowStatus {
@@ -170,14 +246,58 @@ fn window(app: &tauri::AppHandle, label: &str) -> Result<WebviewWindow, String> 
     app.get_webview_window(label)
         .ok_or_else(|| format!("找不到 {label} 窗口。"))
 }
-fn work_area(monitor: &tauri::Monitor) -> PhysicalRect {
+fn edge_monitor(monitor: &tauri::Monitor) -> Result<MonitorGeometry, String> {
     let area = monitor.work_area();
-    PhysicalRect {
-        x: area.position.x,
-        y: area.position.y,
-        width: area.size.width,
-        height: area.size.height,
+    edge_coordinates::monitor_geometry(
+        EDGE_SPACE,
+        PhysicalRect {
+            x: monitor.position().x,
+            y: monitor.position().y,
+            width: monitor.size().width,
+            height: monitor.size().height,
+        },
+        PhysicalRect {
+            x: area.position.x,
+            y: area.position.y,
+            width: area.size.width,
+            height: area.size.height,
+        },
+        monitor.scale_factor(),
+    )
+}
+fn monitor_signature(monitor: &tauri::Monitor, geometry: &MonitorGeometry) -> String {
+    // Real DPI remains part of the signature even when the logical area is unchanged.
+    format!("{:?}:{:?}", geometry, monitor.name())
+}
+fn edge_cursor(source: &WebviewWindow) -> Result<Point, String> {
+    #[cfg(target_os = "macos")]
+    let primary_scale = source
+        .primary_monitor()
+        .map_err(error)?
+        .ok_or("主屏暂不可用，请稍后重试。")?
+        .scale_factor();
+    #[cfg(not(target_os = "macos"))]
+    let primary_scale = 1.; // Windows cursor values already use desktop physical pixels.
+    let cursor = source.cursor_position().map_err(error)?;
+    edge_coordinates::cursor_point(EDGE_SPACE, cursor.x, cursor.y, primary_scale)
+}
+fn edge_window_rect(source: &WebviewWindow) -> Result<Rect, String> {
+    let scale = source.scale_factor().map_err(error)?;
+    let position = source.outer_position().map_err(error)?;
+    let size = source.outer_size().map_err(error)?;
+    if source.scale_factor().map_err(error)? != scale {
+        return Err("屏幕缩放正在变化，请重新调整小窗。".into());
     }
+    edge_coordinates::window_rect(
+        EDGE_SPACE,
+        PhysicalRect {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+        },
+        scale,
+    )
 }
 fn choose_monitor(app: &tauri::AppHandle, placement: &Placement) -> Result<tauri::Monitor, String> {
     let panel = window(app, "edge-panel")?;
@@ -222,32 +342,125 @@ fn saved_monitor_index(
         .or(Some(first))
         .map(|(index, _)| index)
 }
-fn apply_rect(window: &WebviewWindow, rect: PhysicalRect) -> Result<(), String> {
-    // These auxiliary windows have no decorations or system shadow; their physical
-    // input bounds equal the clamped rectangle. Never slide a live window offscreen.
-    window
-        .set_size(PhysicalSize::new(rect.width, rect.height))
-        .map_err(error)?;
-    window
-        .set_position(PhysicalPosition::new(rect.x, rect.y))
-        .map_err(error)
+fn set_edge_size(window: &WebviewWindow, rect: Rect) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let size = LogicalSize::new(rect.width, rect.height);
+    #[cfg(not(target_os = "macos"))]
+    let size = {
+        let physical = rect.physical_rect()?;
+        PhysicalSize::new(physical.width, physical.height)
+    };
+    window.set_size(size).map_err(error)
 }
-fn apply_rect_live(window: &WebviewWindow, rect: PhysicalRect) -> Result<(), String> {
-    // Shrink before moving, then expand. With both endpoints in the same work
-    // area, every intermediate rectangle stays inside it, including right docks.
-    let old = window.outer_size().map_err(error)?;
-    window
-        .set_size(PhysicalSize::new(
-            old.width.min(rect.width),
-            old.height.min(rect.height),
-        ))
-        .map_err(error)?;
-    window
-        .set_position(PhysicalPosition::new(rect.x, rect.y))
-        .map_err(error)?;
-    window
-        .set_size(PhysicalSize::new(rect.width, rect.height))
-        .map_err(error)
+fn set_edge_position(window: &WebviewWindow, rect: Rect) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let position = LogicalPosition::new(rect.x, rect.y);
+    #[cfg(not(target_os = "macos"))]
+    let position = {
+        let physical = rect.physical_rect()?;
+        PhysicalPosition::new(physical.x, physical.y)
+    };
+    window.set_position(position).map_err(error)
+}
+fn rect_applied(
+    actual: Rect,
+    desired: Rect,
+    work: Rect,
+    actual_scale: f64,
+    target_scale: f64,
+) -> bool {
+    let epsilon = 0.000_001;
+    target_scale.is_finite()
+        && target_scale > 0.
+        && actual_scale == target_scale
+        && [
+            actual.x - desired.x,
+            actual.y - desired.y,
+            actual.width - desired.width,
+            actual.height - desired.height,
+        ]
+        .iter()
+        .all(|delta| delta.is_finite() && delta.abs() <= epsilon)
+        && actual.x >= work.x - epsilon
+        && actual.y >= work.y - epsilon
+        && actual.x + actual.width <= work.x + work.width + epsilon
+        && actual.y + actual.height <= work.y + work.height + epsilon
+}
+fn confirm_edge_rect(
+    window: &WebviewWindow,
+    rect: Rect,
+    monitor: &MonitorGeometry,
+    repair_hidden: bool,
+) -> Result<Rect, String> {
+    // SetWindowPos and DPI notifications can complete after a setter returns.
+    // Require two matching samples before revealing/caching a hidden transition.
+    let mut previous = None;
+    for _ in 0..32 {
+        let actual = edge_window_rect(window)?;
+        let scale = window.scale_factor().map_err(error)?;
+        if rect_applied(actual, rect, monitor.work, scale, monitor.scale) {
+            if previous == Some(actual) {
+                return Ok(actual);
+            }
+            previous = Some(actual);
+        } else {
+            previous = None;
+            if repair_hidden {
+                set_edge_size(window, rect)?;
+                set_edge_position(window, rect)?;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(8));
+    }
+    Err("屏幕或窗口尺寸尚未稳定，已暂停小窗；请稍后重试。".into())
+}
+fn apply_rect(
+    window: &WebviewWindow,
+    rect: Rect,
+    monitor: &MonitorGeometry,
+) -> Result<Rect, String> {
+    // Called while hidden. Moving a large window can keep it assigned to its old
+    // monitor. A small staging frame selects the target before applying its DPI.
+    if window.scale_factor().map_err(error)? != monitor.scale {
+        set_edge_size(
+            window,
+            Rect {
+                width: 1.,
+                height: 1.,
+                ..rect
+            },
+        )?;
+        set_edge_position(window, rect)?;
+        for _ in 0..12 {
+            if window.scale_factor().map_err(error)? == monitor.scale {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if window.scale_factor().map_err(error)? != monitor.scale {
+            return Err("小窗尚未切换到目标屏幕的缩放比例，请稍后重试。".into());
+        }
+    }
+    // Mac logical setters avoid reinterpreting target pixels using the old scale.
+    // Windows reapplies physical size after its WM_DPICHANGED resizing has settled.
+    set_edge_size(window, rect)?;
+    set_edge_position(window, rect)?;
+    confirm_edge_rect(window, rect, monitor, true)
+}
+fn apply_rect_live(window: &WebviewWindow, rect: Rect) -> Result<(), String> {
+    // Shrink before moving, then expand within the same work area. The old and new
+    // sizes are first placed in the same coordinate plane, including mixed DPI.
+    let old = edge_window_rect(window)?;
+    set_edge_size(
+        window,
+        Rect {
+            width: old.width.min(rect.width),
+            height: old.height.min(rect.height),
+            ..rect
+        },
+    )?;
+    set_edge_position(window, rect)?;
+    set_edge_size(window, rect)
 }
 fn same_window_layout(previous: &Settings, next: &Settings) -> bool {
     // Appearance, task ordering, and the internal section split update inside
@@ -265,20 +478,22 @@ fn apply_geometry(
 ) -> Result<(), String> {
     let result = apply_geometry_inner(app, dock, settings);
     if result.is_err() {
-        // A failed show/position must never be cached as successfully applied.
-        // Hide the auxiliary surfaces, invalidate the cache, and let the next
-        // tick retry the committed preferences. The console/tray stay usable.
-        dock.applied_settings = None;
-        dock.geometry = None;
-        dock.signature.clear();
-        dock.visible = false;
-        for label in ["edge-panel", "edge-handle"] {
-            if let Ok(window) = window(app, label) {
-                let _ = window.hide();
-            }
-        }
+        invalidate_geometry(app, dock);
     }
     result
+}
+
+fn invalidate_geometry(app: &tauri::AppHandle, dock: &mut DockRuntime) {
+    // Never cache a failed or unconfirmed native application as successful.
+    dock.applied_settings = None;
+    dock.geometry = None;
+    dock.signature.clear();
+    dock.visible = false;
+    for label in ["edge-panel", "edge-handle"] {
+        if let Ok(window) = window(app, label) {
+            let _ = window.hide();
+        }
+    }
 }
 
 fn apply_geometry_inner(
@@ -287,15 +502,8 @@ fn apply_geometry_inner(
     settings: &Settings,
 ) -> Result<(), String> {
     let monitor = choose_monitor(app, &dock.placement)?;
-    let area = work_area(&monitor);
-    if area.width == 0
-        || area.height == 0
-        || !monitor.scale_factor().is_finite()
-        || monitor.scale_factor() <= 0.
-    {
-        return Err("屏幕工作区暂不可用，已暂停小窗。".into());
-    }
-    let signature = format!("{:?}:{}:{:?}", area, monitor.scale_factor(), monitor.name());
+    let area = edge_monitor(&monitor)?;
+    let signature = monitor_signature(&monitor, &area);
     let changed = !dock
         .applied_settings
         .as_ref()
@@ -306,14 +514,14 @@ fn apply_geometry_inner(
         dock.applied_settings = Some(settings.clone());
         return Ok(());
     }
-    let geometry = dock_geometry(
-        area,
-        monitor.scale_factor(),
+    let mut geometry = edge_coordinates::dock_layout(
+        EDGE_SPACE,
+        &area,
         settings.panel_width,
         settings.panel_height,
         settings.edge == "left",
         dock.placement.offset,
-    );
+    )?;
     let panel = window(app, "edge-panel")?;
     let handle = window(app, "edge-handle")?;
     // Hide before a geometry transition so automatic correction cannot reveal an
@@ -325,10 +533,21 @@ fn apply_geometry_inner(
     handle.hide().map_err(error)?;
     if live_resize {
         apply_rect_live(&panel, geometry.panel)?;
+        geometry.panel = confirm_edge_rect(&panel, geometry.panel, &area, false)?;
     } else {
-        apply_rect(&panel, geometry.panel)?;
+        geometry.panel = apply_rect(&panel, geometry.panel, &area)?;
     }
-    apply_rect(&handle, geometry.handle)?;
+    let handle_unchanged = live_resize
+        && dock
+            .geometry
+            .is_some_and(|previous| previous.handle == geometry.handle);
+    if !handle_unchanged {
+        geometry.handle = apply_rect(&handle, geometry.handle, &area)?;
+    }
+    let fresh_monitor = choose_monitor(app, &dock.placement)?;
+    if monitor_signature(&fresh_monitor, &edge_monitor(&fresh_monitor)?) != signature {
+        return Err("定位期间屏幕已改变，已暂停小窗；请稍后重试。".into());
+    }
     dock.geometry = Some(geometry);
     dock.signature = signature;
     if settings.edge_enabled {
@@ -664,9 +883,9 @@ fn install_application_menu(app: &tauri::App) -> tauri::Result<()> {
 }
 
 fn tick(app: &tauri::AppHandle) -> Result<(), String> {
-    let settings = settings(app)?;
     let state = app.state::<AppState>();
     let mut dock = state.dock.lock().map_err(|_| "窗口服务不可用。")?;
+    let settings = settings(app)?;
     if let Some(drag) = &mut dock.drag {
         drag.cancelled |= escape_down() || drag.settings != settings;
         if drag.started.elapsed() > Duration::from_millis(160) && !left_button_down() {
@@ -674,18 +893,27 @@ fn tick(app: &tauri::AppHandle) -> Result<(), String> {
         }
         return Ok(());
     }
-    if dock
-        .resize
-        .as_ref()
-        .is_some_and(|resize| resize.settings != settings)
-    {
-        let resize = dock.resize.take().unwrap();
-        dock.placement = resize.placement;
-        dock.applied_settings = None;
-        let _ = app.emit(
-            "sidetask:window-error",
-            "缩放期间设置已更新，已恢复最新设置。",
-        );
+    if dock.resize.is_some() {
+        let reason = if escape_down() {
+            Some("已取消小窗尺寸调整。")
+        } else {
+            let signature = choose_monitor(app, &dock.placement).and_then(|monitor| {
+                edge_monitor(&monitor).map(|area| monitor_signature(&monitor, &area))
+            });
+            let signature = match signature {
+                Ok(signature) => signature,
+                Err(message) => {
+                    dock.cancel_resize(None);
+                    invalidate_geometry(app, &mut dock);
+                    return Err(message);
+                }
+            };
+            dock.resize_invalidated(&settings, &signature)
+        };
+        if let Some(message) = reason {
+            dock.cancel_resize(None);
+            let _ = app.emit("sidetask:window-error", message);
+        }
     }
     let applied = dock
         .resize
@@ -697,7 +925,7 @@ fn tick(app: &tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
     let panel = window(app, "edge-panel")?;
-    let cursor = panel.cursor_position().map_err(error)?;
+    let cursor = edge_cursor(&panel)?;
     let Some(geometry) = dock.geometry else {
         return Ok(());
     };
@@ -748,109 +976,126 @@ fn tick(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 fn resize_panel(app: &tauri::AppHandle, payload: Value) -> Result<(), String> {
-    let width = payload
-        .get("width")
-        .and_then(Value::as_f64)
-        .filter(|n| n.is_finite())
-        .ok_or("缺少有效宽度。")?
-        .clamp(300., 640.);
-    let height = payload
-        .get("height")
-        .and_then(Value::as_f64)
-        .filter(|n| n.is_finite())
-        .ok_or("缺少有效高度。")?
-        .clamp(380., 1000.);
-    let commit = payload
-        .get("commit")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
+    let request: ResizeRequest =
+        serde_json::from_value(payload).map_err(|_| "小窗缩放请求无效。")?;
+    if request.session().is_empty() || request.session().len() > 128 {
+        return Err("小窗缩放会话无效。".into());
+    }
     let state = app.state::<AppState>();
     let mut dock = state.dock.lock().map_err(|_| "窗口服务不可用。")?;
-    if dock.drag.is_some() {
-        return Err("请先结束移动，再调整小窗尺寸。".into());
-    }
-    // Never keep the service lock while waiting for a main-thread window call:
-    // a synchronous snapshot/mutation command may be waiting for that lock.
-    let current = state
-        .service
-        .lock()
-        .map_err(|_| "任务服务不可用。")?
-        .snapshot
-        .settings
-        .clone();
-    if dock.resize.as_ref().is_some_and(|r| r.settings != current) {
-        let resize = dock.resize.take().unwrap();
-        dock.placement = resize.placement;
-        dock.applied_settings = None;
-        apply_geometry(app, &mut dock, &current)?;
-        return Err("缩放期间设置已更新，请重新调整。".into());
-    }
-    if dock.resize.is_none() {
-        apply_geometry(app, &mut dock, &current)?;
-        dock.resize = Some(Resize {
-            settings: current.clone(),
-            draft: current.clone(),
-            placement: dock.placement.clone(),
-            top: dock.geometry.ok_or("小窗尚未定位。")?.panel.y,
-        });
-    }
-    let mut draft = current.clone();
-    draft.panel_width = width;
-    draft.panel_height = height;
-    let monitor = choose_monitor(app, &dock.placement)?;
-    let area = work_area(&monitor);
-    let shape = dock_geometry(
-        area,
-        monitor.scale_factor(),
-        width,
-        height,
-        draft.edge == "left",
-        0.,
-    );
-    let margin = shape.panel.y - area.y;
-    let travel = area.height as i64 - shape.panel.height as i64 - 2 * margin as i64;
-    let top = dock.resize.as_ref().unwrap().top;
-    dock.placement.offset = if travel > 0 {
-        ((top - area.y - margin) as f64 / travel as f64).clamp(0., 1.)
-    } else {
-        0.
-    };
-    dock.resize.as_mut().unwrap().draft = draft.clone();
-    // Preview is runtime-only, so moving the grip never writes SQLite per frame.
-    apply_geometry(app, &mut dock, &draft)?;
-    if !commit {
+    // Do not hold the service lock across native window calls.
+    let current = settings(app)?;
+    if let ResizeRequest::Cancel { session } = &request {
+        if dock.cancel_resize(Some(session)) {
+            apply_geometry(app, &mut dock, &current)?;
+        }
         return Ok(());
     }
-    let mut service = state.service.lock().map_err(|_| "任务服务不可用。")?;
-    exit::ensure_running(&state)?;
-    if service.snapshot.settings != current {
-        let latest = service.snapshot.settings.clone();
-        drop(service);
-        let resize = dock.resize.take().unwrap();
-        dock.placement = resize.placement;
-        dock.applied_settings = None;
-        apply_geometry(app, &mut dock, &latest)?;
-        return Err("缩放期间设置已更新，请重新调整。".into());
-    }
-    let next = service.snapshot.apply(
-        Action::UpdateSettings {
-            changes: json!({"panelWidth":width,"panelHeight":height}),
-        },
-        service.snapshot.revision,
-    )?;
-    let placement = serde_json::to_string(&dock.placement).map_err(error)?;
-    if let Err(message) = service.repository.save_placement(&next, &placement) {
-        drop(service);
-        let resize = dock.resize.take().unwrap();
-        dock.placement = resize.placement;
-        dock.applied_settings = None;
+    if let ResizeRequest::Start {
+        session,
+        expected_settings,
+    } = request
+    {
+        if dock.drag.is_some() || dock.resize.is_some() {
+            return Err("请先结束当前移动或缩放。".into());
+        }
+        exit::ensure_running(&state)?;
+        if current != expected_settings {
+            return Err("小窗设置已更新，请重新调整。".into());
+        }
         apply_geometry(app, &mut dock, &current)?;
-        return Err(message);
+        dock.resize = Some(Resize {
+            session,
+            settings: current.clone(),
+            draft: current,
+            placement: dock.placement.clone(),
+            top: dock.geometry.ok_or("小窗尚未定位。")?.panel.y,
+            monitor_signature: dock.signature.clone(),
+        });
+        return Ok(());
     }
-    service.snapshot = next.clone();
-    drop(service);
-    dock.resize = None;
-    let _ = app.emit("sidetask:changed", json!({"revision":next.revision}));
+    let (session, width, height, commit) = match request {
+        ResizeRequest::Preview {
+            session,
+            width,
+            height,
+        } => (session, width, height, false),
+        ResizeRequest::Commit {
+            session,
+            width,
+            height,
+        } => (session, width, height, true),
+        _ => unreachable!(),
+    };
+    // Only Start creates a gesture. Queued previews/commits after a cancellation,
+    // conflict or failed commit cannot resurrect it using a newer settings base.
+    dock.require_resize_session(&session)?;
+    let result = (|| -> Result<(), String> {
+        if !width.is_finite() || !height.is_finite() {
+            return Err("小窗尺寸无效。".into());
+        }
+        let width = width.clamp(300., 640.);
+        let height = height.clamp(380., 1000.);
+        let monitor = choose_monitor(app, &dock.placement)?;
+        let area = edge_monitor(&monitor)?;
+        let signature = monitor_signature(&monitor, &area);
+        if let Some(message) = dock.resize_invalidated(&current, &signature) {
+            return Err(message.into());
+        }
+        let mut draft = current.clone();
+        draft.panel_width = width;
+        draft.panel_height = height;
+        dock.placement.offset = edge_coordinates::resize_offset(
+            EDGE_SPACE,
+            &area,
+            width,
+            height,
+            draft.edge == "left",
+            dock.resize.as_ref().unwrap().top,
+        )?;
+        dock.resize.as_mut().unwrap().draft = draft.clone();
+        // Preview is runtime-only; SQLite is touched once on an explicit commit.
+        apply_geometry(app, &mut dock, &draft)?;
+        if let Some(message) = dock.resize_invalidated(&current, &dock.signature) {
+            return Err(message.into());
+        }
+        if !commit {
+            return Ok(());
+        }
+        let monitor = choose_monitor(app, &dock.placement)?;
+        let fresh_signature = monitor_signature(&monitor, &edge_monitor(&monitor)?);
+        if let Some(message) = dock.resize_invalidated(&current, &fresh_signature) {
+            return Err(message.into());
+        }
+        let mut service = state.service.lock().map_err(|_| "任务服务不可用。")?;
+        exit::ensure_running(&state)?;
+        if service.snapshot.settings != current {
+            return Err("缩放期间设置已更新，请重新调整。".into());
+        }
+        let next = service.snapshot.apply(
+            Action::UpdateSettings {
+                changes: json!({"panelWidth":width,"panelHeight":height}),
+            },
+            service.snapshot.revision,
+        )?;
+        let placement = serde_json::to_string(&dock.placement).map_err(error)?;
+        service.repository.save_placement(&next, &placement)?;
+        service.snapshot = next.clone();
+        drop(service);
+        dock.resize = None;
+        let _ = app.emit("sidetask:changed", json!({"revision":next.revision}));
+        Ok(())
+    })();
+    if let Err(message) = result {
+        dock.cancel_resize(Some(&session));
+        // Latest committed settings may have changed during the native preview.
+        // A failed rollback still invalidates/hides geometry and surfaces both errors.
+        let restored = settings(app).and_then(|latest| apply_geometry(app, &mut dock, &latest));
+        return match restored {
+            Ok(()) => Err(message),
+            Err(rollback) => Err(format!("{message} 恢复窗口失败：{rollback}")),
+        };
+    }
     Ok(())
 }
 fn finish_drag(app: &tauri::AppHandle, dock: &mut DockRuntime) -> Result<(), String> {
@@ -868,27 +1113,18 @@ fn finish_drag(app: &tauri::AppHandle, dock: &mut DockRuntime) -> Result<(), Str
         return apply_geometry(app, dock, &settings(app)?);
     }
     let source = window(app, &drag.label)?;
-    let cursor = source.cursor_position().map_err(error)?;
+    let cursor = edge_cursor(&source)?;
     let monitors = source.available_monitors().map_err(error)?;
-    let target = monitors
+    let monitor_geometry = monitors
         .iter()
-        .find(|m| {
-            let p = m.position();
-            let s = m.size();
-            PhysicalRect {
-                x: p.x,
-                y: p.y,
-                width: s.width,
-                height: s.height,
-            }
-            .contains(cursor.x, cursor.y)
-        })
-        .cloned()
+        .map(edge_monitor)
+        .collect::<Result<Vec<_>, _>>()?;
+    let target = edge_coordinates::monitor_at_point(&monitor_geometry, cursor)
+        .map(|index| monitors[index].clone())
         .or(source.current_monitor().map_err(error)?)
         .ok_or("找不到目标屏幕。")?;
-    let area = work_area(&target);
-    let position = source.outer_position().map_err(error)?;
-    let size = source.outer_size().map_err(error)?;
+    let area = edge_monitor(&target)?;
+    let source_rect = edge_window_rect(&source)?;
     let state = app.state::<AppState>();
     let mut service = state.service.lock().map_err(|_| "任务服务不可用。")?;
     exit::ensure_running(&state)?;
@@ -899,17 +1135,19 @@ fn finish_drag(app: &tauri::AppHandle, dock: &mut DockRuntime) -> Result<(), Str
         apply_geometry(app, dock, &current)?;
         return Err("拖动期间设置已更新，保留最新停靠设置。".into());
     }
-    let edge = if cursor.x < area.x as f64 + area.width as f64 / 2. {
+    let edge = if cursor.x < area.work.x + area.work.width / 2. {
         "left"
     } else {
         "right"
     };
-    let scale = target.scale_factor();
-    let panel_height = (current.panel_height * scale).min(area.height as f64 - 16. * scale);
-    let center = position.y as f64 + size.height as f64 / 2.;
-    let offset = ((center - panel_height / 2. - area.y as f64 - 8. * scale)
-        / (area.height as f64 - panel_height - 16. * scale).max(1.))
-    .clamp(0., 1.);
+    let offset = edge_coordinates::drag_offset(
+        EDGE_SPACE,
+        &area,
+        current.panel_width,
+        current.panel_height,
+        edge == "left",
+        source_rect.center_y(),
+    )?;
     let placement = Placement {
         monitor_name: target.name().cloned(),
         monitor_position: Some(MonitorPosition {
@@ -968,10 +1206,10 @@ pub fn window_action(
         if !["edge-handle", "edge-panel"].contains(&caller.label()) {
             return Err("此窗口不能停靠。".into());
         }
-        let settings = settings(app)?;
         {
             let state = app.state::<AppState>();
             let mut dock = state.dock.lock().map_err(|_| "窗口服务不可用。")?;
+            let settings = settings(app)?;
             if dock.resize.is_some() {
                 return Err("请先结束缩放，再移动小窗。".into());
             }
@@ -1005,10 +1243,10 @@ pub fn window_action(
         return resize_panel(app, payload);
     }
     if action == "retryWindowSettings" {
-        let desired = settings(app)?;
         let result = {
             let state = app.state::<AppState>();
             let mut dock = state.dock.lock().map_err(|_| "窗口服务不可用。")?;
+            let desired = settings(app)?;
             if dock.drag.is_some() || dock.resize.is_some() {
                 return Err("请先结束移动或缩放，再重试窗口设置。".into());
             }
@@ -1018,9 +1256,9 @@ pub fn window_action(
         publish_window_status(app, result.as_ref().err().cloned());
         return result;
     }
-    let settings = settings(app)?;
     let state = app.state::<AppState>();
     let mut dock = state.dock.lock().map_err(|_| "窗口服务不可用。")?;
+    let settings = settings(app)?;
     if ["finishDrag", "cancelDrag"].contains(&action)
         && dock
             .drag
@@ -1066,12 +1304,8 @@ pub fn window_action(
             } else {
                 dock.interaction_owners.remove(caller.label());
             }
-            if !locked && caller.label() == "edge-panel" {
-                if let Some(resize) = dock.resize.take() {
-                    dock.placement = resize.placement;
-                    dock.applied_settings = None;
-                    apply_geometry(app, &mut dock, &settings)?;
-                }
+            if !locked && caller.label() == "edge-panel" && dock.cancel_resize(None) {
+                apply_geometry(app, &mut dock, &settings)?;
             }
             dock.left = None;
             Ok(())
@@ -1127,6 +1361,141 @@ fn escape_down() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn resizing_dock() -> DockRuntime {
+        let saved = Placement {
+            monitor_name: Some("Saved display".into()),
+            monitor_position: Some(MonitorPosition { x: -1920, y: 0 }),
+            offset: 0.7,
+        };
+        let mut dock = DockRuntime::new(saved.clone());
+        let settings = Settings::default();
+        let mut draft = settings.clone();
+        draft.panel_width = 480.;
+        dock.resize = Some(Resize {
+            session: "first".into(),
+            settings,
+            draft: draft.clone(),
+            placement: saved,
+            top: -300.5,
+            monitor_signature: "negative-display@1.5".into(),
+        });
+        dock.applied_settings = Some(draft);
+        dock.placement.offset = 0.2;
+        dock
+    }
+
+    #[test]
+    fn cancelled_resize_restores_placement_and_rejects_every_queued_request() {
+        let mut dock = resizing_dock();
+        assert!(dock.require_resize_session("first").is_ok());
+        assert!(!dock.cancel_resize(Some("other")));
+        assert_eq!(dock.placement.offset, 0.2);
+        assert!(dock.cancel_resize(Some("first")));
+        assert_eq!(dock.placement.offset, 0.7);
+        assert_eq!(
+            dock.placement.monitor_position,
+            Some(MonitorPosition { x: -1920, y: 0 })
+        );
+        assert!(dock.applied_settings.is_none());
+        for _ in 0..3 {
+            assert!(dock.require_resize_session("first").is_err());
+            assert!(!dock.cancel_resize(Some("first")));
+        }
+        assert!(!dock.locked());
+    }
+
+    #[test]
+    fn resize_conflict_and_dpi_change_invalidate_the_gesture_without_restarting_it() {
+        let mut dock = resizing_dock();
+        let saved = dock.resize.as_ref().unwrap().settings.clone();
+        assert!(dock
+            .resize_invalidated(&saved, "negative-display@1.5")
+            .is_none());
+        assert!(dock
+            .resize_invalidated(&saved, "negative-display@2")
+            .is_some());
+        let mut latest = saved.clone();
+        latest.edge = if saved.edge == "left" {
+            "right"
+        } else {
+            "left"
+        }
+        .into();
+        assert!(dock
+            .resize_invalidated(&latest, "negative-display@1.5")
+            .is_some());
+        dock.cancel_resize(None);
+        assert!(dock.require_resize_session("first").is_err());
+        // A stale cancel/commit must not affect an explicitly begun newer gesture.
+        dock.resize = resizing_dock().resize;
+        dock.resize.as_mut().unwrap().session = "second".into();
+        assert!(dock.require_resize_session("first").is_err());
+        assert!(!dock.cancel_resize(Some("first")));
+        assert!(dock.require_resize_session("second").is_ok());
+    }
+
+    #[test]
+    fn resize_protocol_requires_explicit_phases_and_start_settings() {
+        for payload in [
+            json!({"width":480,"height":700,"commit":true}),
+            json!({"phase":"start","session":"first"}),
+            json!({"phase":"preview","session":"first","width":480}),
+            json!({"phase":"commit","width":480,"height":700}),
+        ] {
+            assert!(serde_json::from_value::<ResizeRequest>(payload).is_err());
+        }
+        let cancel: ResizeRequest =
+            serde_json::from_value(json!({"phase":"cancel","session":"first"})).unwrap();
+        assert_eq!(cancel.session(), "first");
+        let start: ResizeRequest = serde_json::from_value(
+            json!({"phase":"start","session":"first","expectedSettings":Settings::default()}),
+        )
+        .unwrap();
+        assert!(matches!(start, ResizeRequest::Start { .. }));
+    }
+
+    #[test]
+    fn native_dock_confirmation_rejects_dpi_resize_and_one_pixel_leaks() {
+        let work = Rect {
+            x: -1920.,
+            y: -200.,
+            width: 1920.,
+            height: 1080.,
+        };
+        let desired = Rect {
+            x: -564.,
+            y: -100.,
+            width: 564.,
+            height: 900.,
+        };
+        assert!(rect_applied(desired, desired, work, 1.5, 1.5));
+        // A native DPI message can resize the frame after our setter returned.
+        let dpi_adjusted = Rect {
+            width: 846.,
+            height: 1350.,
+            ..desired
+        };
+        assert!(!rect_applied(dpi_adjusted, desired, work, 1.5, 1.5));
+        assert!(!rect_applied(desired, desired, work, 1., 1.5));
+        let leaking = Rect {
+            x: desired.x + 1.,
+            ..desired
+        };
+        assert!(!rect_applied(leaking, leaking, work, 1.5, 1.5));
+        let stale_position = Rect {
+            y: desired.y + 1.,
+            ..desired
+        };
+        assert!(!rect_applied(stale_position, desired, work, 1.5, 1.5));
+        let fractional = Rect {
+            x: -563. / 1.5,
+            y: -100. / 1.5,
+            width: 551. / 1.5,
+            height: 900. / 1.5,
+        };
+        assert!(rect_applied(fractional, fractional, work, 1.5, 1.5));
+    }
 
     #[test]
     fn auxiliary_windows_cannot_quit_or_invoke_console_operations() {

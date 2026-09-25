@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AppStoreProvider, useAppStore } from './lib/store';
-import { attachNativeNavigation, isDesktop, windowAction } from './lib/native';
+import { attachNativeNavigation, createPreviewResizeHandler, isDesktop, windowAction } from './lib/native';
 import Console from './surfaces/console/Console';
 import EdgePanel from './surfaces/edge-panel/EdgePanel';
 import EdgeHandle from './surfaces/edge-panel/EdgeHandle';
@@ -21,6 +21,16 @@ function BrowserEdgePreview() {
   const [dragging, setDragging] = useState(false);
   const [side, setSide] = useState<'left' | 'right'>('right');
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  const resizeSource = useRef({ settings: snapshot?.settings, mutate });
+  resizeSource.current = { settings: snapshot?.settings, mutate };
+  useEffect(() => {
+    const resize = createPreviewResizeHandler(
+      () => resizeSource.current.settings, setSize,
+      (width, height) => resizeSource.current.mutate({ type: 'updateSettings', changes: { panelWidth: width, panelHeight: height } }),
+    );
+    window.addEventListener('sidetask:preview-resize', resize);
+    return () => window.removeEventListener('sidetask:preview-resize', resize);
+  }, []);
   const previewElement = useRef<HTMLDivElement>(null);
   const lastPointer = useRef({ x: 0, y: 120 });
   const inside = useRef(false);
@@ -32,15 +42,6 @@ function BrowserEdgePreview() {
     const preview = (event: Event) => setVisible(Boolean((event as CustomEvent).detail.visible));
     const leave = () => { if (!snapshot?.settings.pinned && !inside.current && !dragging && !locked.current) setVisible(false); };
     const interaction = (event: Event) => { locked.current = Boolean((event as CustomEvent).detail.locked); };
-    const resize = (event: Event) => {
-      const detail = (event as CustomEvent).detail;
-      const width = Math.max(300, Math.min(640, Math.round(Number(detail.width))));
-      const height = Math.max(380, Math.min(1000, Math.round(Number(detail.height))));
-      if (!Number.isFinite(width) || !Number.isFinite(height)) { detail.reject(new Error('窗口尺寸无效')); return; }
-      setSize({ width, height });
-      if (detail.commit === false) detail.resolve();
-      else void mutate({ type: 'updateSettings', changes: { panelWidth: width, panelHeight: height } }).then(detail.resolve).catch((error) => { setSize(null); detail.reject(error); });
-    };
     const begin = () => setDragging(true);
     const move = (event: PointerEvent) => {
       lastPointer.current = { x: event.clientX, y: event.clientY };
@@ -65,7 +66,6 @@ function BrowserEdgePreview() {
     window.addEventListener('sidetask:preview', preview);
     window.addEventListener('sidetask:preview-leave', leave);
     window.addEventListener('sidetask:preview-interaction', interaction);
-    window.addEventListener('sidetask:preview-resize', resize);
     window.addEventListener('sidetask:drag-start', begin);
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', end);
@@ -74,7 +74,6 @@ function BrowserEdgePreview() {
       window.removeEventListener('sidetask:preview', preview);
       window.removeEventListener('sidetask:preview-leave', leave);
       window.removeEventListener('sidetask:preview-interaction', interaction);
-      window.removeEventListener('sidetask:preview-resize', resize);
       window.removeEventListener('sidetask:drag-start', begin);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', end);
@@ -94,22 +93,19 @@ function BrowserEdgePreview() {
   >{visible ? <EdgePanel /> : <EdgeHandle />}</div>;
 }
 function App() {
-  const { mutate } = useAppStore();
+  const { mutate, snapshot } = useAppStore();
   const [previewSize, setPreviewSize] = useState<{ width: number; height: number } | null>(null);
+  const resizeSource = useRef({ settings: snapshot?.settings, mutate });
+  resizeSource.current = { settings: snapshot?.settings, mutate };
   useEffect(() => {
     if (isDesktop || surface !== 'edge-panel') return;
-    const resize = (event: Event) => {
-      const detail = (event as CustomEvent).detail;
-      const width = Math.max(300, Math.min(640, Math.round(Number(detail.width))));
-      const height = Math.max(380, Math.min(1000, Math.round(Number(detail.height))));
-      if (!Number.isFinite(width) || !Number.isFinite(height)) { detail.reject(new Error('窗口尺寸无效')); return; }
-      setPreviewSize({ width, height });
-      if (detail.commit === false) detail.resolve();
-      else void mutate({ type: 'updateSettings', changes: { panelWidth: width, panelHeight: height } }).then(detail.resolve).catch(detail.reject);
-    };
+    const resize = createPreviewResizeHandler(
+      () => resizeSource.current.settings, setPreviewSize,
+      (width, height) => resizeSource.current.mutate({ type: 'updateSettings', changes: { panelWidth: width, panelHeight: height } }),
+    );
     window.addEventListener('sidetask:preview-resize', resize);
     return () => window.removeEventListener('sidetask:preview-resize', resize);
-  }, [mutate]);
+  }, []);
   useEffect(() => {
     let done = false;
     let cleanup: (() => void) | undefined;

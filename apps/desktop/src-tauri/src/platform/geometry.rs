@@ -6,14 +6,6 @@ pub struct PhysicalRect {
     pub width: u32,
     pub height: u32,
 }
-impl PhysicalRect {
-    pub fn contains(self, x: f64, y: f64) -> bool {
-        x >= self.x as f64
-            && x < self.x as f64 + self.width as f64
-            && y >= self.y as f64
-            && y < self.y as f64 + self.height as f64
-    }
-}
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DockGeometry {
     pub panel: PhysicalRect,

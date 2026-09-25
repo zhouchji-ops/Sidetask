@@ -23,6 +23,7 @@
 | 今日任务与 DDL 为什么能同步 | [数据模型](docs/engineering/DATA_MODEL.md) |
 | 正常开发一个 App 的流程 | [开发流程](docs/engineering/DEVELOPMENT.md) |
 | 先做哪一步 | [里程碑](docs/delivery/ROADMAP.md)、[待办](docs/delivery/BACKLOG.md) |
+| Windows开发机如何接手 | [Windows交接](docs/delivery/WINDOWS_HANDOFF.md) |
 | 目前做到哪、下次接着做什么 | [项目状态](docs/delivery/STATUS.md)、[交接说明](docs/delivery/HANDOFF.md) |
 | 怎样判断真的做完 | [验收计划](docs/delivery/TEST_PLAN.md) |
 | AI / 开发者协作约定 | [AGENTS.md](AGENTS.md) |
@@ -64,7 +65,9 @@ Todobar 的窗口隐藏、悬停和数据模型与需求有明显差距，因此
 
 运行入口在 [apps/desktop/README.md](apps/desktop/README.md)：进入该目录后 `npm ci`、`npm run dev` 可启动浏览器原型；原生开发使用 `npm run tauri -- dev`（需要 Rust 和平台构建环境）。浏览器只能验证布局和任务交互，不能证明真实多屏窗口能力。生成物与个人任务数据库不提交仓库。
 
-本地分支为 `main`，`origin` 已连接用户指定仓库，用户已授权推送和 CI。[092cfa9 的 CI](https://github.com/changjin-cpu/SideTask/actions/runs/36046961175)中 Mac 99TS/93Rust/67UI 和 App 构建通过；Windows 99TS/91Rust 通过，午夜 UI 测试因加载跨过预置的一秒边界失败，测试时钟已修正并待新 CI。GitHub artifact 配额仍阻塞产物保留。最新可运行包与验证结果见 STATUS。
+本地分支为`main`，origin连接用户指定仓库，已授权推送。[fade1d6 CI](https://github.com/changjin-cpu/SideTask/actions/runs/36051857305)的Mac99TS/121Rust/72UI与App、Windows99TS/119Rust/72UI与NSIS通过，两平台上传受账户artifact配额阻塞。本轮小窗修复在Mac本地99TS/138Rust/82UI及双包构建/验签通过；新提交自身CI需另查，不能沿用旧结果。
+
+用户已将Windows后续交给Windows开发机，本Mac任务提供源码和[完整接手说明](docs/delivery/WINDOWS_HANDOFF.md)。本轮未验证Windows真实窗口或安装升级；正式可运行Mac包和摘要见STATUS。
 
 文档索引见 [docs/README.md](docs/README.md)。调研记录日期：2026-09-24。
 

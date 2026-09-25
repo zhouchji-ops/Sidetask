@@ -19,4 +19,7 @@ PRD 是产品行为的依据；ADR 是技术取舍的依据；BACKLOG 是事项�
 
 - [控制台设备偏好与schema4决策](decisions/0006-console-window-preferences.md)
 - [控制台几何集成验收](../tests/manual/2026-09-25-console-geometry.md)
-- [小窗混合DPI复查与修复计划](research/EDGE_COORDINATES.md)
+- [小窗混合DPI复查与实现](research/EDGE_COORDINATES.md)
+- [Windows真实App冒烟可行性与边界](research/WINDOWS_NATIVE_SMOKE.md)
+- [小窗尺寸与混合DPI集成记录](../tests/manual/2026-09-25-edge-resize.md)
+- [Windows开发机接手说明](delivery/WINDOWS_HANDOFF.md)

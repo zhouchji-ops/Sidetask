@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { Page } from './types';
+import type { Page, Settings, Snapshot } from './types';
 
 export const isDesktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 let previewHide: ReturnType<typeof setTimeout> | undefined;
@@ -40,7 +40,70 @@ export async function openConsole(page: Page = 'today', taskId?: string): Promis
   await windowAction('openConsole', { page, taskId: taskId ?? null });
 }
 export async function startWindowDrag(): Promise<void> { await windowAction('startDrag'); }
-export async function setInteractionLock(locked: boolean): Promise<void> { await windowAction('interaction', { locked }); }
+const interactionOwners = new Set<string | symbol>();
+let interactionQueue: Promise<unknown> = Promise.resolve();
+export async function setInteractionLock(locked: boolean, owner: string | symbol = 'default'): Promise<void> {
+  if (locked) interactionOwners.add(owner); else interactionOwners.delete(owner);
+  const held = interactionOwners.size > 0;
+  interactionQueue = interactionQueue.catch(() => {}).then(() => windowAction('interaction', { locked: held }));
+  await interactionQueue;
+}
+
+export function sameSettings(a: Settings, b: Settings): boolean {
+  const keys = Object.keys(a) as (keyof Settings)[];
+  return keys.length === Object.keys(b).length && keys.every(key => a[key] === b[key]);
+}
+
+/** Browser-only counterpart of the native resize session; no per-frame writes. */
+export function createPreviewResizeHandler(
+  settings: () => Settings | undefined,
+  show: (size: { width: number; height: number } | null) => void,
+  commit: (width: number, height: number) => Promise<Snapshot>,
+) {
+  let active: { session: string; base: Settings } | null = null;
+  let committed: Settings[] = [];
+  return async (event: Event) => {
+    const detail = (event as CustomEvent).detail;
+    try {
+      const { phase, session } = detail;
+      if (typeof session !== 'string' || !session) throw new Error('缺少有效的缩放会话。');
+      if (phase === 'cancel') {
+        if (active?.session === session) { active = null; show(null); }
+        detail.resolve(); return;
+      }
+      const observed = settings();
+      if (!observed) throw new Error('正在读取窗口设置。');
+      const seen = committed.findIndex(value => sameSettings(value, observed));
+      const current = seen >= 0 ? committed[committed.length - 1] : observed;
+      committed = seen >= 0 ? committed.slice(seen) : [];
+      if (phase === 'start') {
+        if (active) throw new Error('请先结束当前缩放。');
+        if (!detail.expectedSettings || !sameSettings(current, detail.expectedSettings)) throw new Error('缩放期间设置已更新，请重新调整。');
+        active = { session, base: { ...current } };
+        detail.resolve(); return;
+      }
+      if (phase !== 'preview' && phase !== 'commit') throw new Error('不支持的缩放操作。');
+      if (!active || active.session !== session) throw new Error('缩放已结束，请重新调整。');
+      if (!sameSettings(current, active.base)) throw new Error('缩放期间设置已更新，请重新调整。');
+      const { width, height } = detail;
+      if (!Number.isFinite(width) || !Number.isFinite(height) || width < 300 || width > 640 || height < 380 || height > 1000) throw new Error('窗口尺寸无效。');
+      show({ width, height });
+      if (phase === 'commit') {
+        const next = await commit(width, height);
+        const visible = settings() ?? observed;
+        if (committed.length && sameSettings(committed[committed.length - 1], current) && committed.some(value => sameSettings(value, visible))) committed = [...committed, next.settings];
+        else if (sameSettings(visible, observed) || sameSettings(visible, current) || sameSettings(visible, next.settings)) committed = [current, next.settings];
+        else committed = [];
+        active = null;
+      }
+      detail.resolve();
+    } catch (reason) {
+      // A stale request must not cancel a newer session.
+      if (active?.session === detail.session) { active = null; show(null); }
+      detail.reject(reason);
+    }
+  };
+}
 export async function attachNativeNavigation(): Promise<() => void> {
   if (!isDesktop) return () => {};
   return listen<{ page?: Page; taskId?: string; newTask?: boolean }>('sidetask:navigate', ({ payload }) => {

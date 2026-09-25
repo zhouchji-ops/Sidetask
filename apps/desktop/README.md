@@ -6,9 +6,9 @@ Tauri 2 + React / TypeScript + Rust + SQLite。任务、今日计划和设置共
 
 移入回收站保留任务 ID、DDL、完成状态和全部历史/未来计划；恢复后仍按原完成状态与计划展示。普通搜索与回收站搜索分开，删除/恢复及查看任务都遵守编辑草稿保护。首轮不提供永久删除、自动清空或批量删除。
 
-当前本地99/99 TypeScript、93/93 Rust、67/67 Playwright通过；最后包证据见STATUS，含回收站、分区保存及键盘焦点回归。合成 10k 回收站首屏挂载 17 行、639 个 DOM 节点，首尾搜索和恢复路径有回归；这是浏览器桌面分支结果，不是原生 WebView 性能承诺。
+当前本地99/99 TypeScript、138/138 Rust、82/82 Playwright通过，fmt/clippy和Mac双包构建/验签通过。资源`index-DItlHKdY.js` / `index-p-kKpHab.css`；最新包、未覆盖项和历史证据以[STATUS](../../docs/delivery/STATUS.md)为准。浏览器和纯测试不是原生WebView/混合DPI通过证据。
 
-最后补丁的 Mac arm64 App 已构建并通过本地 ad-hoc 验签（`index-B-9KMQ89.js` / `index-BN07M5pO.css`）。因设备锁屏尚未启动本阶段原生验收；包路径和归档摘要见 STATUS，不标记 B31 或双平台验收完成。
+Windows后续由用户的Windows开发机负责，先读[Windows接手说明](../../docs/delivery/WINDOWS_HANDOFF.md)，包含PowerShell环境/检查/隔离原生流程、代码入口与优先验收项。本Mac任务不再代做Windows专项。
 
 ## 开发
 
@@ -26,7 +26,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri -- dev # 原生开发（会启动 Vite，不要同时占用 1420）
 ```
 
-打包 Mac 应用：`npm run tauri -- build --bundles app`。Windows 在 Windows 构建环境运行 `npm run tauri -- build --bundles nsis`；基线48e5d4f已在Windows CI构建成功，但artifact上传因账户配额失败，安装与交互仍需实机验收。
+打包 Mac 应用：`npm run tauri -- build --bundles app`。Windows 在 Windows 构建环境运行 `npm run tauri -- build --bundles nsis`；上一阶段fade1d6已在Windows CI构建成功，但artifact上传因账户配额失败，本轮新源码与安装/交互需Windows接手方分别验收。
 
 浏览器预览使用独立的合成数据存储 `sidetask-browser-preview-v1`，不读取本机 SQLite。原生数据位于系统应用数据目录 `com.changjin.sidetask/sidetask.sqlite3`，不在仓库内。首次原生启动为空库。浏览器演示才使用示例任务；旧数据库升级不会重置任务。
 
@@ -41,8 +41,8 @@ npm run tauri -- dev # 原生开发（会启动 Vite，不要同时占用 1420�
 | src/lib | 类型、派生视图、Tauri 调用、统一 Store；另含浏览器演示适配器 |
 | src-tauri/src/domain | 独立 Task、计划引用、校验、revision 冲突 |
 | src-tauri/src/application | 事务用例与统一提交入口 |
-| src-tauri/src/infrastructure | SQLite Repository，schema3版本化snapshot、升级前安全备份与严格验证 |
-| src-tauri/src/platform | 窗口协调、物理工作区、拖动与停靠、hover |
+| src-tauri/src/infrastructure | SQLite Repository，schema4版本化snapshot及独立设备metadata、升级前安全备份与严格验证 |
+| src-tauri/src/platform | 窗口协调、分平台坐标适配、实际矩形确认、拖动/尺寸会话、hover |
 | src-tauri/migrations | 实际数据库初始化 SQL |
 | tests | Vitest 业务与 Playwright UI 自动化 |
 
@@ -59,6 +59,6 @@ npm audit
 cargo audit --file src-tauri/Cargo.lock # 需要cargo-audit；本轮使用0.22.2
 ```
 
-CI 使用 Node24.14.1/Rust1.98.1，Actions 固定 commit。b781899 的 Windows Clippy 因恢复目录构造器 `unused_mut` 失败；fc182cf 按 Unix/非 Unix 拆分声明修复，[CI36042694723](https://github.com/changjin-cpu/SideTask/actions/runs/36042694723)已完成Mac74TS/74Rust/47UI、Windows74TS/72Rust/47UI及App/NSIS构建；最终只有artifact配额上传失败。该CI与本地回收站/分区比例改动分开，后者仍需自己的双平台验证。旧 artifact 配额问题仍未解决，不能把构建通过写成安装包已可下载。
+CI固定Node24.14.1/Rust1.98.1及官方Actions commit。上一阶段[fade1d6 CI36051857305](https://github.com/changjin-cpu/SideTask/actions/runs/36051857305)通过Mac99TS/121Rust/72UI、Windows99TS/119Rust/72UI与App/NSIS，最后仅artifact配额上传失败。本轮B33不能借用旧提交CI作为自身双平台通过。构建成功不表示有可下载安装包。
 
-隔离原生验收使用临时 Tauri 配置覆盖 productName 和 identifier，不向正式个人数据库注入合成数据。小窗分区比例已可保存，后续控制台窗口位置和首次说明尚未实现，执行方案见[窗口偏好计划](../../docs/research/WINDOW_PREFERENCES.md)。
+隔离原生验收以临时Tauri配置覆盖productName/identifier，不向正式个人库注入fixture。分区比例和控制台几何已实现，小窗混合DPI/尺寸取消本轮修复；首次常驻说明尚未实现，见[路线图](../../docs/delivery/ROADMAP.md)。
