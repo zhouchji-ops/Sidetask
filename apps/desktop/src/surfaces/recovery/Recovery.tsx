@@ -59,8 +59,23 @@ function Recovery({ initialStatus }: { initialStatus: RecoveryStatus }) {
   const [error, setError] = useState('');
   const inFlight = useRef(false);
   const outcomeHeading = useRef<HTMLHeadingElement>(null);
+  const confirmHeading = useRef<HTMLHeadingElement>(null);
+  const backupOptions = useRef<HTMLFieldSetElement>(null);
+  const recoverButton = useRef<HTMLButtonElement>(null);
+  const scanButton = useRef<HTMLButtonElement>(null);
+  const focusRequest = useRef<'confirmation' | 'selection' | 'retry' | null>(null);
   const selected = status.candidates.find(candidate => candidate.id === selectedId);
   const busy = working || status.busy;
+  useEffect(() => {
+    if (busy || !focusRequest.current) return;
+    const request = focusRequest.current;
+    focusRequest.current = null;
+    if (status.recovered || (document.activeElement !== document.body && document.activeElement !== recoverButton.current)) return;
+    const target = request === 'confirmation' && confirm ? confirmHeading.current
+      : request === 'retry' && confirm && selected ? recoverButton.current
+      : backupOptions.current?.querySelector<HTMLInputElement>('input:checked') ?? scanButton.current;
+    target?.focus({ preventScroll: true });
+  }, [busy, confirm, selected, status.recovered]);
   async function refreshStatus() {
     const next = await invoke<RecoveryStatus | null>('get_startup_recovery');
     if (!next) throw new Error('恢复状态已改变，请退出后重新启动侧笺。');
@@ -91,6 +106,7 @@ function Recovery({ initialStatus }: { initialStatus: RecoveryStatus }) {
   }
   async function recover() {
     if (inFlight.current || !selected || !confirm || status.busy || status.recovered) return;
+    if (document.activeElement === recoverButton.current) focusRequest.current = 'retry';
     inFlight.current = true; setWorking(true); setError('');
     try {
       const recovered = await invoke<RecoveryOutcome>('recover_startup_backup', { candidateId: selected.id });
@@ -123,9 +139,9 @@ function Recovery({ initialStatus }: { initialStatus: RecoveryStatus }) {
       <p>本地数据库未能通过启动检查，任务暂未加载。选择一份已验证的备份恢复；恢复前会保留原数据库及日志文件。</p>
       <details className="recovery-details"><summary>查看启动检查错误</summary><p>{status.error}</p></details>
       <section aria-labelledby="recovery-backups-title" className="recovery-backups">
-        <div className="recovery-section-heading"><h2 id="recovery-backups-title">可用备份</h2><button className="secondary-button" disabled={working} onClick={() => void scan()}>重新检查备份</button></div>
+        <div className="recovery-section-heading"><h2 id="recovery-backups-title">可用备份</h2><button ref={scanButton} className="secondary-button" disabled={working} onClick={() => void scan()}>重新检查备份</button></div>
         {status.scanError && <p role="alert" className="recovery-error">备份检查未完成：{status.scanError}</p>}
-        {status.candidates.length ? <fieldset className="recovery-options" disabled={busy || confirm}><legend className="sr-only">选择恢复备份</legend>
+        {status.candidates.length ? <fieldset ref={backupOptions} className="recovery-options" disabled={busy || confirm}><legend className="sr-only">选择恢复备份</legend>
           {status.candidates.map(candidate => <label className={`recovery-option ${candidate.id === selectedId ? 'is-selected' : ''}`} key={candidate.id}>
             <input type="radio" name="recovery-backup" value={candidate.id} checked={candidate.id === selectedId} onChange={() => { setSelectedId(candidate.id); setError(''); }} />
             <span><strong>{backupDate(candidate.modifiedAt)} · 文件修改时间</strong><span>{candidate.taskCount.toLocaleString()} 项任务 · {candidate.planCount.toLocaleString()} 项计划 · {['before-schema-2', 'before-schema-3', 'before-schema-4'].includes(candidate.kind) ? '升级前备份' : '安全备份'}</span><small>{candidate.fileName}</small></span>
@@ -135,10 +151,10 @@ function Recovery({ initialStatus }: { initialStatus: RecoveryStatus }) {
       {error && <p role="alert" className="recovery-error">恢复尚未完成：{error}</p>}
       {busy && <p role="status">{status.busy || confirm ? '正在处理恢复，请稍候。' : '正在检查备份，请稍候。'}</p>}
       {confirm && selected ? <section className="recovery-confirm" aria-labelledby="recovery-confirm-title">
-        <h2 id="recovery-confirm-title">确认恢复这份备份？</h2>
+        <h2 ref={confirmHeading} tabIndex={-1} id="recovery-confirm-title">确认恢复这份备份？</h2>
         <p>将从所选文件恢复 {selected.taskCount.toLocaleString()} 项任务和 {selected.planCount.toLocaleString()} 项计划，以及该备份中的本机设置。备份以后的修改不会出现在恢复后的任务中，原文件会另行保留。</p>
-        <div className="recovery-actions"><button className="secondary-button" disabled={busy} onClick={() => setConfirm(false)}>返回选择</button><button className="primary-button" disabled={busy} onClick={() => void recover()}>保留原文件并恢复</button></div>
-      </section> : <div><button className="primary-button" disabled={busy || !selected} onClick={() => setConfirm(true)}>检查并恢复所选备份</button></div>}
+        <div className="recovery-actions"><button className="secondary-button" disabled={busy} onClick={() => { focusRequest.current = 'selection'; setConfirm(false); }}>返回选择</button><button ref={recoverButton} className="primary-button" disabled={busy} onClick={() => void recover()}>保留原文件并恢复</button></div>
+      </section> : <div><button className="primary-button" disabled={busy || !selected} onClick={() => { focusRequest.current = 'confirmation'; setConfirm(true); }}>检查并恢复所选备份</button></div>}
     </>}
   </div></main>;
 }

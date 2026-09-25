@@ -3,7 +3,7 @@ import type { KeyboardEvent, PointerEvent } from 'react';
 import { setInteractionLock } from './native';
 
 const clamp = (value: number) => Math.round(Math.max(30, Math.min(70, value)));
-type Gesture = { type: 'pointer'; id: number } | { type: 'keyboard' };
+type Gesture = { type: 'pointer'; id: number; y: number; span: number; target: HTMLDivElement } | { type: 'keyboard' };
 type Draft = { base: number; value: number };
 type Failure = 'write' | 'conflict' | null;
 
@@ -64,7 +64,9 @@ export function usePanelSplit(saved: number, busy: boolean, commit: (value: numb
       alive.current = false;
       focusAfterRemoval.current = null;
       focusAfterFailure.current = null;
+      const previous = gesture.current;
       gesture.current = null;
+      releasePointer(previous);
       if (ownsLock.current) lock(false);
     };
   }, []);
@@ -72,12 +74,17 @@ export function usePanelSplit(saved: number, busy: boolean, commit: (value: numb
   function focusAfterControlsDisappear(previous: Element | null) {
     if (failure) focusAfterRemoval.current = previous;
   }
+  function releasePointer(current: Gesture | null) {
+    if (current?.type === 'pointer' && current.target.hasPointerCapture(current.id)) current.target.releasePointerCapture(current.id);
+  }
   function discard() {
     if (inFlight.current) return;
     const previousFocus = document.activeElement;
     focusAfterControlsDisappear(previousFocus);
     draft.current = null;
+    const previousGesture = gesture.current;
     gesture.current = null;
+    releasePointer(previousGesture);
     setValue(latest.current.saved);
     setFailure(null);
     if (ownsLock.current) lock(false);
@@ -135,17 +142,21 @@ export function usePanelSplit(saved: number, busy: boolean, commit: (value: numb
     setValue(draft.current.value);
   }
   function pointerDown(event: PointerEvent<HTMLDivElement>) {
-    if (event.button !== 0 || !event.isPrimary || !begin({ type: 'pointer', id: event.pointerId })) return;
+    if (event.button !== 0 || !event.isPrimary) return;
+    const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
+    const divider = event.currentTarget.getBoundingClientRect();
+    if (!bounds || bounds.height <= divider.height || !begin({ type: 'pointer', id: event.pointerId, y: event.screenY, span: bounds.height - divider.height, target: event.currentTarget })) return;
     event.preventDefault();
     event.currentTarget.focus();
     try { event.currentTarget.setPointerCapture(event.pointerId); }
     catch { discard(); }
   }
   function pointerMove(event: PointerEvent<HTMLDivElement>) {
-    if (gesture.current?.type !== 'pointer' || gesture.current.id !== event.pointerId) return;
-    const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
-    const divider = event.currentTarget.getBoundingClientRect();
-    if (bounds && bounds.height > divider.height) preview((event.clientY - bounds.top - divider.height / 2) / (bounds.height - divider.height) * 100);
+    const current = gesture.current;
+    if (current?.type !== 'pointer' || current.id !== event.pointerId || !draft.current) return;
+    // Preserve where the pointer grabbed the divider. Returning to that point
+    // must restore the saved value even when the grab was off its centre.
+    preview(draft.current.base + (event.screenY - current.y) / current.span * 100);
   }
   function pointerEnd(event: PointerEvent<HTMLDivElement>, cancelled: boolean) {
     if (gesture.current?.type !== 'pointer' || gesture.current.id !== event.pointerId) return;
@@ -156,7 +167,7 @@ export function usePanelSplit(saved: number, busy: boolean, commit: (value: numb
   }
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.nativeEvent.isComposing) return;
-    if (event.key === 'Escape' && gesture.current?.type === 'keyboard') {
+    if (event.key === 'Escape' && gesture.current) {
       event.preventDefault(); event.stopPropagation(); discard(); return;
     }
     if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;

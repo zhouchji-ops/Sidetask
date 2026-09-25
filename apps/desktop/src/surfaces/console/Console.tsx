@@ -21,6 +21,11 @@ const pageTitles: Record<Page, string> = { today: '今日', all: '全部任务',
 const icons = { today: Sun, all: Inbox, deadlines: CalendarDays, completed: CheckCheck, trash: Trash2, settings: Settings2 };
 const priorities: { value: Priority; label: string }[] = [{ value: 'high', label: '高' }, { value: 'normal', label: '普通' }, { value: 'low', label: '低' }];
 function getInitialPage(): Page { const value = new URLSearchParams(location.search).get('page'); return value && Object.hasOwn(pageTitles, value) ? value as Page : 'today'; }
+function isInputMethodKey(event: KeyboardEvent) {
+  // WebKit can dispatch an IME-handled key after compositionend. Its legacy
+  // 229 marker still distinguishes that key from a deliberate app shortcut.
+  return event.isComposing || event.keyCode === 229;
+}
 export default function Console() { return <DraftProvider><ConsoleContent /></DraftProvider>; }
 function ConsoleContent() {
   const usageGuide = useUsageGuide();
@@ -98,7 +103,19 @@ function ConsoleContent() {
   const navigate = (callback: () => void) => { const state = navigationState.current; if (state.busy || state.resolving) return; if (state.dirty) setPendingNavigation(() => callback); else callback(); };
   useEffect(() => { const handler = (event: Event) => { const detail = (event as CustomEvent<{ page?: Page; taskId?: string }>).detail; if (!detail || typeof detail !== 'object') return; navigate(() => { if (detail.page && Object.hasOwn(pageTitles, detail.page)) setPage(detail.page); setSelectedId(detail.taskId || null); setQuery(''); if ((detail as { newTask?: boolean }).newTask) setNewTask(true); }); }; window.addEventListener('sidetask:navigate', handler); return () => window.removeEventListener('sidetask:navigate', handler); }, [draftDirty, busy, resolving]);
   useEffect(() => { const create = () => setNewTask(true); window.addEventListener('sidetask:new-task', create); return () => window.removeEventListener('sidetask:new-task', create); }, []);
-  useEffect(() => { const key = (event: KeyboardEvent) => { if (event.isComposing || busy || resolving) return; const input = event.target instanceof HTMLElement && (event.target.matches('input,textarea,select') || event.target.isContentEditable); if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); setNewTask(true); } else if (event.key === '/' && !input && !newTask) { event.preventDefault(); searchRef.current?.focus(); } else if (event.key === 'Escape' && !input && !newTask && !pendingNavigation) { navigate(() => setSelectedId(null)); searchRef.current?.blur(); } }; window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key); }, [newTask, draftDirty, pendingNavigation, busy, resolving]);
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      // A confirmation owns keyboard input until it closes. Background
+      // shortcuts must not move focus out of it or open another editor.
+      if (event.defaultPrevented || isInputMethodKey(event) || modalStack.length || busy || resolving) return;
+      const input = event.target instanceof HTMLElement && (event.target.matches('input,textarea,select') || event.target.isContentEditable);
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); setNewTask(true); }
+      else if (event.key === '/' && !input && !newTask) { event.preventDefault(); searchRef.current?.focus(); }
+      else if (event.key === 'Escape' && !input && !newTask && !pendingNavigation) { navigate(() => setSelectedId(null)); searchRef.current?.blur(); }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [newTask, draftDirty, pendingNavigation, busy, resolving]);
   useEffect(() => { if (!toast || busy || pendingNavigation) return; const timer = setTimeout(() => setToast(null), 5500); return () => clearTimeout(timer); }, [toast, busy, pendingNavigation]);
   useEffect(() => { const handler = (event: BeforeUnloadEvent) => { if (draftDirty) { event.preventDefault(); event.returnValue = ''; } }; window.addEventListener('beforeunload', handler); return () => window.removeEventListener('beforeunload', handler); }, [draftDirty, busy, resolving]);
   async function run(action: Action, message?: string) { try { await mutate(action); if (message) setToast({ message }); } catch { /* Store exposes the recoverable error. */ } }
@@ -304,7 +321,7 @@ function Modal({ title, onClose, closeDisabled = false, children }: { title: str
     autofocus?.focus();
     void setInteractionLock(true).catch(() => {});
     const key = (event: KeyboardEvent) => {
-      if (event.isComposing || modalStack.at(-1) !== id) return;
+      if (event.defaultPrevented || isInputMethodKey(event) || modalStack.at(-1) !== id) return;
       if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeRef.current(); }
       if (event.key === 'Tab') {
         const elements = Array.from(element?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]') || []).filter(item => item.getClientRects().length > 0);
@@ -333,7 +350,7 @@ function NewTaskModal({ busy, addToToday, onClose, onSubmit }: { busy: boolean; 
   useDraft('new-task', { dirty, save: saveDraft, discard: onClose });
   const requestClose = () => { if (busy) return; if (dirty) setConfirmClose(true); else onClose(); };
   async function submit(event: FormEvent) { event.preventDefault(); await saveDraft(); }
-  return <><Modal title="新建任务" onClose={requestClose}><form ref={formRef} className="new-task-form" onSubmit={submit}><fieldset disabled={busy} className="form-fields"><label htmlFor="new-title">任务名称</label><input id="new-title" autoFocus placeholder="例如：完成这周的阅读报告" value={title} onChange={event => setTitle(event.target.value)} maxLength={240} required/><div className="form-two-cols"><div><label htmlFor="new-date">截止日期 <span>可选</span></label><input id="new-date" type="date" value={date} onChange={event => { setDate(event.target.value); if (!event.target.value) setTime(''); }}/></div><div><label htmlFor="new-priority">重要程度</label><select id="new-priority" value={priority} onChange={event => setPriority(event.target.value as Priority)}>{priorities.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div></div>{date && <div className="new-time-field"><label htmlFor="new-time">具体时间 <span>留空表示当天结束前</span></label><input id="new-time" type="time" value={time} onChange={event => setTime(event.target.value)}/></div>}<p className="detail-note">{date ? `截止日期时区：${currentTimeZone()}` : ''}</p><label htmlFor="new-notes">备注 <span>可选</span></label><textarea id="new-notes" placeholder="添加任务相关说明" rows={3} value={notes} onChange={event => setNotes(event.target.value)} maxLength={5000}/><div className="new-task-plan"><div><Sun size={17}/><span>安排到今日</span></div><Toggle checked={planned} onChange={setPlanned} label="安排到今日"/></div>{failure && <p className="inline-error" role="alert">{failure}</p>}<div className="dialog-footer"><button type="button" className="secondary-button" disabled={busy} onClick={requestClose}>取消</button><button className="primary-button" type="submit" disabled={busy || !title.trim()}>{busy ? <LoaderCircle size={15} className="spin"/> : <Plus size={15}/>}创建任务</button></div></fieldset></form></Modal>{confirmClose && <Modal title="保留新任务草稿？" onClose={() => setConfirmClose(false)}><p className="dialog-description">新任务尚未保存。</p><div className="dialog-footer"><button className="secondary-button" onClick={onClose}>放弃新任务</button><button className="primary-button" onClick={() => setConfirmClose(false)}>继续编辑</button></div></Modal>}</>;
+  return <><Modal title="新建任务" onClose={requestClose}><form ref={formRef} className="new-task-form" onSubmit={submit}><fieldset disabled={busy} className="form-fields"><label htmlFor="new-title">任务名称</label><input id="new-title" placeholder="例如：完成这周的阅读报告" value={title} onChange={event => setTitle(event.target.value)} maxLength={240} required/><div className="form-two-cols"><div><label htmlFor="new-date">截止日期 <span>可选</span></label><input id="new-date" type="date" value={date} onChange={event => { setDate(event.target.value); if (!event.target.value) setTime(''); }}/></div><div><label htmlFor="new-priority">重要程度</label><select id="new-priority" value={priority} onChange={event => setPriority(event.target.value as Priority)}>{priorities.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div></div>{date && <div className="new-time-field"><label htmlFor="new-time">具体时间 <span>留空表示当天结束前</span></label><input id="new-time" type="time" value={time} onChange={event => setTime(event.target.value)}/></div>}<p className="detail-note">{date ? `截止日期时区：${currentTimeZone()}` : ''}</p><label htmlFor="new-notes">备注 <span>可选</span></label><textarea id="new-notes" placeholder="添加任务相关说明" rows={3} value={notes} onChange={event => setNotes(event.target.value)} maxLength={5000}/><div className="new-task-plan"><div><Sun size={17}/><span>安排到今日</span></div><Toggle checked={planned} onChange={setPlanned} label="安排到今日"/></div>{failure && <p className="inline-error" role="alert">{failure}</p>}<div className="dialog-footer"><button type="button" className="secondary-button" disabled={busy} onClick={requestClose}>取消</button><button className="primary-button" type="submit" disabled={busy || !title.trim()}>{busy ? <LoaderCircle size={15} className="spin"/> : <Plus size={15}/>}创建任务</button></div></fieldset></form></Modal>{confirmClose && <Modal title="保留新任务草稿？" onClose={() => setConfirmClose(false)}><p className="dialog-description">新任务尚未保存。</p><div className="dialog-footer"><button className="secondary-button" onClick={onClose}>放弃新任务</button><button className="primary-button" onClick={() => setConfirmClose(false)}>继续编辑</button></div></Modal>}</>;
 }
 
 function SettingsPage({ settings, busy, save, onSaved, usageGuide }: { usageGuide: UsageGuideState; settings: Settings; busy: boolean; save: (changes: Partial<Settings>) => Promise<void>; onSaved: () => void }) {
@@ -374,30 +391,57 @@ function DataControls() {
   const [failure, setFailure] = useState('');
   const [preview, setPreview] = useState<{ content: string; revision: number; taskCount: number; trashedTaskCount: number; planCount: number; exportedAt: string } | null>(null);
   const picker = useRef<HTMLInputElement>(null);
+  const exportButton = useRef<HTMLButtonElement>(null);
+  const pickerButton = useRef<HTMLButtonElement>(null);
+  const restoreButton = useRef<HTMLButtonElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  const focusAfterOperation = useRef<'export' | 'picker' | 'restore' | null>(null);
+  const editing = useRef({ dirty, busy });
+  editing.current = { dirty, busy };
   const unavailable = busy || working || dirty;
+  useEffect(() => {
+    if (busy || working || !focusAfterOperation.current) return;
+    const source = focusAfterOperation.current;
+    focusAfterOperation.current = null;
+    // Disabling the settings fieldset can blur the submit button. Return focus
+    // after React enables it, but leave any deliberate focus change alone.
+    const target = source === 'export' ? exportButton.current : source === 'picker' ? pickerButton.current
+      : preview ? preview.revision === snapshot?.revision && !dirty ? restoreButton.current : cancelButton.current : pickerButton.current;
+    if (document.activeElement !== document.body && document.activeElement !== target) return;
+    target?.focus({ preventScroll: true });
+  }, [busy, working, preview, snapshot?.revision, dirty]);
   if (!isDesktop || !snapshot) return null;
   async function exportData() {
     if (unavailable) return;
+    focusAfterOperation.current = document.activeElement === exportButton.current ? 'export' : null;
     setWorking(true); setFailure(''); setMessage('');
     try { const result = await invoke<{ path: string }>('export_backup'); setMessage(`备份已导出：${result.path}`); }
     catch (reason) { setFailure(String(reason)); } finally { setWorking(false); }
   }
   async function readFile(file?: File) {
     if (!file || unavailable || !snapshot) return;
+    focusAfterOperation.current = document.activeElement === pickerButton.current ? 'picker' : null;
     setWorking(true); setFailure(''); setMessage(''); setPreview(null);
     try {
       if (file.size > 10 * 1024 * 1024) throw new Error('备份超过 10 MiB，未读取或恢复。');
       const revision = snapshot.revision;
       const content = await file.text();
       const result = await invoke<{ taskCount: number; trashedTaskCount: number; planCount: number; exportedAt: string }>('preview_restore', { content });
+      // Choosing a file is not permission for a late response to interrupt a
+      // new editor (including an empty modal) or a save begun during validation.
+      if (editing.current.dirty || editing.current.busy || modalStack.length > 0) {
+        setMessage('编辑状态已改变，预览已取消。请先完成当前编辑，再选择备份。');
+        return;
+      }
       setPreview({ ...result, content, revision });
     } catch (reason) { setFailure(String(reason)); } finally { setWorking(false); }
   }
   async function restore() {
     if (!preview || unavailable) return;
+    focusAfterOperation.current = document.activeElement === restoreButton.current ? 'restore' : null;
     setWorking(true); setFailure('');
     try { const path = await restoreBackup(preview.content, preview.revision); setPreview(null); setMessage(`恢复完成。恢复前的完整数据库备份：${path}`); }
     catch (reason) { setFailure(String(reason)); } finally { setWorking(false); }
   }
-  return <section className="settings-section"><div className="settings-section-title"><Inbox size={18}/><h2>数据备份</h2></div><p className="detail-note">导出全部任务（含回收站）与计划。恢复会替换现有任务和回收站；当前风格、窗口设置仍保留。</p><div className="setting-row"><button type="button" className="secondary-button" disabled={unavailable} onClick={() => void exportData()}>导出任务备份</button><button type="button" className="secondary-button" disabled={unavailable} onClick={() => picker.current?.click()}>选择备份恢复</button><input ref={picker} type="file" accept=".json,application/json" aria-label="选择任务备份文件" hidden onChange={event => { void readFile(event.currentTarget.files?.[0]); event.currentTarget.value = ''; }}/></div>{dirty && <p className="detail-note">请先保存或放弃正在编辑的修改，再备份或恢复。</p>}{message && <p className="detail-note backup-path" role="status">{message}</p>}{failure && !preview && <p className="inline-error" role="alert">{failure}</p>}{preview && <Modal title="恢复这份任务备份？" onClose={() => { if (!working) setPreview(null); }}><p className="dialog-description">包含 {preview.taskCount} 项任务（其中回收站 {preview.trashedTaskCount ?? 0} 项）、{preview.planCount} 条计划。导出时间：{new Date(preview.exportedAt).toLocaleString('zh-CN')}。</p><p className="dialog-description">确认后会先备份当前数据库，再替换任务和计划。安全备份失败时不会恢复。</p>{preview.revision !== snapshot.revision && <p className="inline-error" role="alert">任务已更新，请取消并重新选择备份，以核对最新数据。</p>}{failure && <p className="inline-error" role="alert">{failure}</p>}<div className="dialog-footer"><button type="button" className="secondary-button" disabled={working} onClick={() => setPreview(null)}>取消恢复</button><button type="button" className="primary-button" disabled={unavailable || preview.revision !== snapshot.revision} onClick={() => void restore()}>备份当前数据并恢复</button></div></Modal>}</section>;
+  return <section className="settings-section"><div className="settings-section-title"><Inbox size={18}/><h2>数据备份</h2></div><p className="detail-note">导出全部任务（含回收站）与计划。恢复会替换现有任务和回收站；当前风格、窗口设置仍保留。</p><div className="setting-row"><button ref={exportButton} type="button" className="secondary-button" disabled={unavailable} onClick={() => void exportData()}>导出任务备份</button><button ref={pickerButton} type="button" className="secondary-button" disabled={unavailable} onClick={() => picker.current?.click()}>选择备份恢复</button><input ref={picker} type="file" accept=".json,application/json" aria-label="选择任务备份文件" hidden onChange={event => { void readFile(event.currentTarget.files?.[0]); event.currentTarget.value = ''; }}/></div>{dirty && <p className="detail-note">请先保存或放弃正在编辑的修改，再备份或恢复。</p>}{message && <p className="detail-note backup-path" role="status">{message}</p>}{failure && !preview && <p className="inline-error" role="alert">{failure}</p>}{preview && <Modal title="恢复这份任务备份？" closeDisabled={working || busy} onClose={() => { if (!working && !busy) setPreview(null); }}><p className="dialog-description">包含 {preview.taskCount} 项任务（其中回收站 {preview.trashedTaskCount ?? 0} 项）、{preview.planCount} 条计划。导出时间：{new Date(preview.exportedAt).toLocaleString('zh-CN')}。</p><p className="dialog-description">确认后会先备份当前数据库，再替换任务和计划。安全备份失败时不会恢复。</p>{preview.revision !== snapshot.revision && <p className="inline-error" role="alert">任务已更新，请取消并重新选择备份，以核对最新数据。</p>}{failure && <p className="inline-error" role="alert">{failure}</p>}<div className="dialog-footer"><button ref={cancelButton} type="button" className="secondary-button" disabled={working} onClick={() => setPreview(null)}>取消恢复</button><button ref={restoreButton} type="button" className="primary-button" disabled={unavailable || preview.revision !== snapshot.revision} onClick={() => void restore()}>备份当前数据并恢复</button></div></Modal>}</section>;
 }

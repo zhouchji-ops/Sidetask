@@ -88,10 +88,10 @@ async function nativeHarness(page: Page) {
 async function mutationCalls(page: Page) {
   return page.evaluate(() => (window as any).splitHarness.calls.filter((call: any) => call.command === 'mutate'));
 }
-async function assertOnlyInteraction(page: Page) {
+async function assertOnlyInteraction(page: Page, explicitPointer = false) {
   const calls = await page.evaluate(() => (window as any).splitHarness.calls.filter((call: any) => call.command === 'window_action'));
   expect(calls.length).toBeGreaterThan(0);
-  expect(calls.every((call: any) => call.args.action === 'interaction')).toBe(true);
+  expect(calls.every((call: any) => call.args.action === 'interaction' || (explicitPointer && call.args.action === 'focusPanel'))).toBe(true);
   expect(calls.at(-1).args.payload.locked).toBe(false);
 }
 
@@ -126,7 +126,7 @@ test('取消和真实捕获丢失回退且释放锁，非主指针不启动，�
   await page.mouse.up();
   await expect(divider).toHaveAttribute('aria-valuenow', '54');
   expect(await mutationCalls(page)).toHaveLength(0);
-  await assertOnlyInteraction(page);
+  await assertOnlyInteraction(page, true);
 
   await drag(page, 38);
   await divider.evaluate(element => element.releasePointerCapture((window as any).splitHarness.pointerId));
@@ -134,7 +134,7 @@ test('取消和真实捕获丢失回退且释放锁，非主指针不启动，�
   await page.mouse.up();
   await expect(divider).toHaveAttribute('aria-valuenow', '54');
   expect(await mutationCalls(page)).toHaveLength(0);
-  await assertOnlyInteraction(page);
+  await assertOnlyInteraction(page, true);
   const callCount = await page.evaluate(() => (window as any).splitHarness.calls.length);
   await divider.dispatchEvent('pointerdown', { pointerId: 91, pointerType: 'touch', isPrimary: false, button: 0, bubbles: true });
   await divider.dispatchEvent('pointerdown', { pointerId: 92, pointerType: 'mouse', isPrimary: true, button: 2, bubbles: true });
@@ -146,7 +146,7 @@ test('取消和真实捕获丢失回退且释放锁，非主指针不启动，�
   await page.mouse.up();
   await expect.poll(async () => (await mutationCalls(page)).length).toBe(1);
   await expect.poll(() => page.evaluate(() => (window as any).splitHarness.snapshot().settings.panelSplit)).toBe(61);
-  await assertOnlyInteraction(page);
+  await assertOnlyInteraction(page, true);
   expect((await mutationCalls(page))[0].args.action).toEqual({ type: 'updateSettings', changes: { panelSplit: 61 } });
   const committed = await page.evaluate(() => (window as any).splitHarness.snapshot());
   expect(committed.tasks).toEqual(before.tasks);

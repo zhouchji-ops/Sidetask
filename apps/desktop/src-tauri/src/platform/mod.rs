@@ -53,6 +53,8 @@ struct Drag {
     started: Instant,
     settings: Settings,
     original_visible: bool,
+    original_rect: Rect,
+    movement_threshold: f64,
     cancelled: bool,
 }
 struct Resize {
@@ -60,6 +62,7 @@ struct Resize {
     settings: Settings,
     draft: Settings,
     placement: Placement,
+    original_geometry: DockLayout,
     // Global AppKit logical units on Mac; desktop physical pixels on Windows.
     top: f64,
     monitor_signature: String,
@@ -176,8 +179,16 @@ impl DockRuntime {
             return false;
         }
         let resize = self.resize.take().unwrap();
+        // A click or a preview returned to its original frame has nothing to
+        // restore. Invalidating it would hide/re-show the panel and discard the
+        // keyboard focus that this explicit interaction just requested.
+        let unchanged = self.geometry == Some(resize.original_geometry)
+            && self.signature == resize.monitor_signature
+            && self.applied_settings.as_ref() == Some(&resize.settings);
         self.placement = resize.placement;
-        self.applied_settings = None;
+        if !unchanged {
+            self.applied_settings = None;
+        }
         self.left = None;
         true
     }
@@ -238,6 +249,7 @@ fn authorize_window_action(label: &str, action: &str) -> Result<(), String> {
         .contains(&action),
         "edge-panel" => [
             "openConsole",
+            "focusPanel",
             "showPanel",
             "hidePanel",
             "togglePanel",
@@ -443,7 +455,77 @@ fn show_verified_edge(
     _rect: Rect,
     _monitor: &MonitorGeometry,
 ) -> Result<(), String> {
+    // A previous explicit interaction may have enabled keyboard focus. Showing
+    // the panel again is a hover/display operation, never a new focus intent.
+    #[cfg(target_os = "macos")]
+    window.set_focusable(false).map_err(error)?;
     window.show().map_err(error)
+}
+
+#[cfg(target_os = "macos")]
+fn hide_edge_window(window: &WebviewWindow) -> Result<(), String> {
+    let reset = window.set_focusable(false).map_err(error);
+    // Even a failed focus reset must not prevent the requested real hide.
+    let hidden = window.hide().map_err(error);
+    match (reset, hidden) {
+        (Err(reset), Err(hidden)) => Err(format!("{reset} 隐藏小窗失败：{hidden}")),
+        (Err(reason), Ok(())) | (Ok(()), Err(reason)) => Err(reason),
+        (Ok(()), Ok(())) => Ok(()),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn hide_edge_window(window: &WebviewWindow) -> Result<(), String> {
+    window.hide().map_err(error)
+}
+
+#[cfg(target_os = "macos")]
+fn focus_panel(
+    panel: &WebviewWindow,
+    dock: &DockRuntime,
+    settings: &Settings,
+) -> Result<(), String> {
+    // An IPC can arrive after its click has hidden/moved away from the panel.
+    // Never re-show a window or steal focus for such an obsolete request.
+    if !dock.visible
+        || !settings.edge_enabled
+        || dock.drag.is_some()
+        || !panel.is_visible().map_err(error)?
+    {
+        return Ok(());
+    }
+    let cursor = edge_cursor(panel)?;
+    if !dock
+        .geometry
+        .is_some_and(|geometry| geometry.panel.contains(cursor.x, cursor.y))
+    {
+        return Ok(());
+    }
+    panel.set_focusable(true).map_err(error)?;
+    let focused = panel.set_focus().map_err(error).and_then(|()| {
+        if panel.is_focused().map_err(error)? {
+            Ok(())
+        } else {
+            Err("未能把键盘焦点交给小窗，请再次点击调整控件。".into())
+        }
+    });
+    if let Err(reason) = focused {
+        return match panel.set_focusable(false) {
+            Ok(()) => Err(reason),
+            Err(reset) => Err(format!("{reason} 恢复悬停焦点状态失败：{reset}")),
+        };
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn focus_panel(
+    _panel: &WebviewWindow,
+    _dock: &DockRuntime,
+    _settings: &Settings,
+) -> Result<(), String> {
+    // Windows activation requires its own native validation and implementation.
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -566,7 +648,10 @@ fn invalidate_geometry(app: &tauri::AppHandle, dock: &mut DockRuntime) {
     dock.visible = false;
     for label in ["edge-panel", "edge-handle"] {
         if let Ok(window) = window(app, label) {
-            let _ = window.hide();
+            if let Err(reason) = hide_edge_window(&window) {
+                eprintln!("edge window cleanup: {reason}");
+                let _ = app.emit("sidetask:window-error", reason);
+            }
         }
     }
 }
@@ -586,7 +671,7 @@ fn apply_geometry_inner(
                 .as_ref()
                 .is_some_and(|previous| !previous.edge_enabled)
         {
-            window(app, "edge-panel")?.hide().map_err(error)?;
+            hide_edge_window(&window(app, "edge-panel")?)?;
             window(app, "edge-handle")?.hide().map_err(error)?;
         }
         dock.visible = false;
@@ -629,7 +714,7 @@ fn apply_geometry_inner(
     // intermediate rectangle on a neighbouring monitor.
     let live_resize = dock.resize.is_some() && dock.signature == signature && dock.visible;
     if dock.visible && !live_resize {
-        panel.hide().map_err(error)?;
+        hide_edge_window(&panel)?;
     }
     handle.hide().map_err(error)?;
     if live_resize {
@@ -661,7 +746,7 @@ fn apply_geometry_inner(
             show_verified_edge(&handle, geometry.handle, &area)?;
         }
     } else {
-        panel.hide().map_err(error)?;
+        hide_edge_window(&panel)?;
         dock.visible = false;
     }
     dock.applied_settings = Some(settings.clone());
@@ -700,7 +785,7 @@ fn hide_panel(
     settings: &Settings,
     suppress: bool,
 ) -> Result<(), String> {
-    window(app, "edge-panel")?.hide().map_err(error)?;
+    hide_edge_window(&window(app, "edge-panel")?)?;
     if settings.edge_enabled {
         let result = (|| {
             let monitor = choose_monitor(app, &dock.placement)?;
@@ -1154,12 +1239,14 @@ fn resize_panel(app: &tauri::AppHandle, payload: Value) -> Result<(), String> {
             return Err("小窗设置已更新，请重新调整。".into());
         }
         apply_geometry(app, &mut dock, &current)?;
+        let original_geometry = dock.geometry.ok_or("小窗尚未定位。")?;
         dock.resize = Some(Resize {
             session,
             settings: current.clone(),
             draft: current,
             placement: dock.placement.clone(),
-            top: dock.geometry.ok_or("小窗尚未定位。")?.panel.y,
+            original_geometry,
+            top: original_geometry.panel.y,
             monitor_signature: dock.signature.clone(),
         });
         return Ok(());
@@ -1263,6 +1350,17 @@ fn finish_drag(app: &tauri::AppHandle, dock: &mut DockRuntime) -> Result<(), Str
         return apply_geometry(app, dock, &settings(app)?);
     }
     let source = window(app, &drag.label)?;
+    let source_rect = edge_window_rect(&source)?;
+    // Compare native frames before deriving a new placement. A click, small
+    // jitter or return to the starting frame must not replace the offset with one
+    // reconstructed from a rounded/clamped native rectangle, or bump revision.
+    let unchanged_size = source_rect.width == drag.original_rect.width
+        && source_rect.height == drag.original_rect.height;
+    let distance =
+        (source_rect.x - drag.original_rect.x).hypot(source_rect.y - drag.original_rect.y);
+    if source_rect == drag.original_rect || (unchanged_size && distance < drag.movement_threshold) {
+        return apply_geometry(app, dock, &settings(app)?);
+    }
     let cursor = edge_cursor(&source)?;
     let monitors = source.available_monitors().map_err(error)?;
     let monitor_geometry = monitors
@@ -1274,7 +1372,6 @@ fn finish_drag(app: &tauri::AppHandle, dock: &mut DockRuntime) -> Result<(), Str
         .or(source.current_monitor().map_err(error)?)
         .ok_or("找不到目标屏幕。")?;
     let area = edge_monitor(&target)?;
-    let source_rect = edge_window_rect(&source)?;
     let state = app.state::<AppState>();
     let mut service = state.service.lock().map_err(|_| "任务服务不可用。")?;
     exit::ensure_running(&state)?;
@@ -1367,11 +1464,18 @@ pub fn window_action(
                 return Err("小窗正在移动，请先结束当前拖动。".into());
             }
             let original_visible = dock.visible;
+            let original_rect = edge_window_rect(caller)?;
+            #[cfg(target_os = "macos")]
+            let movement_threshold = 5.; // Rect is already in global logical points.
+            #[cfg(not(target_os = "macos"))]
+            let movement_threshold = 5. * caller.scale_factor().map_err(error)?;
             dock.drag = Some(Drag {
                 label: caller.label().into(),
                 started: Instant::now(),
                 settings,
                 original_visible,
+                original_rect,
+                movement_threshold,
                 cancelled: false,
             });
             dock.entered = None;
@@ -1418,6 +1522,7 @@ pub fn window_action(
         return Err("不能结束其他窗口的拖动。".into());
     }
     match action {
+        "focusPanel" => focus_panel(caller, &dock, &settings),
         "showPanel" => show_panel(app, &mut dock, &settings),
         "hidePanel" => hide_panel(app, &mut dock, &settings, true),
         "togglePanel" => {
@@ -1523,12 +1628,58 @@ mod tests {
             settings,
             draft: draft.clone(),
             placement: saved,
+            original_geometry: DockLayout {
+                panel: Rect {
+                    x: -376.,
+                    y: -300.,
+                    width: 368.,
+                    height: 610.,
+                },
+                handle: Rect {
+                    x: -18.,
+                    y: -41.,
+                    width: 18.,
+                    height: 92.,
+                },
+            },
             top: -300.5,
             monitor_signature: "negative-display@1.5".into(),
         });
         dock.applied_settings = Some(draft);
         dock.placement.offset = 0.2;
         dock
+    }
+
+    #[test]
+    fn untouched_resize_cancellation_preserves_confirmed_frame_without_hiding() {
+        let mut dock = resizing_dock();
+        let resize = dock.resize.as_ref().unwrap();
+        let saved = resize.settings.clone();
+        let original = resize.original_geometry;
+        dock.geometry = Some(original);
+        dock.signature = resize.monitor_signature.clone();
+        dock.applied_settings = Some(saved.clone());
+        dock.resize.as_mut().unwrap().draft = saved.clone();
+        assert!(dock.cancel_resize(Some("first")));
+        assert!(!dock.status(&saved).pending);
+        assert_eq!(dock.geometry, Some(original));
+        assert_eq!(dock.placement.offset, 0.7);
+        assert!(dock.require_resize_session("first").is_err());
+        assert!(!dock.locked());
+
+        // Actual movement still invalidates the cache and follows safe rollback.
+        let mut changed = resizing_dock();
+        changed.geometry = Some(DockLayout {
+            panel: Rect {
+                width: 480.,
+                ..original.panel
+            },
+            ..original
+        });
+        changed.signature = changed.resize.as_ref().unwrap().monitor_signature.clone();
+        changed.applied_settings = Some(saved.clone());
+        assert!(changed.cancel_resize(Some("first")));
+        assert!(changed.status(&saved).pending);
     }
 
     #[test]
@@ -1650,6 +1801,9 @@ mod tests {
         }
         assert!(authorize_window_action("edge-handle", "resizePanel").is_err());
         assert!(authorize_window_action("edge-handle", "interaction").is_err());
+        assert!(authorize_window_action("edge-handle", "focusPanel").is_err());
+        assert!(authorize_window_action("console", "focusPanel").is_err());
+        assert!(authorize_window_action("edge-panel", "focusPanel").is_ok());
         assert!(authorize_window_action("console", "startDrag").is_err());
         for action in ["retryConsolePosition", "discardConsolePosition"] {
             assert!(authorize_window_action("console", action).is_ok());
@@ -1733,6 +1887,13 @@ mod tests {
             started: Instant::now(),
             settings: Settings::default(),
             original_visible: false,
+            original_rect: Rect {
+                x: 0.,
+                y: 0.,
+                width: 18.,
+                height: 92.,
+            },
+            movement_threshold: 5.,
             cancelled: false,
         });
         assert_eq!(dock.poll_interval(), Duration::from_millis(40));
