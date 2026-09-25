@@ -6,7 +6,7 @@
 
 一个 App、两种界面：**大窗口控制台**集中管理任务和设置，**边缘小窗**用于学习时快速查看和勾选。第一版只做独立的大任务，不做拆解或子任务。
 
-项目仓库：[changjin-cpu/SideTask](https://github.com/changjin-cpu/SideTask)。后续代码与文档均在该仓库的本地工作目录中维护；当前本地目录名称仍为 `任务弹窗`。
+项目仓库：[changjin-cpu/SideTask](https://github.com/changjin-cpu/SideTask)。代码与文档均在该仓库维护；Mac 开发目录为 `任务弹窗`，Windows 开发目录为 `E:\A_项目\SideTask`。
 
 **当前阶段：功能完善与内部试用验收。** 使用 Tauri 2 + React/TypeScript + Rust + SQLite 自建精简核心。备份与坏库启动恢复、固定 DDL、退出草稿保护、全局搜索、大列表和今日整理已实现；回收站与单项恢复已落地，正在完成集成和原生验收。第一版同时面向 macOS / Windows，双平台、多屏和发布验收尚未完成。实际测试及构建结果见 [STATUS](docs/delivery/STATUS.md)。
 
@@ -65,9 +65,9 @@ Todobar 的窗口隐藏、悬停和数据模型与需求有明显差距，因此
 
 运行入口在 [apps/desktop/README.md](apps/desktop/README.md)：进入该目录后 `npm ci`、`npm run dev` 可启动浏览器原型；原生开发使用 `npm run tauri -- dev`（需要 Rust 和平台构建环境）。浏览器只能验证布局和任务交互，不能证明真实多屏窗口能力。生成物与个人任务数据库不提交仓库。
 
-本地分支为`main`，origin连接用户指定仓库，已授权推送。[fade1d6 CI](https://github.com/changjin-cpu/SideTask/actions/runs/36051857305)的Mac99TS/121Rust/72UI与App、Windows99TS/119Rust/72UI与NSIS通过，两平台上传受账户artifact配额阻塞。本轮小窗修复在Mac本地99TS/138Rust/82UI及双包构建/验签通过；新提交自身CI需另查，不能沿用旧结果。
+Windows 从远端 `main` 的 `e844fcd` 接续，在 `codex/windows-polish` 完成辅助窗边界、托盘入口、主鼠标键和暂停轮询修复，并按窗口拆分前端加载。本机 99 TS / 138 Rust / 83 UI 及 NSIS 构建通过；真实任务链路、双窗口、退出重启和单屏悬停/控制台恢复已有证据。
 
-用户已将Windows后续交给Windows开发机，本Mac任务提供源码和[完整接手说明](docs/delivery/WINDOWS_HANDOFF.md)。本轮未验证Windows真实窗口或安装升级；正式可运行Mac包和摘要见STATUS。
+本机已有 Windows x64 内部试用安装器，文件位置与校验值见 [STATUS](docs/delivery/STATUS.md)。该包未签名，隔离同版本安装/重装/卸载保留数据已验；旧版本升级、多屏、IME、休眠和连续使用等仍待验收，详见 [Windows 记录](tests/manual/2026-09-25-windows-native.md)。Mac 首次使用说明独立推进；两平台 CI 构建产物的远端上传仍受账户配额限制。
 
 文档索引见 [docs/README.md](docs/README.md)。调研记录日期：2026-09-24。
 
