@@ -24,6 +24,8 @@ Mac 开发与推送固定使用 `mac` → `origin/mac`；Windows完成分支已�
 npm ci
 npm run dev          # 浏览器 UI 预览，http://127.0.0.1:1420
 npm test             # TypeScript 业务测试
+npm run test:tools       # 原生冒烟工具清理故障契约
+node --check scripts/windows-native-smoke.mjs
 npm run test:ui      # Playwright；首次运行需 npx playwright install chromium
 npm run build        # 类型检查及前端生产构建
 cargo test --manifest-path src-tauri/Cargo.toml
@@ -40,7 +42,7 @@ $smokeAppProcessId = [int](Read-Host '输入该隔离进程的 PID')
 ./scripts/measure-windows-resources.ps1 -Executable $smokeExe -AppProcessId $smokeAppProcessId -Seconds 15 -State 'console-visible-edge-collapsed'
 ```
 
-采样校验EXE与PID并记录进程树、CPU和内存；短样本不能证明持续性能或泄漏已解决。本轮数据见`资源记录`（Windows开发机本地文件），安装后真实悬停/隐藏、控制台几何重启及缩放会话见`体验报告`（Windows开发机本地文件）。混合DPI多屏、物理拖动、IME、睡眠、虚拟桌面、托盘真实点击、旧版本升级及连续性能仍未验。
+采样校验EXE与PID并记录进程树、CPU和内存；短样本不能证明持续性能或泄漏已解决。本轮数据见`artifacts/windows/resources-final.json`（Windows开发机本地文件），安装后真实悬停/隐藏、控制台几何重启及缩放会话见`artifacts/windows/installed-experience/report.json`（Windows开发机本地文件）。混合DPI多屏、物理拖动、IME、睡眠、虚拟桌面、托盘真实点击、旧版本升级及连续性能仍未验。
 
 浏览器预览使用独立的合成数据存储 `sidetask-browser-preview-v1`，不读取本机 SQLite。原生数据位于系统应用数据目录 `com.changjin.sidetask/sidetask.sqlite3`，不在仓库内。首次原生启动为空库。浏览器演示才使用示例任务；旧数据库升级不会重置任务。
 
