@@ -55,6 +55,27 @@ async function expectFirstRowsFit(panel: Locator) {
   }
 }
 
+test('设置控件滚入视口后不被固定保存栏遮住', async ({ page }) => {
+  await page.goto('/?surface=console');
+  await settings(page);
+  for (const size of [{ width: 1180, height: 790 }, { width: 640, height: 480 }]) {
+    await page.setViewportSize(size);
+    for (const style of styles) {
+      await page.getByRole('button', { name: `切换到${style.name}风格`, exact: true }).click();
+      const toggle = page.getByRole('switch', { name: '保持小窗展开', exact: true });
+      // Native WebDriver and browser focus scrolling may align an element to
+      // the bottom of its scrollport. The sticky save bar must reserve space.
+      await toggle.evaluate(element => element.scrollIntoView({ block: 'end' }));
+      const uncovered = await toggle.evaluate(element => {
+        const rect = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+        return !!hit && element.contains(hit);
+      });
+      expect(uncovered, `${style.value} ${size.width}×${size.height}: 设置控件可点击`).toBe(true);
+    }
+  }
+});
+
 test('四款风格立即保存、跨窗口同步及逐款重载，保留全部任务与计划', async ({ page, context }) => {
   const initial = createSeed(date);
   initial.settings.theme = 'dark';

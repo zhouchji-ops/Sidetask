@@ -9,6 +9,7 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "test": "vitest run tests/domain.test.ts",
     "test:ui": "playwright test",
+    "test:native:windows": "node scripts/windows-native-smoke.mjs",
     "tauri": "tauri"
   },
   "dependencies": {
