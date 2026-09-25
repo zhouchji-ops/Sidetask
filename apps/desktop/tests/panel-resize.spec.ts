@@ -264,6 +264,7 @@ test('尺寸取消只释放自己的交互锁，不解除仍在编辑的其他�
 
 test('浏览器预览取消零写入，卸载握柄也取消而不把实际小尺寸存为偏好', async ({ page }) => {
   const seed = initial(); seed.settings.panelHeight = 900;
+  seed.settings.revealMode = 'hover';
   await page.addInitScript(({ seed, key }) => {
     localStorage.setItem(key, JSON.stringify(seed));
     const probe = { writes: 0, phases: [] as string[], pointerId: 0 };

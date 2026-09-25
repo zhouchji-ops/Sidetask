@@ -10,12 +10,13 @@
 | `sidetask-safety-backup-<UUID>.sqlite3` | 恢复前的完整 SQLite，包括本机设置及停靠信息 | 启动恢复界面选取已验证副本，或按下面离线流程恢复 |
 | `sidetask-before-schema-2-<UUID>.sqlite3` | 升级schema前完整SQLite副本 | 同上；新版本再次打开时先验证并安全升级 |
 | `sidetask-before-schema-3-<UUID>.sqlite3` | 从 schema1/2 升到回收站数据版本前的完整 SQLite 副本 | 同上；保留旧快照原文、全部计划与设备信息 |
-| `sidetask-before-schema-4-<UUID>.sqlite3` | 从 schema1/2/3 升到控制台设备偏好版本前的完整 SQLite 副本 | 同上；副本内仍为升级前版本，snapshot / placement 原文保留 |
+| `sidetask-before-schema-4-<UUID>.sqlite3` | 历史控制台设备偏好版本升级前的完整 SQLite 副本 | 同上；继续支持读取 |
+| `sidetask-before-schema-5-<UUID>.sqlite3` | 从 schema1/2/3/4 升到展开模式版本前的完整 SQLite 副本 | 同上；副本内仍为升级前版本，snapshot / placement 原文保留 |
 | `sidetask.sqlite3` | 正在使用的唯一任务数据库 | 不能被JSON直接替换，不在应用运行时复制它作为完整备份 |
 
 JSON 文件即使改名为 `.sqlite3` 也不是数据库。SQLite 安全副本也不能从 JSON 文件选择器导入。JSON 恢复保留当前本机设置，包括分区比例、小窗停靠和控制台位置；离线完整 SQLite 恢复会恢复该副本内的本机设置。
 
-当前 SQLite 为 schema4，识别旧 schema1/2/3。旧库先做保留 WAL 的完整副本预检，再生成经过校验并同步的 `before-schema-4` 一致性备份，然后在事务中升级版本（schema1 同时补应用身份）。备份内保持升级前版本，迁移不重新编码原 snapshot / placement；缺少 `deletedAt` 的旧任务仍按未删除读取。历史 `before-schema-2` / `before-schema-3` 副本继续支持。旧应用不支持 schema4，应保留新版和升级前副本，不通过手工改版本号来降级。任务 JSON 格式独立，仍导出v2、读v1/v2。
+当前 SQLite 为 schema5，识别旧 schema1/2/3/4。旧库先做保留 WAL 的完整副本预检，再生成经过校验并同步的 `before-schema-5` 一致性备份，然后在事务中升级版本（schema1 同时补应用身份）。备份内保持升级前版本，迁移不重新编码原 snapshot / placement；缺少 `deletedAt` 的旧任务仍按未删除读取。历史 `before-schema-2` / `before-schema-3` / `before-schema-4` 副本继续支持。旧应用不支持 schema5，应保留新版和升级前副本，不通过手工改版本号来降级。任务 JSON 格式独立，仍导出v2、读v1/v2。
 
 ## 数据目录
 
@@ -56,7 +57,7 @@ v1 备份缺失或为 null 的删除标记按未删除处理，不能携带非�
 1. 明确退出 SideTask，并确认所有 SideTask 应用/开发进程已结束。仅关闭控制台窗口不等于退出。macOS 活动监视器或 Windows 任务管理器可确认；同时停下可能运行的 `tauri dev`。
 2. 找到上面的整个数据目录。保留原目录为一个新名字，例如 `com.changjin.sidetask.before-recovery-20260925-153000`；确保该备份名字不存在，不覆盖其他备份。目录内的 `sidetask.sqlite3`、`-wal`、`-shm`、`-journal` 及导出文件一起保留。只有进程全部停止后才能执行这步。
 3. 在原位置重新创建空的 `com.changjin.sidetask` 目录。从保留下来的文件中**复制**一份确认过时间与内容的 `sidetask-…-<UUID>.sqlite3` 安全备份到新目录，复制后的名字为 `sidetask.sqlite3`。保留源安全备份不动。新目录不要放旧库的 WAL/SHM/journal；这些文件与旧数据库配套，不能混到恢复副本中。
-4. 启动当前 SideTask。应用先校验库版本、身份、结构、SQLite完整性和业务字段，失败则停止，不以空任务或示例数据覆盖。schema1/2/3安全副本通过后会再做一次带备份的schema4升级。
+4. 启动当前 SideTask。应用先校验库版本、身份、结构、SQLite完整性和业务字段，失败则停止，不以空任务或示例数据覆盖。schema1/2/3/4安全副本通过后会再做一次带备份的schema5升级。
 5. 若启动成功，先核对任务和计划，再核对停靠屏幕/尺寸等设备设置；完整SQLite副本含创建时的本机配置。确认前继续保留原目录和安全副本。
 6. 若仍失败，退出所有进程，保留这次尝试目录为另一个新名字，再把步骤2的原目录恢复原名。不要把多份库或WAL文件混在一起，不删除唯一原始损坏数据。由维护者用副本进一步分析。
 
@@ -68,7 +69,7 @@ v1 备份缺失或为 null 的删除标记按未删除处理，不能携带非�
 sqlite3 -readonly "所选安全备份的绝对路径.sqlite3" "PRAGMA integrity_check; PRAGMA user_version; PRAGMA application_id;"
 ```
 
-预期 integrity_check 为 `ok`；schema1 的 application_id 为0，schema2/3/4为1396986955。此命令只检查SQLite层，不能替代应用对任务/计划/时区/字段的完整校验。不要执行 `.recover`、`VACUUM` 或手工写 SQL 到唯一原库。
+预期 integrity_check 为 `ok`；schema1 的 application_id 为0，schema2/3/4/5为1396986955。此命令只检查SQLite层，不能替代应用对任务/计划/时区/字段的完整校验。不要执行 `.recover`、`VACUUM` 或手工写 SQL 到唯一原库。
 
 ## 只有控制台位置提示失败
 
@@ -78,11 +79,11 @@ sqlite3 -readonly "所选安全备份的绝对路径.sqlite3" "PRAGMA integrity_
 
 ## 未覆盖与后续
 
-现有单元测试使用临时合成数据库覆盖损坏拒绝覆盖、迁移回滚、WAL备份、恢复冲突与启动恢复；本轮另覆盖schema4迁移原文保留、两连接设备字段合并、元数据失败的事务回滚和任务版本隔离，没有用个人库演练。本轮控制台几何的Mac原生因锁屏未执行，Windows本轮CI及原生也未执行；旧阶段结果不能证明本轮通过。真实磁盘满、物理断电和两平台离线恢复仍未验收，不能用异常注入等同硬件断电证明。具体自动化与原生结果以[最新STATUS](../delivery/STATUS.md)为准。
+现有单元测试使用临时合成数据库覆盖损坏拒绝覆盖、迁移回滚、WAL备份、恢复冲突与启动恢复；本轮另覆盖schema5迁移原文保留、两连接设备字段合并、元数据失败的事务回滚和任务版本隔离，没有用个人库演练。Mac与Windows的各阶段原生/CI证据分别记录，不能复用历史数字证明当前版本通过。真实磁盘满、物理断电和两平台离线恢复仍未验收，不能用异常注入等同硬件断电证明。具体自动化与原生结果以[最新STATUS](../delivery/STATUS.md)为准。
 
 ## 附录：启动恢复的文件与实现边界
 
-- 候选名称仅接受 `sidetask-before-schema-2-<UUID>.sqlite3` / `sidetask-before-schema-3-<UUID>.sqlite3` / `sidetask-before-schema-4-<UUID>.sqlite3` / `sidetask-safety-backup-<UUID>.sqlite3`，UUID 为标准小写格式；不接受用户路径、链接、JSON 改名或带 WAL/SHM/journal 的备份。候选限 32 MiB，原库与日志证据合计限 1 GiB。
+- 候选名称仅接受 `sidetask-before-schema-2-<UUID>.sqlite3` / `sidetask-before-schema-3-<UUID>.sqlite3` / `sidetask-before-schema-4-<UUID>.sqlite3` / `sidetask-before-schema-5-<UUID>.sqlite3` / `sidetask-safety-backup-<UUID>.sqlite3`，UUID 为标准小写格式；不接受用户路径、链接、JSON 改名或带 WAL/SHM/journal 的备份。候选限 32 MiB，原库与日志证据合计限 1 GiB。
 - 候选 ID 包含校验时的 SHA-256；确认后再次校验，文件变更必须重新预览。SHA-256 用于变化检测和复制校验，不代替数据来源可信判断。
 - `sidetask-recovery-evidence-<UUID>/manifest.json` 记录原始四文件的存在情况、长度、摘要；证据不会用于普通候选扫描。Unix 证据目录权限 0700，新文件 0600。
 - `sidetask-recovery-pending.json` 以已完整同步的临时记录通过同目录硬链接发布，先于任何主库/日志移动。重试沿用已验证的原始证据，避免把上次恢复一半的文件当原件。

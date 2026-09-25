@@ -67,7 +67,7 @@ $smokeAppProcessId = [int](Read-Host '输入该隔离进程的 PID')
 | src/lib | 类型、派生视图、Tauri 调用、统一 Store；另含浏览器演示适配器 |
 | src-tauri/src/domain | 独立 Task、计划引用、校验、revision 冲突 |
 | src-tauri/src/application | 事务用例与统一提交入口 |
-| src-tauri/src/infrastructure | SQLite Repository，schema4版本化snapshot及独立设备metadata、升级前安全备份与严格验证 |
+| src-tauri/src/infrastructure | SQLite Repository，schema5版本化snapshot及独立设备metadata、升级前安全备份与严格验证 |
 | src-tauri/src/platform | 窗口协调、分平台坐标适配、实际矩形确认、拖动/尺寸会话、hover |
 | src-tauri/migrations | 实际数据库初始化 SQL |
 | tests | Vitest 业务与 Playwright UI 自动化 |

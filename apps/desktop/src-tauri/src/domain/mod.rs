@@ -41,6 +41,8 @@ pub struct Settings {
     pub panel_height: f64,
     #[serde(default = "default_panel_split")]
     pub panel_split: u8,
+    #[serde(default = "default_reveal_mode")]
+    pub reveal_mode: String,
     pub reveal_delay: u64,
     pub hide_delay: u64,
     pub pinned: bool,
@@ -56,6 +58,9 @@ fn default_ui_style() -> String {
 fn default_panel_split() -> u8 {
     54
 }
+fn default_reveal_mode() -> String {
+    "click".into()
+}
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -63,6 +68,7 @@ impl Default for Settings {
             panel_width: 368.,
             panel_height: 610.,
             panel_split: default_panel_split(),
+            reveal_mode: default_reveal_mode(),
             reveal_delay: 180,
             hide_delay: 450,
             pinned: false,
@@ -141,6 +147,7 @@ fn validate_settings(settings: &Settings) -> Result<(), String> {
         return Err("小窗分区比例需为 30–70 的整数。".into());
     }
     if !["left", "right"].contains(&settings.edge.as_str())
+        || !["click", "hover"].contains(&settings.reveal_mode.as_str())
         || !["light", "dark", "system"].contains(&settings.theme.as_str())
         || !["paper", "studio", "editorial", "mono"].contains(&settings.ui_style.as_str())
         || !["date", "priority"].contains(&settings.ddl_sort.as_str())
@@ -517,6 +524,7 @@ impl Snapshot {
                         "panelWidth",
                         "panelHeight",
                         "panelSplit",
+                        "revealMode",
                         "revealDelay",
                         "hideDelay",
                         "pinned",
@@ -1356,6 +1364,78 @@ mod tests {
                 .is_err());
         }
     }
+    #[test]
+    fn missing_reveal_mode_defaults_to_click_without_changing_legacy_content() {
+        assert_eq!(Settings::default().reveal_mode, "click");
+        let mut legacy = serde_json::to_value(Snapshot::demo("2026-09-24")).unwrap();
+        legacy["settings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("revealMode");
+        let snapshot: Snapshot = serde_json::from_value(legacy.clone()).unwrap();
+        snapshot.validate().unwrap();
+        assert_eq!(snapshot.settings.reveal_mode, "click");
+        legacy["settings"]["revealMode"] = serde_json::json!("click");
+        assert_eq!(serde_json::to_value(snapshot).unwrap(), legacy);
+    }
+
+    #[test]
+    fn reveal_mode_updates_only_preferences_and_survives_other_setting_changes() {
+        let mut snapshot = Snapshot::demo("2026-09-24");
+        for mode in ["hover", "click"] {
+            let previous = serde_json::to_value(&snapshot).unwrap();
+            let changes = serde_json::json!({"revealMode": mode});
+            let next = snapshot
+                .apply(
+                    Action::UpdateSettings {
+                        changes: changes.clone(),
+                    },
+                    snapshot.revision,
+                )
+                .unwrap();
+            let mut expected = previous;
+            expected["settings"]["revealMode"] = serde_json::json!(mode);
+            expected["revision"] = serde_json::json!(snapshot.revision + 1);
+            assert_eq!(serde_json::to_value(&next).unwrap(), expected);
+            assert!(next
+                .apply(Action::UpdateSettings { changes }, snapshot.revision)
+                .is_err());
+            snapshot = next.apply(Action::UpdateSettings { changes: serde_json::json!({"pinned":true, "revealDelay":300, "hideDelay":800}) }, next.revision).unwrap();
+            assert_eq!(snapshot.settings.reveal_mode, mode);
+            assert_eq!(snapshot.settings.reveal_delay, 300);
+            assert_eq!(snapshot.settings.hide_delay, 800);
+        }
+    }
+
+    #[test]
+    fn invalid_reveal_modes_fail_updates_and_snapshot_validation() {
+        let snapshot = Snapshot::demo("2026-09-24");
+        let before = serde_json::to_value(&snapshot).unwrap();
+        for mode in [
+            serde_json::json!(""),
+            serde_json::json!("Hover"),
+            serde_json::json!("automatic"),
+            serde_json::json!(false),
+            serde_json::json!(0),
+            Value::Null,
+        ] {
+            assert!(snapshot
+                .apply(
+                    Action::UpdateSettings {
+                        changes: serde_json::json!({"revealMode":mode.clone()})
+                    },
+                    snapshot.revision
+                )
+                .is_err());
+            assert_eq!(serde_json::to_value(&snapshot).unwrap(), before);
+            let mut persisted = before.clone();
+            persisted["settings"]["revealMode"] = mode;
+            if let Ok(invalid) = serde_json::from_value::<Snapshot>(persisted) {
+                assert!(invalid.validate().is_err());
+            }
+        }
+    }
+
     #[test]
     fn missing_panel_split_defaults_without_changing_legacy_tasks_or_plans() {
         let mut legacy = serde_json::to_value(Snapshot::demo("2026-09-24")).unwrap();

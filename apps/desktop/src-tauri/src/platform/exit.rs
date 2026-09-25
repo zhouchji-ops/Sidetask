@@ -98,6 +98,15 @@ pub fn pending(app: &tauri::AppHandle, window: &str) -> Result<Option<ExitReques
     Ok(pending.filter(|request| request.window == window || window == "edge-panel"))
 }
 
+pub fn is_pending(state: &AppState) -> Result<bool, String> {
+    Ok(state
+        .exit
+        .lock()
+        .map_err(|_| "退出服务暂不可用。")?
+        .pending
+        .is_some())
+}
+
 /// A paused panel can temporarily present its draft confirmation without
 /// changing the saved edge-enabled preference.
 pub fn panel_prompt_visible(state: &AppState) -> Result<bool, String> {
@@ -181,10 +190,13 @@ pub fn resolve(
     let (next, authorized) = {
         // Same order as geometry writes: dock -> service -> exit. Never wait
         // for the native main thread while any of these guards is held.
-        let _dock = state.dock.lock().map_err(|_| "窗口服务暂不可用。")?;
+        let mut dock = state.dock.lock().map_err(|_| "窗口服务暂不可用。")?;
         let _service = state.service.lock().map_err(|_| "任务服务暂不可用。")?;
         let mut exit = state.exit.lock().map_err(|_| "退出服务暂不可用。")?;
         exit.resolve(window, request_id, allow)?;
+        // A click observed while a confirmation was active must not hide a
+        // newly editable panel after a later cancellation/stage transition.
+        dock.pointer_boundary = std::time::Instant::now();
         (exit.pending, exit.authorized)
     };
     if authorized {

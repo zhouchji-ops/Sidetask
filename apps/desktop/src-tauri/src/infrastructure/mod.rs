@@ -9,13 +9,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 const APPLICATION_ID: i64 = 0x5344544b;
 const MAX_SNAPSHOT_BYTES: i64 = 16 * 1024 * 1024;
 const MAX_PLACEMENT_BYTES: usize = 64 * 1024;
 
 /// One shared database and one transaction per command. Older schemas are
-/// retained in a verified SQLite backup before the schema 4 marker upgrade.
+/// retained in a verified SQLite backup before the schema 5 marker upgrade.
 pub trait Repository: Send {
     fn load(&self) -> Result<Option<Snapshot>, String>;
     fn save(&mut self, snapshot: &Snapshot) -> Result<(), String>;
@@ -72,7 +72,7 @@ fn verify_schema(connection: &Connection) -> Result<i64, String> {
     let application: i64 = connection
         .query_row("PRAGMA application_id", [], |r| r.get(0))
         .map_err(storage_error)?;
-    if ![1, 2, 3, SCHEMA_VERSION].contains(&version) {
+    if ![1, 2, 3, 4, SCHEMA_VERSION].contains(&version) {
         return Err(format!(
             "数据库版本 {version} 不受此版本支持。原数据未覆盖。"
         ));
@@ -360,9 +360,9 @@ impl SqliteRepository {
                         path,
                         version,
                         if version == 1 {
-                            "PRAGMA application_id=1396986955; PRAGMA user_version=4;"
+                            "PRAGMA application_id=1396986955; PRAGMA user_version=5;"
                         } else {
-                            "PRAGMA user_version=4;"
+                            "PRAGMA user_version=5;"
                         },
                     )?;
                 }
@@ -595,6 +595,10 @@ mod tests {
             }
             let mut value = serde_json::to_value(Snapshot::demo("2026-09-24")).unwrap();
             value["settings"].as_object_mut().unwrap().remove("uiStyle");
+            value["settings"]
+                .as_object_mut()
+                .unwrap()
+                .remove("revealMode");
             value["revision"] = serde_json::json!(42);
             value["tasks"][0]["title"] = serde_json::json!("Synthetic legacy task");
             let raw = serde_json::to_string(&value).unwrap();
@@ -631,6 +635,7 @@ mod tests {
             TaskService::new(Box::new(SqliteRepository::open(&temp.path).unwrap())).unwrap();
         assert!(service.snapshot.tasks.is_empty());
         assert!(service.snapshot.plans.is_empty());
+        assert_eq!(service.snapshot.settings.reveal_mode, "click");
         drop(service);
         let repo = SqliteRepository::open(&temp.path).unwrap();
         assert!(repo.load().unwrap().unwrap().tasks.is_empty());
@@ -650,7 +655,7 @@ mod tests {
             .file_name()
             .unwrap()
             .to_string_lossy()
-            .starts_with("sidetask-before-schema-4-"));
+            .starts_with("sidetask-before-schema-5-"));
         let backup =
             Connection::open_with_flags(&backups[0], OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         assert_eq!(verify_database(&backup).unwrap(), 1);
@@ -689,7 +694,7 @@ mod tests {
         assert_eq!(repo.load_placement().unwrap().as_deref(), Some(placement));
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].kind, "before-schema-4");
+        assert_eq!(candidates[0].kind, "before-schema-5");
         assert_eq!(candidates[0].schema_version, 2);
         let backup = Connection::open_with_flags(
             temp.directory.join(&candidates[0].file_name),
@@ -721,7 +726,7 @@ mod tests {
             &mut connection,
             &temp.path,
             2,
-            "PRAGMA user_version=4; SELECT missing_column FROM app_state;",
+            "PRAGMA user_version=5; SELECT missing_column FROM app_state;",
         )
         .unwrap_err();
         assert!(error.contains("安全备份"));
@@ -753,12 +758,12 @@ mod tests {
         drop(connection);
 
         let repo = SqliteRepository::open(&temp.path).unwrap();
-        assert_eq!(verify_database(&repo.connection).unwrap(), 4);
+        assert_eq!(verify_database(&repo.connection).unwrap(), SCHEMA_VERSION);
         assert_eq!(read_snapshot(&repo.connection).unwrap().0, raw);
         assert_eq!(repo.load_placement().unwrap().as_deref(), Some(placement));
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].kind, "before-schema-4");
+        assert_eq!(candidates[0].kind, "before-schema-5");
         assert_eq!(candidates[0].schema_version, 3);
         let backup = Connection::open_with_flags(
             temp.directory.join(&candidates[0].file_name),
@@ -794,7 +799,7 @@ mod tests {
             )
             .unwrap();
         let error = migrate_schema(&mut connection, &temp.path, 3,
-            "PRAGMA user_version=4; UPDATE app_state SET value='injected failed change'; SELECT missing_column FROM app_state;").unwrap_err();
+            "PRAGMA user_version=5; UPDATE app_state SET value='injected failed change'; SELECT missing_column FROM app_state;").unwrap_err();
         assert!(error.contains("安全备份"));
         assert_eq!(verify_database(&connection).unwrap(), 3);
         assert_eq!(read_snapshot(&connection).unwrap().0, raw);
@@ -808,7 +813,7 @@ mod tests {
         assert_eq!(remaining, placement);
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].kind, "before-schema-4");
+        assert_eq!(candidates[0].kind, "before-schema-5");
         assert_eq!(candidates[0].schema_version, 3);
         let backup = Connection::open_with_flags(
             temp.directory.join(&candidates[0].file_name),
@@ -826,6 +831,188 @@ mod tests {
         assert_eq!(preserved, placement);
     }
     #[test]
+    fn schema_four_upgrade_defaults_click_but_preserves_raw_content_and_verified_backup() {
+        let temp = TempDatabase::new();
+        let legacy = temp.legacy_version(4);
+        let mut value: Value = serde_json::from_str(&legacy).unwrap();
+        value["tasks"][0]["deletedAt"] = serde_json::json!("2026-09-25T01:02:03.123456789Z");
+        let raw = format!("\n{}\n", serde_json::to_string_pretty(&value).unwrap());
+        let placement = "{\n \"monitorName\":\"synthetic\", \"monitorPosition\":{\"x\":-1920,\"y\":40}, \"offset\":0.4,\n \"console\":{\"width\":1000,\"height\":700}, \"usageGuideSeen\":true, \"futurePreference\":[1,2]\n}";
+        let connection = Connection::open(&temp.path).unwrap();
+        connection
+            .execute("UPDATE app_state SET value=?1 WHERE key='snapshot'", [&raw])
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO app_state(key,value) VALUES('placement',?1)",
+                [placement],
+            )
+            .unwrap();
+        drop(connection);
+        let original_bytes = fs::read(&temp.path).unwrap();
+        recovery::verify_before_open(&temp.path).unwrap();
+        assert_eq!(
+            fs::read(&temp.path).unwrap(),
+            original_bytes,
+            "preflight never upgrades or normalizes the original database"
+        );
+
+        let repo = SqliteRepository::open(&temp.path).unwrap();
+        assert_eq!(verify_database(&repo.connection).unwrap(), SCHEMA_VERSION);
+        assert_eq!(read_snapshot(&repo.connection).unwrap().0, raw);
+        assert_eq!(repo.load_placement().unwrap().as_deref(), Some(placement));
+        let loaded = repo.load().unwrap().unwrap();
+        assert_eq!(loaded.settings.reveal_mode, "click");
+        assert_eq!(serde_json::to_value(&loaded.tasks).unwrap(), value["tasks"]);
+        assert_eq!(serde_json::to_value(&loaded.plans).unwrap(), value["plans"]);
+        assert_eq!(loaded.revision, 42);
+        assert!(repo.read_usage_guide_seen().unwrap());
+        assert_eq!(
+            read_snapshot(&repo.connection).unwrap().0,
+            raw,
+            "reading the new default never writes a normalized snapshot"
+        );
+
+        let candidates = recovery::list_candidates(&temp.directory).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].kind, "before-schema-5");
+        assert_eq!(candidates[0].schema_version, 4);
+        let backup = Connection::open_with_flags(
+            temp.directory.join(&candidates[0].file_name),
+            OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        assert_eq!(verify_database(&backup).unwrap(), 4);
+        assert_eq!(read_snapshot(&backup).unwrap().0, raw);
+        let preserved: String = backup
+            .query_row(
+                "SELECT value FROM app_state WHERE key='placement'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(preserved, placement);
+        drop(backup);
+        drop(repo);
+        let reopened = SqliteRepository::open(&temp.path).unwrap();
+        assert_eq!(read_snapshot(&reopened.connection).unwrap().0, raw);
+        assert_eq!(
+            temp.backups().len(),
+            1,
+            "opening schema 5 must not create another migration backup"
+        );
+    }
+
+    #[test]
+    fn schema_four_migration_failure_rolls_back_and_retains_a_restorable_backup() {
+        let temp = TempDatabase::new();
+        let raw = temp.legacy_version(4);
+        let placement = r#"{ "offset":0.3, "console":{"width":1000}, "usageGuideSeen":true }"#;
+        let mut connection = Connection::open(&temp.path).unwrap();
+        configure(&connection).unwrap();
+        connection
+            .execute(
+                "INSERT INTO app_state(key,value) VALUES('placement',?1)",
+                [placement],
+            )
+            .unwrap();
+        let reason = migrate_schema(&mut connection, &temp.path, 4,
+            "PRAGMA user_version=5; UPDATE app_state SET value='injected failed change'; SELECT missing_column FROM app_state;").unwrap_err();
+        assert!(reason.contains("安全备份"));
+        assert_eq!(verify_database(&connection).unwrap(), 4);
+        assert_eq!(read_snapshot(&connection).unwrap().0, raw);
+        let remaining: String = connection
+            .query_row(
+                "SELECT value FROM app_state WHERE key='placement'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, placement);
+        let candidates = recovery::list_candidates(&temp.directory).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].kind, "before-schema-5");
+        assert_eq!(candidates[0].schema_version, 4);
+        let backup = Connection::open_with_flags(
+            temp.directory.join(&candidates[0].file_name),
+            OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        assert_eq!(read_snapshot(&backup).unwrap().0, raw);
+        let preserved: String = backup
+            .query_row(
+                "SELECT value FROM app_state WHERE key='placement'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(preserved, placement);
+    }
+
+    #[test]
+    fn schema_four_backup_failure_prevents_any_migration_write() {
+        let temp = TempDatabase::new();
+        let raw = temp.legacy_version(4);
+        let mut connection = Connection::open(&temp.path).unwrap();
+        configure(&connection).unwrap();
+        let unavailable = temp
+            .directory
+            .join("missing-directory")
+            .join("tasks.sqlite3");
+        assert!(
+            migrate_schema(&mut connection, &unavailable, 4, "PRAGMA user_version=5;").is_err()
+        );
+        assert_eq!(verify_database(&connection).unwrap(), 4);
+        assert_eq!(read_snapshot(&connection).unwrap().0, raw);
+        assert!(temp.backups().is_empty());
+    }
+
+    #[test]
+    fn reveal_mode_survives_restart_and_unrelated_settings_without_changing_tasks_or_metadata() {
+        let temp = TempDatabase::new();
+        let initial = Snapshot::demo("2026-09-24");
+        let mut repo = SqliteRepository::open(&temp.path).unwrap();
+        repo.save_placement(&initial, r#"{"offset":0.4}"#).unwrap();
+        repo.save_console_placement(r#"{"width":1000}"#).unwrap();
+        repo.acknowledge_usage_guide().unwrap();
+        let placement = repo.load_placement().unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&placement).unwrap(),
+            serde_json::json!({"offset":0.4,"console":{"width":1000},"usageGuideSeen":true})
+        );
+        drop(repo);
+        for mode in ["hover", "click"] {
+            let mut repo = SqliteRepository::open(&temp.path).unwrap();
+            let saved = repo.load().unwrap().unwrap();
+            let chosen = saved
+                .apply(
+                    Action::UpdateSettings {
+                        changes: serde_json::json!({"revealMode":mode}),
+                    },
+                    saved.revision,
+                )
+                .unwrap();
+            repo.save(&chosen).unwrap();
+            let other = chosen.apply(Action::UpdateSettings { changes: serde_json::json!({"uiStyle":"mono", "revealDelay":320, "hideDelay":800}) }, chosen.revision).unwrap();
+            repo.save(&other).unwrap();
+            drop(repo);
+            let restarted = SqliteRepository::open(&temp.path).unwrap();
+            let actual = restarted.load().unwrap().unwrap();
+            assert_eq!(actual.settings, other.settings);
+            assert_eq!(actual.settings.reveal_mode, mode);
+            assert_eq!(actual.tasks, initial.tasks);
+            assert_eq!(
+                serde_json::to_value(&actual.plans).unwrap(),
+                serde_json::to_value(&initial.plans).unwrap()
+            );
+            assert_eq!(
+                restarted.load_placement().unwrap().as_deref(),
+                Some(placement.as_str())
+            );
+        }
+    }
+
+    #[test]
     fn trash_survives_portable_backup_restore_and_sqlite_restart_with_all_plans() {
         let temp = TempDatabase::new();
         let mut repo = SqliteRepository::open(&temp.path).unwrap();
@@ -837,6 +1024,7 @@ mod tests {
             sort_order: 99,
         });
         original.settings.theme = "dark".into();
+        original.settings.reveal_mode = "hover".into();
         repo.save_placement(&original, r#"{"monitorName":"retained-placement"}"#)
             .unwrap();
         let mut service = TaskService::new(Box::new(repo)).unwrap();
@@ -931,7 +1119,7 @@ mod tests {
         let mut connection = Connection::open(&temp.path).unwrap();
         configure(&connection).unwrap();
         let error = migrate_schema(&mut connection,&temp.path,1,
-            "PRAGMA application_id=1396986955; PRAGMA user_version=4; SELECT missing_column FROM app_state;").unwrap_err();
+            "PRAGMA application_id=1396986955; PRAGMA user_version=5; SELECT missing_column FROM app_state;").unwrap_err();
         assert!(error.contains("安全备份"));
         assert_eq!(verify_database(&connection).unwrap(), 1);
         assert_eq!(read_snapshot(&connection).unwrap().0, raw);
@@ -1062,7 +1250,7 @@ mod tests {
                 repo.connection
                     .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                4
+                SCHEMA_VERSION
             );
             // Repeated acknowledgement is a no-op, even if placement writes fail.
             repo.connection.execute_batch("CREATE TRIGGER reject_guide_placement_insert BEFORE INSERT ON app_state WHEN NEW.key='placement' BEGIN SELECT RAISE(ABORT,'no repeated write'); END;").unwrap();
@@ -1428,6 +1616,7 @@ mod tests {
         let mut repo = SqliteRepository::open(&temp.path).unwrap();
         let mut original = Snapshot::demo("2026-09-24");
         original.settings.theme = "dark".into();
+        original.settings.reveal_mode = "hover".into();
         repo.save_placement(&original, r#"{"monitorName":"retained-screen-placement"}"#)
             .unwrap();
         repo.acknowledge_usage_guide().unwrap();

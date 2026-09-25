@@ -27,15 +27,40 @@ export default function BrowserEdgePreview() {
   const lastPointer = useRef({ x: 0, y: 120 });
   const inside = useRef(false);
   const locked = useRef(false);
+  const pointerHeld = useRef(false);
+  const gestureActive = useRef(false);
+  const suppressed = useRef(false);
   useEffect(() => { if (snapshot) setSide(snapshot.settings.edge); }, [snapshot?.settings.edge]);
   useEffect(() => { setSize(null); }, [snapshot?.settings.panelWidth, snapshot?.settings.panelHeight]);
   useEffect(() => { if (snapshot?.settings.pinned) setVisible(true); }, [snapshot?.settings.pinned]);
   useEffect(() => {
-    const hide = () => { window.dispatchEvent(new Event('sidetask:panel-hidden')); setVisible(false); };
-    const preview = (event: Event) => { if ((event as CustomEvent).detail.visible) setVisible(true); else hide(); };
-    const leave = () => { if (!snapshot?.settings.pinned && !inside.current && !dragging && !locked.current) hide(); };
-    const interaction = (event: Event) => { locked.current = Boolean((event as CustomEvent).detail.locked); };
-    const begin = () => setDragging(true);
+    const settings = snapshot?.settings;
+    let revealTimer: ReturnType<typeof setTimeout> | undefined;
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+    const clearTimers = () => { clearTimeout(revealTimer); clearTimeout(hideTimer); };
+    const hide = () => { suppressed.current = true; clearTimers(); window.dispatchEvent(new Event('sidetask:panel-hidden')); setVisible(false); };
+    const preview = (event: Event) => { clearTimers(); if ((event as CustomEvent).detail.visible) setVisible(true); else hide(); };
+    const hover = () => {
+      clearTimers();
+      if (!inside.current) suppressed.current = false;
+      if (settings?.revealMode !== 'hover' || !settings.edgeEnabled || gestureActive.current) return;
+      if (inside.current && !visible && !suppressed.current) revealTimer = setTimeout(() => {
+        if (inside.current && !gestureActive.current) setVisible(true);
+      }, settings.revealDelay);
+      else if (!inside.current && visible && !settings.pinned && !locked.current) hideTimer = setTimeout(() => {
+        if (!inside.current && !locked.current && !gestureActive.current) hide();
+      }, settings.hideDelay);
+    };
+    const hoverEvent = (event: Event) => { inside.current = Boolean((event as CustomEvent).detail.inside); hover(); };
+    const interaction = (event: Event) => { locked.current = Boolean((event as CustomEvent).detail.locked); hover(); };
+    const begin = () => { suppressed.current = true; gestureActive.current = true; clearTimers(); setDragging(true); };
+    const pointerDown = (event: PointerEvent) => {
+      const element = previewElement.current;
+      if (event.target instanceof Node && element?.contains(event.target)) { pointerHeld.current = true; return; }
+      // This observes the click without cancelling it. Drafts stay mounted;
+      // only pointer gestures and an active quit confirmation prevent dismissal.
+      if (visible && settings?.revealMode === 'click' && !settings.pinned && !gestureActive.current && !pointerHeld.current && !element?.querySelector('.panel-exit-surface[inert]')) hide();
+    };
     const move = (event: PointerEvent) => {
       lastPointer.current = { x: event.clientX, y: event.clientY };
       // Replacing the handle with a panel can omit a paired pointerleave.
@@ -43,13 +68,15 @@ export default function BrowserEdgePreview() {
       const bounds = previewElement.current?.getBoundingClientRect();
       const wasInside = inside.current;
       inside.current = !!bounds && event.clientX >= bounds.left && event.clientX < bounds.right && event.clientY >= bounds.top && event.clientY < bounds.bottom;
-      if (wasInside && !inside.current) void windowAction('hoverLeave');
+      if (wasInside !== inside.current) hover();
       if (dragging) {
         setOffset(Math.max(12, Math.min(window.innerHeight - (visible ? 450 : 100), event.clientY - 24)));
         setSide(event.clientX < window.innerWidth / 2 ? 'left' : 'right');
       }
     };
     const end = () => {
+      pointerHeld.current = false;
+      gestureActive.current = false;
       if (!dragging) return;
       setDragging(false);
       const edge = lastPointer.current.x < window.innerWidth / 2 ? 'left' : 'right';
@@ -57,22 +84,28 @@ export default function BrowserEdgePreview() {
       void mutate({ type: 'updateSettings', changes: { edge } }).catch(() => {});
     };
     window.addEventListener('sidetask:preview', preview);
-    window.addEventListener('sidetask:preview-leave', leave);
+    window.addEventListener('sidetask:preview-hover', hoverEvent);
     window.addEventListener('sidetask:preview-interaction', interaction);
     window.addEventListener('sidetask:drag-start', begin);
     window.addEventListener('pointermove', move);
+    document.addEventListener('pointerdown', pointerDown, true);
     window.addEventListener('pointerup', end);
     window.addEventListener('pointercancel', end);
+    // Committed mode/delay/pin changes cancel stale timers and evaluate the
+    // current pointer again, even when it has not crossed another boundary.
+    hover();
     return () => {
+      clearTimers();
       window.removeEventListener('sidetask:preview', preview);
-      window.removeEventListener('sidetask:preview-leave', leave);
+      window.removeEventListener('sidetask:preview-hover', hoverEvent);
       window.removeEventListener('sidetask:preview-interaction', interaction);
       window.removeEventListener('sidetask:drag-start', begin);
       window.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerdown', pointerDown, true);
       window.removeEventListener('pointerup', end);
       window.removeEventListener('pointercancel', end);
     };
-  }, [snapshot?.settings.pinned, dragging, visible, mutate]);
+  }, [snapshot?.settings.pinned, snapshot?.settings.revealMode, snapshot?.settings.revealDelay, snapshot?.settings.hideDelay, snapshot?.settings.edgeEnabled, dragging, visible, mutate]);
   if (!snapshot) return null;
   const width = Math.min(size?.width ?? snapshot.settings.panelWidth, window.innerWidth - 24);
   const height = Math.min(size?.height ?? snapshot.settings.panelHeight, window.innerHeight - 24);

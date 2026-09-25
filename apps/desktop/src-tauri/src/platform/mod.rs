@@ -7,6 +7,8 @@ pub mod exit;
 mod geometry;
 #[cfg(target_os = "macos")]
 mod macos_exit;
+#[cfg(target_os = "macos")]
+mod macos_pointer;
 pub mod startup_recovery;
 #[cfg(any(target_os = "windows", test))]
 mod windows_input;
@@ -67,6 +69,22 @@ struct Resize {
     top: f64,
     monitor_signature: String,
 }
+#[cfg(any(target_os = "macos", test))]
+struct OutsideClick {
+    observed_at: Instant,
+}
+struct HoverSample {
+    over_handle: bool,
+    over_panel: bool,
+    console_focused: bool,
+    primary_down: bool,
+    now: Instant,
+}
+#[derive(Debug, PartialEq)]
+enum VisibilityChange {
+    Show,
+    Hide { suppress: bool },
+}
 #[derive(Deserialize)]
 #[serde(tag = "phase", rename_all = "camelCase")]
 enum ResizeRequest {
@@ -114,6 +132,7 @@ pub struct DockRuntime {
     console_focused: bool,
     window_error: Option<String>,
     notified_status: Option<WindowStatus>,
+    pointer_boundary: Instant,
 }
 #[derive(Clone, PartialEq, Serialize)]
 pub struct WindowStatus {
@@ -140,6 +159,7 @@ impl DockRuntime {
             console_focused: false,
             window_error: None,
             notified_status: None,
+            pointer_boundary: Instant::now(),
         }
     }
 
@@ -148,6 +168,70 @@ impl DockRuntime {
             || (self.console_focused && self.interaction_owners.contains("console"))
             || self.drag.is_some()
             || self.resize.is_some()
+    }
+
+    #[cfg(any(target_os = "macos", test))]
+    fn outside_click_hides(
+        &self,
+        settings: &Settings,
+        click: &OutsideClick,
+        exiting: bool,
+    ) -> bool {
+        settings.reveal_mode == "click"
+            && settings.edge_enabled
+            && self.visible
+            && !settings.pinned
+            && self.drag.is_none()
+            && self.resize.is_none()
+            && !exiting
+            && click.observed_at >= self.pointer_boundary
+        // An explicit outside click may hide an editor. The WebView and its
+        // draft stay alive; interaction locks only protect automatic hover hide.
+    }
+
+    fn hover_change(
+        &mut self,
+        settings: &Settings,
+        sample: HoverSample,
+        exiting: bool,
+    ) -> Option<VisibilityChange> {
+        let console_entered = sample.console_focused && !self.console_focused;
+        self.console_focused = sample.console_focused;
+        if !sample.over_handle && !sample.over_panel {
+            self.suppressed = false;
+        }
+        if settings.reveal_mode != "hover" || exiting || self.locked() {
+            self.entered = None;
+            self.left = None;
+            return None;
+        }
+        if console_entered && self.visible && !settings.pinned {
+            return Some(VisibilityChange::Hide { suppress: true });
+        }
+        if self.visible {
+            if settings.pinned || sample.over_panel || sample.over_handle || sample.primary_down {
+                self.left = None;
+            } else {
+                let left = self.left.get_or_insert(sample.now);
+                if sample.now.duration_since(*left).as_millis() >= settings.hide_delay as u128 {
+                    return Some(VisibilityChange::Hide { suppress: false });
+                }
+            }
+        } else {
+            if sample.console_focused {
+                self.suppressed = true;
+            }
+            if sample.over_handle && !self.suppressed && !sample.console_focused {
+                let entered = self.entered.get_or_insert(sample.now);
+                if sample.now.duration_since(*entered).as_millis() >= settings.reveal_delay as u128
+                {
+                    return Some(VisibilityChange::Show);
+                }
+            } else {
+                self.entered = None;
+            }
+        }
+        None
     }
 
     fn poll_interval(&self) -> Duration {
@@ -179,6 +263,7 @@ impl DockRuntime {
             return false;
         }
         let resize = self.resize.take().unwrap();
+        self.pointer_boundary = Instant::now();
         // A click or a preview returned to its original frame has nothing to
         // restore. Invalidating it would hide/re-show the panel and discard the
         // keyboard focus that this explicit interaction just requested.
@@ -673,6 +758,15 @@ fn apply_geometry_inner(
     dock: &mut DockRuntime,
     settings: &Settings,
 ) -> Result<(), String> {
+    if dock
+        .applied_settings
+        .as_ref()
+        .is_some_and(|previous| previous.reveal_mode != settings.reveal_mode)
+    {
+        dock.entered = None;
+        dock.left = None;
+        dock.pointer_boundary = Instant::now();
+    }
     if !settings.edge_enabled {
         // Pausing the edge does not require a connected monitor. Hide once and
         // skip all monitor/cursor/geometry work until it is enabled again.
@@ -748,6 +842,9 @@ fn apply_geometry_inner(
     }
     dock.geometry = Some(geometry);
     dock.signature = signature;
+    if !live_resize {
+        dock.pointer_boundary = Instant::now();
+    }
     if settings.edge_enabled {
         if dock.visible || settings.pinned {
             if !live_resize {
@@ -785,6 +882,7 @@ fn show_panel(
         return Err(message);
     }
     dock.visible = true;
+    dock.pointer_boundary = Instant::now();
     dock.entered = None;
     dock.left = None;
     dock.suppressed = false;
@@ -811,6 +909,7 @@ fn hide_panel(
         }
     }
     dock.visible = false;
+    dock.pointer_boundary = Instant::now();
     dock.entered = None;
     dock.left = None;
     dock.suppressed = suppress;
@@ -889,6 +988,12 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
 pub fn setup_recovery(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     setup_console(app, true)
+}
+
+/// Called from Tauri RunEvent::Exit on the native main thread.
+pub fn cleanup() {
+    #[cfg(target_os = "macos")]
+    macos_pointer::stop();
 }
 
 fn setup_console(app: &mut tauri::App, recovery: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -1041,6 +1146,12 @@ fn setup_auxiliary(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
             })
     };
     tray.build(app)?;
+    #[cfg(target_os = "macos")]
+    let pointer_events = {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        macos_pointer::install(app.handle(), sender)?;
+        receiver
+    };
     let app_handle = app.handle().clone();
     std::thread::Builder::new()
         .name("sidetask-edge".into())
@@ -1053,8 +1164,20 @@ fn setup_auxiliary(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
                     .lock()
                     .map(|d| d.poll_interval())
                     .unwrap_or(Duration::from_millis(160));
-                std::thread::sleep(interval);
-                if let Err(message) = tick(&app_handle) {
+                #[cfg(target_os = "macos")]
+                let clicked = match pointer_events.recv_timeout(interval) {
+                    Ok(click) => outside_click(&app_handle, click),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Ok(()),
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                };
+                #[cfg(not(target_os = "macos"))]
+                let clicked = {
+                    // Windows event delivery needs its own native implementation;
+                    // never infer an outside click from focus loss or hover.
+                    std::thread::sleep(interval);
+                    Ok::<(), String>(())
+                };
+                if let Err(message) = clicked.and_then(|()| tick(&app_handle)) {
                     publish_window_status(&app_handle, Some(message.clone()));
                     if message != last_error {
                         eprintln!("edge coordinator: {message}");
@@ -1134,6 +1257,17 @@ fn install_application_menu(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+fn outside_click(app: &tauri::AppHandle, click: OutsideClick) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let mut dock = state.dock.lock().map_err(|_| "窗口服务不可用。")?;
+    let settings = settings(app)?;
+    if dock.outside_click_hides(&settings, &click, exit::is_pending(&state)?) {
+        hide_panel(app, &mut dock, &settings, true)?;
+    }
+    Ok(())
+}
+
 fn tick(app: &tauri::AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     let mut dock = state.dock.lock().map_err(|_| "窗口服务不可用。")?;
@@ -1184,46 +1318,23 @@ fn tick(app: &tauri::AppHandle) -> Result<(), String> {
     let over_handle = geometry.handle.contains(cursor.x, cursor.y);
     let over_panel = dock.visible && geometry.panel.contains(cursor.x, cursor.y);
     let console_focused = window(app, "console")?.is_focused().unwrap_or(false);
-    if console_focused
-        && !dock.console_focused
-        && dock.visible
-        && !settings.pinned
-        && !dock.locked()
-    {
-        hide_panel(app, &mut dock, &settings, true)?;
-    }
-    dock.console_focused = console_focused;
-    if !over_handle && !over_panel {
-        dock.suppressed = false;
-    }
-    if dock.locked() {
-        dock.entered = None;
-        dock.left = None;
-        return Ok(());
-    }
-    if dock.visible {
-        if settings.pinned || over_panel || over_handle || primary_button_down() {
-            dock.left = None;
-        } else {
-            let left = dock.left.get_or_insert_with(Instant::now);
-            if left.elapsed().as_millis() >= settings.hide_delay as u128 {
-                hide_panel(app, &mut dock, &settings, false)?;
-            }
+    let change = dock.hover_change(
+        &settings,
+        HoverSample {
+            over_handle,
+            over_panel,
+            console_focused,
+            primary_down: primary_button_down(),
+            now: Instant::now(),
+        },
+        exit::is_pending(&state)?,
+    );
+    match change {
+        Some(VisibilityChange::Show) => show_panel(app, &mut dock, &settings)?,
+        Some(VisibilityChange::Hide { suppress }) => {
+            hide_panel(app, &mut dock, &settings, suppress)?
         }
-    } else {
-        if console_focused {
-            // A pointer already resting at the edge must leave and enter again
-            // after console use; closing the console alone is not hover intent.
-            dock.suppressed = true;
-        }
-        if over_handle && !dock.suppressed && !console_focused {
-            let entered = dock.entered.get_or_insert_with(Instant::now);
-            if entered.elapsed().as_millis() >= settings.reveal_delay as u128 {
-                show_panel(app, &mut dock, &settings)?;
-            }
-        } else {
-            dock.entered = None;
-        }
+        None => (),
     }
     Ok(())
 }
@@ -1337,6 +1448,7 @@ fn resize_panel(app: &tauri::AppHandle, payload: Value) -> Result<(), String> {
         service.snapshot = next.clone();
         drop(service);
         dock.resize = None;
+        dock.pointer_boundary = Instant::now();
         let _ = app.emit("sidetask:changed", json!({"revision":next.revision}));
         Ok(())
     })();
@@ -1356,6 +1468,7 @@ fn finish_drag(app: &tauri::AppHandle, dock: &mut DockRuntime) -> Result<(), Str
     let Some(drag) = dock.drag.take() else {
         return Ok(());
     };
+    dock.pointer_boundary = Instant::now();
     // Even if a screen disappears before we can resolve the release target,
     // the next coordinator tick must restore the last committed safe geometry.
     dock.applied_settings = None;
@@ -1649,6 +1762,203 @@ fn escape_down() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hover_sample(now: Instant, over_handle: bool) -> HoverSample {
+        HoverSample {
+            over_handle,
+            over_panel: false,
+            console_focused: false,
+            primary_down: false,
+            now,
+        }
+    }
+
+    #[test]
+    fn click_mode_never_follows_hover_leave_or_console_focus_and_clears_old_timers() {
+        let mut dock = DockRuntime::new(Placement::default());
+        let settings = Settings::default();
+        assert_eq!(settings.reveal_mode, "click");
+        let now = Instant::now();
+        dock.entered = Some(now);
+        for seconds in [0, 1, 30] {
+            assert_eq!(
+                dock.hover_change(
+                    &settings,
+                    hover_sample(now + Duration::from_secs(seconds), true),
+                    false
+                ),
+                None
+            );
+        }
+        assert!(dock.entered.is_none());
+        dock.visible = true;
+        dock.left = Some(now);
+        assert_eq!(
+            dock.hover_change(
+                &settings,
+                HoverSample {
+                    console_focused: true,
+                    ..hover_sample(now + Duration::from_secs(60), false)
+                },
+                false
+            ),
+            None
+        );
+        assert!(dock.left.is_none());
+        assert!(dock.visible);
+    }
+
+    #[test]
+    fn hover_mode_keeps_delays_and_returning_to_the_panel_cancels_hiding() {
+        let mut dock = DockRuntime::new(Placement::default());
+        let settings = Settings {
+            reveal_mode: "hover".into(),
+            reveal_delay: 200,
+            hide_delay: 450,
+            ..Settings::default()
+        };
+        let now = Instant::now();
+        assert_eq!(
+            dock.hover_change(&settings, hover_sample(now, true), false),
+            None
+        );
+        assert_eq!(
+            dock.hover_change(
+                &settings,
+                hover_sample(now + Duration::from_millis(199), true),
+                false
+            ),
+            None
+        );
+        assert_eq!(
+            dock.hover_change(
+                &settings,
+                hover_sample(now + Duration::from_millis(200), true),
+                false
+            ),
+            Some(VisibilityChange::Show)
+        );
+        dock.visible = true;
+        let left = now + Duration::from_secs(1);
+        assert_eq!(
+            dock.hover_change(&settings, hover_sample(left, false), false),
+            None
+        );
+        assert_eq!(
+            dock.hover_change(
+                &settings,
+                HoverSample {
+                    over_panel: true,
+                    ..hover_sample(left + Duration::from_millis(449), false)
+                },
+                false
+            ),
+            None
+        );
+        assert!(dock.left.is_none());
+        let left_again = left + Duration::from_secs(1);
+        assert_eq!(
+            dock.hover_change(&settings, hover_sample(left_again, false), false),
+            None
+        );
+        assert_eq!(
+            dock.hover_change(
+                &settings,
+                hover_sample(left_again + Duration::from_millis(450), false),
+                false
+            ),
+            Some(VisibilityChange::Hide { suppress: false })
+        );
+    }
+
+    #[test]
+    fn outside_click_hides_an_editor_but_respects_pinning_gestures_exit_and_newer_reveals() {
+        let mut dock = resizing_dock();
+        dock.cancel_resize(None);
+        dock.visible = true;
+        let mut settings = Settings::default();
+        dock.interaction_owners.insert("edge-panel".into());
+        assert!(dock.locked());
+        let click = OutsideClick {
+            observed_at: Instant::now(),
+        };
+        assert!(
+            dock.outside_click_hides(&settings, &click, false),
+            "an open draft does not defeat an explicit outside click"
+        );
+        assert!(!dock.outside_click_hides(&settings, &click, true));
+        settings.pinned = true;
+        assert!(!dock.outside_click_hides(&settings, &click, false));
+        settings.pinned = false;
+        settings.reveal_mode = "hover".into();
+        assert!(!dock.outside_click_hides(&settings, &click, false));
+        settings.reveal_mode = "click".into();
+        dock.pointer_boundary = click.observed_at + Duration::from_millis(1);
+        assert!(
+            !dock.outside_click_hides(&settings, &click, false),
+            "queued clicks must not hide a later reveal or completed gesture"
+        );
+        let fresh = OutsideClick {
+            observed_at: dock.pointer_boundary,
+        };
+        assert!(dock.outside_click_hides(&settings, &fresh, false));
+        dock.resize = resizing_dock().resize;
+        assert!(!dock.outside_click_hides(&settings, &fresh, false));
+        dock.resize = None;
+        dock.drag = Some(Drag {
+            label: "edge-panel".into(),
+            started: Instant::now(),
+            settings: settings.clone(),
+            original_visible: true,
+            original_rect: Rect {
+                x: -376.,
+                y: -300.,
+                width: 368.,
+                height: 610.,
+            },
+            movement_threshold: 5.,
+            cancelled: false,
+        });
+        assert!(!dock.outside_click_hides(&settings, &fresh, false));
+        dock.drag = None;
+        settings.edge_enabled = false;
+        assert!(!dock.outside_click_hides(&settings, &fresh, false));
+        settings.edge_enabled = true;
+        dock.visible = false;
+        assert!(!dock.outside_click_hides(&settings, &fresh, false));
+    }
+
+    #[test]
+    fn hover_editing_and_exit_confirmation_clear_pending_hides() {
+        let mut dock = DockRuntime::new(Placement::default());
+        dock.visible = true;
+        let settings = Settings {
+            reveal_mode: "hover".into(),
+            ..Settings::default()
+        };
+        let now = Instant::now();
+        dock.left = Some(now);
+        assert_eq!(
+            dock.hover_change(
+                &settings,
+                hover_sample(now + Duration::from_secs(10), false),
+                true
+            ),
+            None
+        );
+        assert!(dock.left.is_none());
+        dock.left = Some(now);
+        dock.interaction_owners.insert("edge-panel".into());
+        assert_eq!(
+            dock.hover_change(
+                &settings,
+                hover_sample(now + Duration::from_secs(10), false),
+                false
+            ),
+            None
+        );
+        assert!(dock.left.is_none());
+    }
 
     fn resizing_dock() -> DockRuntime {
         let saved = Placement {

@@ -3,7 +3,6 @@ import { listen } from '@tauri-apps/api/event';
 import type { Page, Settings, Snapshot } from './types';
 
 export const isDesktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-let previewHide: ReturnType<typeof setTimeout> | undefined;
 export async function windowAction(action: string, payload: Record<string, unknown> = {}): Promise<unknown> {
   if (isDesktop) {
     if (action === 'hoverEnter' || action === 'hoverLeave') return;
@@ -19,15 +18,9 @@ export async function windowAction(action: string, payload: Record<string, unkno
       window.dispatchEvent(new CustomEvent('sidetask:preview', { detail: { visible: false } }));
     }
   }
-  if (action === 'showPanel' || action === 'hoverEnter') {
-    clearTimeout(previewHide);
-    window.dispatchEvent(new CustomEvent('sidetask:preview', { detail: { visible: true } }));
-  }
+  if (action === 'showPanel') window.dispatchEvent(new CustomEvent('sidetask:preview', { detail: { visible: true } }));
   if (action === 'hidePanel') window.dispatchEvent(new CustomEvent('sidetask:preview', { detail: { visible: false } }));
-  if (action === 'hoverLeave') {
-    clearTimeout(previewHide);
-    previewHide = setTimeout(() => window.dispatchEvent(new CustomEvent('sidetask:preview-leave')), 450);
-  }
+  if (action === 'hoverEnter' || action === 'hoverLeave') window.dispatchEvent(new CustomEvent('sidetask:preview-hover', { detail: { inside: action === 'hoverEnter' } }));
   if (action === 'startDrag') window.dispatchEvent(new CustomEvent('sidetask:drag-start'));
   if (action === 'finishDrag') window.dispatchEvent(new CustomEvent('sidetask:drag-end'));
   if (action === 'interaction') window.dispatchEvent(new CustomEvent('sidetask:preview-interaction', { detail: payload }));

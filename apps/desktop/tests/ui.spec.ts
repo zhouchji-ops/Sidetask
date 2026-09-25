@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { createSeed } from '../src/lib/domain';
 
 // These tests use the browser preview adapter and isolated synthetic storage.
 // They verify UI flows, not native Tauri window focus, multi-monitor bounds, or SQLite.
@@ -9,6 +10,12 @@ const dueDate = '2028-10-15';
 async function openConsole(page: Page) {
   await page.goto('/?surface=console');
   await expect(page.locator('.page-heading h1')).toHaveText('今日');
+}
+
+async function seedHoverPreview(page: Page) {
+  const snapshot = createSeed();
+  snapshot.settings.revealMode = 'hover';
+  await page.addInitScript(snapshot => localStorage.setItem('sidetask-browser-preview-v1', JSON.stringify(snapshot)), snapshot);
 }
 
 async function navigate(page: Page, name: string) {
@@ -171,6 +178,7 @@ test('设置保存主题、尺寸与停靠方向，重载后保留', async ({ pa
 });
 
 test('浏览器小窗预览支持悬停、自动收起与保持展开', async ({ page }) => {
+  await seedHoverPreview(page);
   await openConsole(page);
   const preview = page.getByTestId('browser-edge-preview');
   await preview.getByRole('button', { name: '展开侧笺；按住拖动可调整位置' }).hover();
@@ -200,6 +208,7 @@ test('独立小窗的新建入口原地添加今日任务', async ({ page }) => 
 });
 
 test('浏览器预览可拖动小窗尺寸，松手后设置保存', async ({ page }) => {
+  await seedHoverPreview(page);
   await openConsole(page);
   const preview = page.getByTestId('browser-edge-preview');
   await preview.getByRole('button', { name: '展开侧笺；按住拖动可调整位置' }).hover();

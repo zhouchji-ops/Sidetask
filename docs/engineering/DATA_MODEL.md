@@ -1,6 +1,6 @@
 # 数据模型与业务一致性
 
-状态：当前实现继续使用 SQLite 的 app_state JSON snapshot。schema 3 加入 Task.deletedAt；本轮 schema 4 为 placement.console 及字段合并建立新兼容边界，任务协议保持不变。类型见 `apps/desktop/src/lib/types.ts` 与 Rust 平台几何类型，实际协议见本文末尾各扩展小节。下方独立表、DailyPlanRevision、设备设置 revision 及 dataset_epoch/change_seq 是目标模型，**没有因 schema 3 / 4 升级而完成规范化**。控制台与边缘小窗共享 Rust 服务和数据库。架构取舍见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md) 与 [ADR-0006](../decisions/0006-console-window-preferences.md)，实际完成度、测试数字与双平台验收见 [STATUS](../delivery/STATUS.md)。
+状态：当前实现继续使用 SQLite 的 app_state JSON snapshot。schema 3 加入 Task.deletedAt；schema 4 为 placement.console 及字段合并建立兼容边界；当前 schema 5 为 Settings.revealMode 建立新边界，任务协议保持不变。类型见 `apps/desktop/src/lib/types.ts` 与 Rust 平台几何类型，实际协议见本文末尾各扩展小节。下方独立表、DailyPlanRevision、设备设置 revision 及 dataset_epoch/change_seq 是目标模型，**没有因 schema 3 / 4 / 5 升级而完成规范化**。控制台与边缘小窗共享 Rust 服务和数据库。架构取舍见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md) 与 [ADR-0006](../decisions/0006-console-window-preferences.md)，实际完成度、测试数字与双平台验收见 [STATUS](../delivery/STATUS.md)。
 
 首版仅有独立的大任务。模型中不设 `parent_id`、子任务表、任务依赖、步骤清单、百分比进度或父子完成聚合；备注是普通文本，不支持可独立勾选的步骤。一次勾选表示整项任务完成，加入今日也不会创建一天的小任务或进度记录。见 [ADR-0002](../decisions/0002-console-and-edge-panel.md)。
 
@@ -42,7 +42,7 @@
 
 每个 `plan_date` 保存一个 `revision`，用于检查同一天计划引用与排序的并发修改。添加、移出或重排计划在同一事务更新引用及该日 revision；一天尚无安排时按初始 revision 处理。任务内容修改不必递增计划 revision，任务完成状态依然只在 Task 内存一份。
 
-当前 schema 4 延续 schema 3 的 Snapshot.revision，保护全部计划操作，不新增每日 revision 字段。软删除/恢复另校验 Task.revision；同一服务内先验证版本，再保存并发布提交结果。
+当前 schema 5 延续 schema 3 的 Snapshot.revision，保护全部计划操作，不新增每日 revision 字段。软删除/恢复另校验 Task.revision；同一服务内先验证版本，再保存并发布提交结果。
 
 ### DevicePreferences / PreferenceApplyState（目标）
 
@@ -50,7 +50,7 @@
 
 | 设置组 | 持久化内容 |
 | --- | --- |
-| edge_panel | 边缘入口启用/暂停、最近停靠显示器、边缘、沿边相对偏移、逻辑宽高、分区比例、展开/收起延迟、固定展开偏好、置顶和 DDL 排序 |
+| edge_panel | 边缘入口启用/暂停、最近停靠显示器、边缘、沿边相对偏移、逻辑宽高、分区比例、展开方式（click默认/hover）、悬停展开/收起延迟、固定展开偏好、置顶和 DDL 排序 |
 | console | 普通窗口的逻辑尺寸、恢复位置及最大化偏好；与小窗几何独立 |
 | system | 快捷键、登录启动偏好 |
 | appearance | uiStyle：paper / studio / editorial / mono；独立系统/浅色/深色偏好、减少动态效果等已确定的展示设置 |
@@ -162,7 +162,7 @@ schema1 原型时期已在 JSON Settings 增加 `uiStyle`。Rust serde 及浏览
 
 ## schema 3 实际兼容与生命周期契约
 
-本节保留生命周期阶段引入的规则和迁移历史；当前数据库已升为 schema 4，新增设备元数据边界见末节，下面的 Task / Plan 规则继续适用。
+本节保留生命周期阶段引入的规则和迁移历史；当前数据库已升为 schema 5，新增设备元数据边界见末节，下面的 Task / Plan 规则继续适用。
 
 当前 Task 用 `completed`/`completedAt` 和 `dueDate`/`dueTime` 表示完成与 DDL；新截止日期可带 `dueTimezone`，精确时刻带 `dueAtUtc`。旧记录缺时区字段时保留原截止语义，普通标题/备注编辑不能重新固定时区。新增 `deletedAt` 对应 Rust `deleted_at: Option<String>`，serde default/skip_none，旧记录缺失或 null 均为未删除；非空值必须通过既有严格 UTC RFC3339 校验。该字段只能由生命周期动作修改，普通字段编辑不能注入它。
 
@@ -170,19 +170,19 @@ schema1 原型时期已在 JSON Settings 增加 `uiStyle`。Rust serde 及浏览
 
 reorderToday 的精确集合只包括当天未删除、未完成任务；已删除及已完成计划的排序值不参与重排。追加今日计划仅稳定压缩当日未删除任务的计划，保留删除项原值。恢复不调整任何 Plan；排序值相同时沿用 Plan 数组的稳定顺序，因此其他任务重排后不保证恢复到删除前的绝对行号。跨日按原计划重新投影，不创建今天的新引用。
 
-生命周期阶段的 SQLite schema1/2→3 先对完整数据库做保留 WAL 的副本预检，再创建校验可读、已同步的一致性 `before-schema-3` 备份；迁移事务只更新版本/身份标记，保留 snapshot 与 placement 原字节，不重编码任务。当时识别 schema1/2/3，候选保留 `before-schema-2`、`before-schema-3` 与 `safety-backup`。本轮直接升级到 schema 4 的版本及备份规则见末节。迁移失败不以空库或演示数据替代，首次新库仍写入空快照。
+生命周期阶段的 SQLite schema1/2→3 先对完整数据库做保留 WAL 的副本预检，再创建校验可读、已同步的一致性 `before-schema-3` 备份；迁移事务只更新版本/身份标记，保留 snapshot 与 placement 原字节，不重编码任务。当时识别 schema1/2/3，候选保留 `before-schema-2`、`before-schema-3` 与 `safety-backup`。后续 schema 4 与当前 schema 5 的版本及备份规则见末节。迁移失败不以空库或演示数据替代，首次新库仍写入空快照。
 
 便携 JSON 的 schemaVersion 与 SQLite 版本独立：新导出 v2，导入接受 v1/v2，均包含完整 tasks/plans；v1 缺失或 null 的 deletedAt 作为未删除，v1 携带非空删除状态则拒绝。预览提供 taskCount、trashedTaskCount、planCount 和 exportedAt。整份恢复先备份当前库，再替换任务及回收站、保留设备设置，并将全局及所有导入任务 revision 提高到已见值以上；当前没有 dataset_epoch 字段。旧备份按备份时的完整集合恢复，不与现有回收站合并。回收站仍计入现有容量限制，元数据增长超限时保持原已提交状态并提示失败。
 
-本节任务规则在 schema 4 继续有效，不将自动化测试、文档同步或 Mac 证据写成双平台验收完成。来源与分阶段检查见 [TASK_LIFECYCLE](../research/TASK_LIFECYCLE.md)，最终证据统一见 [STATUS](../delivery/STATUS.md)。
+本节任务规则在 schema 5 继续有效，不将自动化测试、文档同步或 Mac 证据写成双平台验收完成。来源与分阶段检查见 [TASK_LIFECYCLE](../research/TASK_LIFECYCLE.md)，最终证据统一见 [STATUS](../delivery/STATUS.md)。
 
 ## 分区偏好的当前扩展
 
-Settings新增panelSplit（Rust panel_split:u8），缺省54，只接受30–70整数；属于本机偏好，便携任务备份不携带，整份任务恢复保留本机值。比例修改沿用统一设置事务，不改Task/Plan字段；同一设置冲突由版本及前端的初始比例核对处理。旧快照缺字段只读补默认，不重编码原文；正常提交后保存。分区比例单独落地时保持schema3，与uiStyle一样只支持新程序读旧库；旧schema3程序可能因未知设置字段拒绝读取。本轮控制台placement扩展已统一采用下述schema4备份迁移，不支持降级继续编辑。分阶段记录见[窗口偏好计划](../research/WINDOW_PREFERENCES.md)。
+Settings新增panelSplit（Rust panel_split:u8），缺省54，只接受30–70整数；属于本机偏好，便携任务备份不携带，整份任务恢复保留本机值。比例修改沿用统一设置事务，不改Task/Plan字段；同一设置冲突由版本及前端的初始比例核对处理。旧快照缺字段只读补默认，不重编码原文；正常提交后保存。分区比例单独落地时保持schema3，与uiStyle一样只支持新程序读旧库；旧schema3程序可能因未知设置字段拒绝读取。当时控制台placement扩展采用下述schema4备份迁移，当前由schema5继承，不支持降级继续编辑。分阶段记录见[窗口偏好计划](../research/WINDOW_PREFERENCES.md)。
 
 ## schema 4 控制台设备元数据契约
 
-SQLite 当前 `PRAGMA user_version=4`，仍只有 `app_state` 的 snapshot / placement 记录，不添加 Task 字段、独立偏好 revision 或第二份存储。读取识别 schema 1 / 2 / 3 / 4；旧版本在保持原主库及日志不变的完整副本上通过预检后，先创建经过校验和同步的 `sidetask-before-schema-4-<UUID>.sqlite3`，再事务升到 4。schema 1 同时设置既有 application_id，schema 2 / 3 只更新版本。迁移保留 snapshot / placement 原文，备份内版本仍为迁移前版本；失败回滚并保留安全副本。schema 4 让旧程序明确拒绝继续写库，避免旧 placement 写法丢弃 console 子对象。
+schema 4 阶段的 `PRAGMA user_version=4`，仍只有 `app_state` 的 snapshot / placement 记录，不添加 Task 字段、独立偏好 revision 或第二份存储。读取识别 schema 1 / 2 / 3 / 4；旧版本在保持原主库及日志不变的完整副本上通过预检后，先创建经过校验和同步的 `sidetask-before-schema-4-<UUID>.sqlite3`，再事务升到 4。schema 1 同时设置既有 application_id，schema 2 / 3 只更新版本。迁移保留 snapshot / placement 原文，备份内版本仍为迁移前版本；失败回滚并保留安全副本。schema 4 让旧程序明确拒绝继续写库，避免旧 placement 写法丢弃 console 子对象。
 
 placement 中的 console 可缺省，结构由 `ConsolePlacement` / `ConsoleNormal` 表达：
 
@@ -215,3 +215,9 @@ Mac 先把窗口和各工作区按各自来源 scale 转到统一 AppKit 逻辑�
 `placement.usageGuideSeen` 为可缺省boolean，缺失视为false；不放在Settings、console子对象或Task内。`get_usage_guide_seen` / `acknowledge_usage_guide`仅控制台有权限；确认调用完成后才隐藏提示。读取失败显示重试，不把坏元数据当默认值覆盖。没有任务、已有任务、仅回收站均使用同一标记，不导入示例数据。
 
 确认事务与控制台、边缘位置事务合并最新字段；不发布任务变更事件，不中断尺寸设置会话或编辑草稿。便携JSON导出不包含标记，任务恢复保留它；整库备份包含当时标记，整库恢复到未确认版本后可再次显示。浏览器预览使用独立`sidetask-usage-guide-seen-v1`键，不能用预览localStorage证明原生SQLite写入。
+
+## schema 5 小窗展开方式契约
+
+当前 `PRAGMA user_version=5`。Settings新增 `revealMode: "click" | "hover"`（Rust reveal_mode:String）；新建和旧快照缺字段均默认click，非法字符串/null/数值拒绝。保留revealDelay/hideDelay，切模式不清它们。模式属于本机设置；便携备份仍v2，不携带或覆盖本机Settings。
+
+schema1–4预检通过后先生成校验并同步的 `sidetask-before-schema-5-<UUID>.sqlite3`，再IMMEDIATE事务升级marker；snapshot/placement原文字节不重编码，备份保留旧版本。只读补默认不写入，下一次成功业务提交才按新格式写完整snapshot。备份失败或迁移失败不修改旧内容/版本；schema1沿用设置application_id。旧程序拒绝schema5，不手工改版本降级。恢复候选支持before-schema-2/3/4/5和safety-backup。历史schema4段保留其引入的设备字段/合并规则。

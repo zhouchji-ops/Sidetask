@@ -291,6 +291,12 @@ test('保存并收起等待和失败都保留草稿，成功后才收起', async
     await expect(page.getByRole('button', { name: '继续编辑', exact: true })).toBeDisabled();
     await expect(page.getByRole('button', { name: '放弃草稿', exact: true })).toBeDisabled();
     await page.keyboard.press('Escape');
+    // Some browser/platform combinations retain focus on a newly disabled
+    // button. Deliver that bubbled key deterministically as well, so a disabled
+    // control cannot conceal an Escape bypass of the in-flight save guard.
+    await page.getByRole('form', { name: '快速添加今日任务', exact: true }).dispatchEvent('keydown', { key: 'Escape', code: 'Escape' });
+    await expect(page.getByRole('group', { name: '处理今日任务草稿', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '继续编辑', exact: true })).toBeDisabled();
     await expect(titleInput(page)).toHaveValue('合成保存后再收起');
     expect(await persisted(page)).toEqual(initial);
   } finally { await releaseWrites(page); }
@@ -306,8 +312,11 @@ test('保存并收起等待和失败都保留草稿，成功后才收起', async
 });
 
 test('小窗草稿阻止悬停收起，显式隐藏再展开保留草稿且快捷键不打开控制台新建', async ({ page, context }) => {
-  const initial = await seed(context);
+  const snapshot = fixture(); snapshot.settings.revealMode = 'hover';
+  const initial = await seed(context, snapshot);
   const preview = await openPreview(page);
+  await page.clock.install({ time: fixedTime });
+  await page.clock.pauseAt(fixedTime);
   await headingAdd(preview).click();
   await titleInput(preview).fill('合成隐藏期间保留');
   for (const modifier of ['Meta', 'Control']) {
@@ -317,14 +326,15 @@ test('小窗草稿阻止悬停收起，显式隐藏再展开保留草稿且快�
     await expect(titleInput(preview)).toBeFocused();
   }
   await page.mouse.move(400, 100);
-  // Deliver the actual preview hide-timer event without making elapsed time a
-  // pass condition. The panel's interaction owner must reject this automatic hide.
-  await page.evaluate(() => window.dispatchEvent(new CustomEvent('sidetask:preview-leave')));
+  // Run the real hover timer under a controlled clock; an active editor owns
+  // its interaction lock and must stay visible after the configured delay.
+  await page.clock.runFor(snapshot.settings.hideDelay + 1);
   await expect(titleInput(preview)).toBeVisible();
   await preview.getByRole('button', { name: '收起小窗', exact: true }).click();
   await page.mouse.move(400, 100);
   await expect(titleInput(preview)).toBeHidden();
   await preview.getByRole('button', { name: '展开侧笺；按住拖动可调整位置', exact: true }).hover();
+  await page.clock.runFor(snapshot.settings.revealDelay);
   await expect(titleInput(preview)).toHaveValue('合成隐藏期间保留');
   await expect(page.getByRole('dialog', { name: '新建任务', exact: true })).toHaveCount(0);
   expect(await persisted(page)).toEqual(initial);
@@ -334,8 +344,11 @@ test('小窗草稿阻止悬停收起，显式隐藏再展开保留草稿且快�
 });
 
 test('收起快速添加只释放自己的交互锁，其他交互仍能阻止自动隐藏', async ({ page, context }) => {
-  await seed(context);
+  const snapshot = fixture(); snapshot.settings.revealMode = 'hover';
+  await seed(context, snapshot);
   const preview = await openPreview(page);
+  await page.clock.install({ time: fixedTime });
+  await page.clock.pauseAt(fixedTime);
   await headingAdd(preview).click();
   await page.evaluate(async () => {
     const path = '/src/lib/native.ts';
@@ -346,14 +359,14 @@ test('收起快速添加只释放自己的交互锁，其他交互仍能阻止�
   await expect(titleInput(preview)).toBeHidden();
   await expect.poll(() => page.evaluate(() => (window as ProbeWindow).quickAddProbe.locks.at(-1))).toBe(true);
   await page.mouse.move(400, 100);
-  await page.evaluate(() => window.dispatchEvent(new CustomEvent('sidetask:preview-leave')));
+  await page.clock.runFor(snapshot.settings.hideDelay + 1);
   await expect(preview.locator('.edge-panel')).toBeVisible();
   await page.evaluate(async () => {
     const path = '/src/lib/native.ts';
     const native = await import(path);
     await native.setInteractionLock(false, 'synthetic-other-editor');
-    window.dispatchEvent(new CustomEvent('sidetask:preview-leave'));
   });
+  await page.clock.runFor(snapshot.settings.hideDelay);
   await expect(preview.locator('.edge-panel')).toBeHidden();
 });
 

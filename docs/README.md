@@ -26,3 +26,5 @@ PRD 是产品行为的依据；ADR 是技术取舍的依据；BACKLOG 是事项�
 - [Windows开发机接手说明](delivery/WINDOWS_HANDOFF.md)
 
 - [Mac分支及首次说明、真实窗口修复记录](../tests/manual/2026-09-25-mac-branch.md)
+
+小窗展开方式：[ADR-0007 默认单击与可选悬停](decisions/0007-panel-reveal-mode.md)。

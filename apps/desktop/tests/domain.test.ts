@@ -792,3 +792,44 @@ describe('recoverable task lifecycle', () => {
     expect([precise, dateOnly]).toEqual(before);
   });
 });
+
+describe('edge panel reveal mode', () => {
+  it('defaults new and legacy previews to click without rewriting legacy data', () => {
+    expect(createEmptySnapshot().settings.revealMode).toBe('click');
+    const current = createSeed(today);
+    const { revealMode: _mode, ...settings } = current.settings;
+    const legacy = { ...current, settings };
+    const before = structuredClone(legacy);
+    const normalized = normalizePreviewSnapshot(legacy);
+    expect(normalized).toEqual({ ...legacy, settings: { ...settings, revealMode: 'click' } });
+    expect(legacy).toEqual(before);
+    expect(legacy.settings).not.toHaveProperty('revealMode');
+  });
+
+  it('persists either explicit mode and preserves it during unrelated preference and task updates', () => {
+    let snapshot = createSeed(today);
+    const tasks = structuredClone(snapshot.tasks);
+    const plans = structuredClone(snapshot.plans);
+    for (const revealMode of ['hover', 'click'] as const) {
+      const before = structuredClone(snapshot);
+      snapshot = apply(snapshot, { type: 'updateSettings', changes: { revealMode } });
+      expect(snapshot).toEqual({ ...before, revision: before.revision + 1, settings: { ...before.settings, revealMode } });
+      expect(() => applyPreviewAction(snapshot, { type: 'updateSettings', changes: { revealMode } }, before.revision)).toThrow();
+      snapshot = normalizePreviewSnapshot(JSON.parse(JSON.stringify(snapshot)));
+      snapshot = apply(snapshot, { type: 'updateSettings', changes: { pinned: true, revealDelay: 300, hideDelay: 800 } });
+      expect(snapshot.settings.revealMode).toBe(revealMode);
+      expect(snapshot.tasks).toEqual(tasks);
+      expect(snapshot.plans).toEqual(plans);
+    }
+    const changed = apply(snapshot, { type: 'setCompleted', id: snapshot.tasks[0].id, completed: true, expectedRevision: snapshot.tasks[0].revision });
+    expect(changed.settings).toEqual(snapshot.settings);
+  });
+
+  it.each(['', 'Hover', 'automatic', null, 0, false])('rejects invalid mode %j without changing stored state', revealMode => {
+    const snapshot = createSeed(today);
+    const before = structuredClone(snapshot);
+    expect(() => apply(snapshot, { type: 'updateSettings', changes: { revealMode } } as unknown as Action)).toThrow('设置选项');
+    expect(snapshot).toEqual(before);
+    expect(() => normalizePreviewSnapshot({ ...snapshot, settings: { ...snapshot.settings, revealMode } })).toThrow('设置选项');
+  });
+});

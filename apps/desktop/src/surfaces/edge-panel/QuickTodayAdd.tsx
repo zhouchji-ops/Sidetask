@@ -111,6 +111,7 @@ export function QuickTodayAdd({ open, focusRequest, onClose, ref }: {
     }
     if (event.key === 'Escape') {
       event.preventDefault(); event.stopPropagation();
+      if (inFlight.current || locked) return;
       if (confirmClose) { returnToInput.current = true; setConfirmClose(false); pendingLeave.current = null; }
       else leave(() => {});
     }
