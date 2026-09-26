@@ -4,7 +4,7 @@
 
 把今日计划和截止日期放在屏幕边缘。随手查看、直接添加、勾选完成，需要集中整理时再打开完整控制台。
 
-[**完整使用说明书**](docs/product/USER_GUIDE.md) · [下载与安装](#下载与安装) · [产品价值](docs/product/INNOVATIONS.md) · [验证状态](docs/VALIDATION.md)
+[**完整使用说明书**](docs/product/USER_GUIDE.md) · [下载与安装](#下载与安装) · [产品价值](docs/product/INNOVATIONS.md) · [验证状态](docs/VALIDATION.md) · [参与贡献](CONTRIBUTING.md)
 
 当前版本为 **0.1.0 内部试用版**，已有 Mac arm64 App 和 Windows x64 安装包。两平台自动化检查和构建已通过；原生交互、完整系统兼容、多屏与签名分发仍在完善。
 
@@ -62,6 +62,8 @@
 
 采用 Tauri 2、React / TypeScript、Rust 和 SQLite。界面共用任务服务，平台窗口适配集中在 Rust 平台层；架构、验证和数据恢复资料见下方文档。
 
+想报告问题、完善文档或提交修复，请先看[贡献指南](CONTRIBUTING.md)。外部贡献者在自己的 Fork 中创建主题分支，PR 目标为 `mac`；下面的平台分支约定用于维护者协作。
+
 默认分支为 `mac`，已包含两平台的内部试用实现。Mac 开发以 `mac` → `origin/mac` 为入口；Windows 开发先同步远端，再从已确认的 `origin/mac` 提交创建 `codex/<任务名>` 分支，并记录所用完整 SHA。不要从旧分支或旧提交历史接续。需要 Node.js 24、Rust 与对应系统的 Tauri 构建环境，详情见[桌面客户端开发说明](apps/desktop/README.md)。
 
 ```sh
@@ -83,6 +85,11 @@ npm run tauri -- dev
 | [设计规范](design/DESIGN_SYSTEM.md) / [同类调研](docs/research/ALTERNATIVES.md) | 界面风格、参考与取舍 |
 | [验证状态](docs/VALIDATION.md) / [测试入口](tests/README.md) | 已覆盖的检查、证据类型、未验证范围与运行方式 |
 | [详细数据恢复](docs/engineering/DATA_RECOVERY.md) / [安全边界](SECURITY.md) | 备份、启动故障与已知限制 |
+| [贡献指南](CONTRIBUTING.md) / [开发流程](docs/engineering/DEVELOPMENT.md) | 问题反馈、PR、平台协作与检查要求 |
 | [变更记录](CHANGELOG.md) / [全部文档](docs/README.md) | 版本变化与导航 |
 
-反馈时附上系统、包版本和重现步骤，具体格式见[说明书](docs/product/USER_GUIDE.md#当前范围与反馈)。个人数据库、导出文件和本地备份不提交仓库。
+反馈时附上系统、包版本和重现步骤，具体格式见[贡献指南](CONTRIBUTING.md#报告问题或提出建议)。个人数据库、导出文件和本地备份不提交仓库。
+
+## 许可证与第三方材料
+
+当前仓库尚未设置项目级 `LICENSE`，许可协议待维护者明确。已收录的第三方依赖声明见[前端依赖](apps/desktop/public/third-party/frontend-notices.txt)和[时间处理依赖](apps/desktop/public/third-party/time-dependencies.txt)；这些声明对应列出的第三方材料，完整依赖许可清单仍待补齐。

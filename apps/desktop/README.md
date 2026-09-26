@@ -1,6 +1,6 @@
 # SideTask 桌面客户端（0.1.0 内部试用版）
 
-本文面向开发者。安装和日常操作请读[完整使用说明书](../../docs/product/USER_GUIDE.md)，当前包下载见[项目首页](../../README.md#下载与安装)。
+本文面向开发者。安装和日常操作请读[完整使用说明书](../../docs/product/USER_GUIDE.md)，当前包下载见[项目首页](../../README.md#下载与安装)，问题反馈与 PR 流程见[贡献指南](../../CONTRIBUTING.md)。
 
 Tauri 2 + React / TypeScript + Rust + SQLite。任务、今日计划和设置共用一个 Rust 服务；控制台、边缘小窗和内部把手由平台层协调。当前已实现回收站与单项恢复、备份导入及双窗口草稿保护；已执行检查与未覆盖范围见[验证状态](../../docs/VALIDATION.md)。
 
@@ -16,19 +16,45 @@ Tauri 2 + React / TypeScript + Rust + SQLite。任务、今日计划和设置共
 
 需要 Node.js 24、npm、Rust 和相应系统的 Tauri 构建前置条件。与 CI 对齐时使用 Node.js 24.14.1 和 Rust 1.98.1；版本以[工作流](../../.github/workflows/desktop-checks.yml)为准。
 
-在本目录运行：
+以下命令都在 `apps/desktop` 目录执行。首次安装依赖：
 
 ```sh
 npm ci
-npm run dev          # 浏览器 UI 预览，http://127.0.0.1:1420
-npm test             # TypeScript 业务测试
-npm run test:tools       # 原生冒烟工具清理故障契约
-node --check scripts/windows-native-smoke.mjs
-npm run test:ui      # Playwright；首次运行需 npx playwright install chromium
-npm run build        # 类型检查及前端生产构建
-cargo test --locked --manifest-path src-tauri/Cargo.toml
-npm run tauri -- dev # 原生开发（会启动 Vite，不要同时占用 1420）
 ```
+
+### 浏览器预览
+
+```sh
+npm run dev
+```
+
+打开 <http://127.0.0.1:1420>。该命令会持续运行，按 Ctrl+C 停止。预览使用独立合成数据，不读取原生 SQLite，也不能验证系统窗口行为。
+
+### 原生开发
+
+```sh
+npm run tauri -- dev
+```
+
+Tauri 会自行启动 Vite；先停止其他占用 1420 端口的开发服务。默认配置使用正式 identifier `com.changjin.sidetask`，若本机已使用 SideTask，会访问同一应用数据目录。用于合成数据测试时，先用临时 Tauri 配置覆盖 `productName` / `identifier`，不要向个人库注入测试任务。Windows 隔离配置与构建的完整步骤见[原生冒烟说明](scripts/windows-native-smoke.md)。
+
+## 检查
+
+以下为一次性检查，可按[贡献指南](../../CONTRIBUTING.md#代码与验证约定)选择与修改相关的项目：
+
+```sh
+npm test
+npm run test:tools
+node --check scripts/windows-native-smoke.mjs
+npx playwright install chromium
+npm run test:ui
+npm run build
+cargo test --locked --manifest-path src-tauri/Cargo.toml
+```
+
+`npm test` 检查 TypeScript 业务规则，`test:tools` 检查冒烟工具的失败清理契约，`test:ui` 运行 Playwright 浏览器回归，`build` 执行类型检查及前端生产构建。Chromium 在首次运行或 Playwright 更新后安装；[Playwright 配置](playwright.config.ts)会在需要时启动 Vite，无需另开预览服务。完整覆盖说明见[测试入口](../../tests/README.md)，格式、Clippy 与审计见下方[数据与安全检查](#数据与安全检查)。
+
+## 打包与原生验证
 
 打包 Mac 应用：`npm run tauri -- build --bundles app`。Windows 在 Windows 构建环境运行 `npm run tauri -- build --bundles nsis`。构建成功与安装/升级验收分别记录。
 
@@ -51,7 +77,7 @@ $smokeAppProcessId = [int](Read-Host '输入该隔离进程的 PID')
 
 采样校验EXE与PID并记录进程树、CPU和内存；短样本不能证明持续性能或泄漏已解决。原始测量和手工记录在本地留存；混合 DPI 多屏、完整物理输入、睡眠、虚拟桌面、跨版本升级及长期性能仍有未验证范围，详见[验证状态](../../docs/VALIDATION.md)。
 
-浏览器预览使用独立的合成数据存储 `sidetask-browser-preview-v1`，不读取本机 SQLite。原生数据位于系统应用数据目录 `com.changjin.sidetask/sidetask.sqlite3`，不在仓库内。首次原生启动为空库。浏览器演示才使用示例任务；旧数据库升级不会重置任务。
+浏览器预览使用独立的合成数据存储 `sidetask-browser-preview-v1`，不读取本机 SQLite。原生数据位于系统应用数据目录 `com.changjin.sidetask/sidetask.sqlite3`，不在仓库内；隔离配置使用其对应 identifier 的数据目录。该目录首次使用时创建空库，已有数据库则按启动检查与迁移流程处理。浏览器演示才使用示例任务；旧数据库升级不会重置任务。
 
 ## 目录职责
 

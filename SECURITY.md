@@ -15,7 +15,9 @@
 
 在apps/desktop执行`npm audit`；安装cargo-audit后执行`cargo audit --file src-tauri/Cargo.lock`。CI同样检查锁定依赖。运行结果和供应链警告见[原生安全复查](docs/research/NATIVE_SECURITY_REVIEW.md)及[阶段记录](docs/research/RELEASE_HARDENING.md)。扫描无已知漏洞不证明不存在未知漏洞。
 
-若发现数据泄漏、权限绕过或数据破坏问题，请向项目维护者私下提供版本/系统/复现步骤及脱敏证据，不在公开问题中附个人数据库、备份、凭据或其他隐私。当前仓库与协作方式见README。
+若发现数据泄漏、权限绕过或数据破坏问题，请向项目维护者私下提供版本、系统、复现步骤及脱敏证据。先查看仓库的 [Security 页面](https://github.com/zhouchji-ops/Sidetask/security)：如果提供 “Report a vulnerability” 入口，可用它提交私密报告；如果没有该入口，可在 [Issue](https://github.com/zhouchji-ops/Sidetask/issues/new) 中仅请求私密联系渠道，不公开漏洞细节、利用步骤或敏感附件。
+
+普通使用问题按[贡献指南](CONTRIBUTING.md#报告问题或提出建议)反馈。任何公开问题都不要附个人数据库、备份、凭据或其他隐私。
 
 ## 尚未完成的发布门槛
 
