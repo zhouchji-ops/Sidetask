@@ -20,4 +20,4 @@ Windows 分支 `d05684b` 和首轮整合曾保留原生失焦收起与输入保�
 
 ## 数据兼容
 
-旧程序Settings拒绝未知字段；因此schema5建立明确降级边界。旧schema1–4先创建完整一致性before-schema-5备份，再事务升级marker；不重编码原snapshot/placement。只读内存补click，后续正常成功写入使用新格式。便携任务备份仍v2并保留本机设置，完整SQLite恢复则恢复备份中的偏好。当前验证状态与实际平台边界见[验证摘要](../VALIDATION.md)。
+旧程序Settings拒绝未知字段；因此schema5建立明确降级边界。旧schema1–4先创建完整一致性before-schema-5备份，再事务升级marker；不重编码原snapshot/placement。只读内存补click，后续正常成功写入使用新格式。便携任务备份仍v2并保留本机设置，完整SQLite恢复则恢复备份中的偏好。当前验证状态与实际平台边界见内部验证记录（本地保留，不随公开仓库分发）。

@@ -1,6 +1,6 @@
 # Windows 原生冒烟工具
 
-该工具驱动专用 release EXE 中真实的 Tauri / WebView2 / Rust / SQLite；不启动 Vite，不替换 IPC，不造浏览器演示库。工具实现不代表原生用例已通过，以本次 `report.json` 和 `events.jsonl` 为准。项目当前覆盖范围见[验证状态](../../../docs/VALIDATION.md)；其中的摘要不替代每次运行生成的原始报告。
+该工具驱动专用 release EXE 中真实的 Tauri / WebView2 / Rust / SQLite；不启动 Vite，不替换 IPC，不造浏览器演示库。工具实现不代表原生用例已通过，以本次 `report.json` 和 `events.jsonl` 为准。每次运行的实际覆盖范围与结果须依据原始报告确认。
 
 ## 准备
 

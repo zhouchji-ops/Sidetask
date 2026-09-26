@@ -1,6 +1,6 @@
 # Windows 真实 App 自动化冒烟：可行性与首轮边界
 
-2026-09-25，只读调研。用户随后明确Windows专项由Windows开发机接手，本文保留为 Windows 原生冒烟方案的调研参考，当时的 Mac 调研任务未继续实施。**可在现有 `windows-latest` 上尝试真实 Tauri / WebView2 / Rust / SQLite 链路；尚未安装工具、修改 CI 或启动 SideTask 验证。** 第一阶段仅验证控制台 CRUD、明确退出和重新启动。双窗口附着、原生几何及完整 B12 验收不能提前标记完成，最新执行状态统一见 [验证摘要](../VALIDATION.md)。
+2026-09-25，只读调研。用户随后明确Windows专项由Windows开发机接手，本文保留为 Windows 原生冒烟方案的调研参考，当时的 Mac 调研任务未继续实施。**可在现有 `windows-latest` 上尝试真实 Tauri / WebView2 / Rust / SQLite 链路；尚未安装工具、修改 CI 或启动 SideTask 验证。** 第一阶段仅验证控制台 CRUD、明确退出和重新启动。双窗口附着、原生几何及完整 B12 验收不能提前标记完成，最新执行状态统一见内部验证记录（本地保留，不随公开仓库分发）。
 
 ## 已核对的本项目条件
 

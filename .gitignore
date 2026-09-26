@@ -43,3 +43,15 @@ SideTask-macos.zip
 /docs/delivery/
 /tests/manual/
 /docs/product/SELLING_POINTS.md
+
+# Documentation retained locally, excluded from the public repository
+/docs/product/PROMO_COPY.md
+/docs/product/INNOVATIONS.md
+/design/DESIGN_SYSTEM.md
+/docs/research/ALTERNATIVES.md
+/docs/VALIDATION.md
+/tests/README.md
+/CONTRIBUTING.md
+/docs/engineering/DEVELOPMENT.md
+/CHANGELOG.md
+/docs/README.md

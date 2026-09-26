@@ -27,7 +27,7 @@ Impeccable 并非仅一个 Markdown 指令文件：其启动器首次运行下�
 
 两个本机 skill 目录均有 `INSTALL_RECEIPT.json`，记录仓库、commit、源目录、安装时间、SKILL.md 的 SHA-256 和许可，便于以后核对版本。Impeccable 引擎探测返回 `impeccable-engine 0.1.5`。
 
-已读取两份实际 SKILL.md，并针对任务工具读取 Impeccable 的 `distill`、`operate` 与 `craft-floor`。项目已有 [PRD](../product/PRD.md)、[UX](../product/UX.md) 和 [设计系统](../../design/DESIGN_SYSTEM.md) 提供真实上下文，沿用这些文件，不创建内容重复的 PRODUCT.md / DESIGN.md。技能保存在本机的全局 skill 目录，不是 SideTask 的运行时依赖，也不随 App 打包。
+已读取两份实际 SKILL.md，并针对任务工具读取 Impeccable 的 `distill`、`operate` 与 `craft-floor`。当时已有的 [PRD](../product/PRD.md)、[UX](../product/UX.md) 和设计系统（现仅本地保留）提供真实上下文，本轮沿用这些文件，不创建内容重复的 PRODUCT.md / DESIGN.md。技能保存在本机的全局 skill 目录，不是 SideTask 的运行时依赖，也不随 App 打包。
 
 ## 本轮设计计划与取舍
 
@@ -41,6 +41,6 @@ Impeccable 并非仅一个 Markdown 指令文件：其启动器首次运行下�
 
 选择依据是任务查阅路径和重复信息：同一条任务要比容器显眼，完成数无需占据独立图形区域，边缘小窗的垂直空间应留给任务。色盘延续用户选择，只在语义明确的操作、选中和状态处强调。本轮因此包含信息与结构的调整，不能仅以换成另一套流行配色作为交付。
 
-上述为本轮设计与实现依据；当前测试、构建和原生验证范围见[验证摘要](../VALIDATION.md)，原始截图与执行证据见内部验收记录（本地保留，未随公开仓库分发）；本调研记录不代替验证。
+上述为本轮设计与实现依据；当前测试、构建、原生验证范围及原始截图与执行证据见内部验收记录（本地保留，未随公开仓库分发）；本调研记录不代替验证。
 
 技能只能辅助设计判断；Tauri原生窗口焦点、多屏边界、Windows兼容和真实学习场景可用性仍需各自验证。

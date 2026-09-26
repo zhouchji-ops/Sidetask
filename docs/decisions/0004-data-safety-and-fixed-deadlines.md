@@ -17,4 +17,4 @@
 
 每次写入仍校验完整快照并检查可导出容量；这是早期可靠性选择，实际合成规模性能另记录。备份上限10MiB/10,000任务/100,000计划；超过时拒绝新提交，已有库不会截断。当前仍无周期备份轮转；损坏启动的图形恢复向导、真实断电演练和Windows验收未完成。
 
-实现与参考：[存储](../research/STORAGE_HARDENING.md)、[时间](../research/TIME_SEMANTICS.md)、[原生安全](../research/NATIVE_SECURITY_REVIEW.md)、[恢复操作](../engineering/DATA_RECOVERY.md)。当前完成范围见[验证摘要](../VALIDATION.md)；原始执行证据见内部验收记录（本地保留，未随公开仓库分发）。
+实现与参考：[存储](../research/STORAGE_HARDENING.md)、[时间](../research/TIME_SEMANTICS.md)、[原生安全](../research/NATIVE_SECURITY_REVIEW.md)、[恢复操作](../engineering/DATA_RECOVERY.md)。当前完成范围与原始执行证据见内部验收记录（本地保留，未随公开仓库分发）。

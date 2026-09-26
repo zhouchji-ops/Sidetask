@@ -1,6 +1,6 @@
 # 数据模型与业务一致性
 
-状态：当前实现继续使用 SQLite 的 app_state JSON snapshot。schema 3 加入 Task.deletedAt；schema 4 为 placement.console 及字段合并建立兼容边界；当前 schema 5 为 Settings.revealMode 建立新边界，任务协议保持不变。类型见 `apps/desktop/src/lib/types.ts` 与 Rust 平台几何类型，实际协议见本文末尾各扩展小节。下方独立表、DailyPlanRevision、设备设置 revision 及 dataset_epoch/change_seq 是目标模型，**没有因 schema 3 / 4 / 5 升级而完成规范化**。控制台与边缘小窗共享 Rust 服务和数据库。架构取舍见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md) 与 [ADR-0006](../decisions/0006-console-window-preferences.md)，实际完成度、测试数字与双平台验收见 [验证摘要](../VALIDATION.md)。
+状态：当前实现继续使用 SQLite 的 app_state JSON snapshot。schema 3 加入 Task.deletedAt；schema 4 为 placement.console 及字段合并建立兼容边界；当前 schema 5 为 Settings.revealMode 建立新边界，任务协议保持不变。类型见 `apps/desktop/src/lib/types.ts` 与 Rust 平台几何类型，实际协议见本文末尾各扩展小节。下方独立表、DailyPlanRevision、设备设置 revision 及 dataset_epoch/change_seq 是目标模型，**没有因 schema 3 / 4 / 5 升级而完成规范化**。控制台与边缘小窗共享 Rust 服务和数据库。架构取舍见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md) 与 [ADR-0006](../decisions/0006-console-window-preferences.md)，实际完成度、测试数字与双平台验收见内部验证记录（本地保留，不随公开仓库分发）。
 
 首版仅有独立的大任务。模型中不设 `parent_id`、子任务表、任务依赖、步骤清单、百分比进度或父子完成聚合；备注是普通文本，不支持可独立勾选的步骤。一次勾选表示整项任务完成，加入今日也不会创建一天的小任务或进度记录。见 [ADR-0002](../decisions/0002-console-and-edge-panel.md)。
 
@@ -174,7 +174,7 @@ reorderToday 的精确集合只包括当天未删除、未完成任务；已删�
 
 便携 JSON 的 schemaVersion 与 SQLite 版本独立：新导出 v2，导入接受 v1/v2，均包含完整 tasks/plans；v1 缺失或 null 的 deletedAt 作为未删除，v1 携带非空删除状态则拒绝。预览提供 taskCount、trashedTaskCount、planCount 和 exportedAt。整份恢复先备份当前库，再替换任务及回收站、保留设备设置，并将全局及所有导入任务 revision 提高到已见值以上；当前没有 dataset_epoch 字段。旧备份按备份时的完整集合恢复，不与现有回收站合并。回收站仍计入现有容量限制，元数据增长超限时保持原已提交状态并提示失败。
 
-本节任务规则在 schema 5 继续有效，不将自动化测试、文档同步或 Mac 证据写成双平台验收完成。来源与分阶段检查见 [TASK_LIFECYCLE](../research/TASK_LIFECYCLE.md)，当前验证范围见[验证摘要](../VALIDATION.md)，原始执行证据见内部验收记录（本地保留，未随公开仓库分发）。
+本节任务规则在 schema 5 继续有效，不将自动化测试、文档同步或 Mac 证据写成双平台验收完成。来源与分阶段检查见 [TASK_LIFECYCLE](../research/TASK_LIFECYCLE.md)，当前验证范围与原始执行证据见内部验收记录（本地保留，未随公开仓库分发）。
 
 ## 展开模式偏好（2026-09-25）
 
@@ -212,7 +212,7 @@ Mac 先把窗口和各工作区按各自来源 scale 转到统一 AppKit 逻辑�
 
 位置候选/恢复错误/忽略状态只在 ConsoleRuntime 内，不加入任务草稿或 portable JSON。恢复失败阻止自动采样覆盖旧保存值；显式重试保存当前位置，丢弃先采样当前值后取消这次保存。便携任务格式继续为 v2，读取 v1/v2，任务恢复保留 Settings 与全部 placement；完整 SQLite 恢复包含备份时设备配置。启动候选扩展为 before-schema-2 / before-schema-3 / before-schema-4 / safety-backup。
 
-实现决策及固定许可参考见 [ADR-0006](../decisions/0006-console-window-preferences.md)。本阶段Mac已开始单屏原生复验，Windows由另一开发机负责；当前平台验证范围见[验证摘要](../VALIDATION.md)。合成数据、几何与状态测试不能替代多屏窗口或断电恢复证据。
+实现决策及固定许可参考见 [ADR-0006](../decisions/0006-console-window-preferences.md)。本阶段Mac已开始单屏原生复验，Windows由另一开发机负责；当前平台验证范围见内部验证记录（本地保留，不随公开仓库分发）。合成数据、几何与状态测试不能替代多屏窗口或断电恢复证据。
 
 ## 首次使用说明状态
 

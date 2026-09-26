@@ -1,6 +1,6 @@
 # 设计资料
 
-放线框、可点击原型、图标源文件、样式规范与交互录像。文字线框位于 [UX](../docs/product/UX.md)，可交互原型源码位于 apps/desktop。视觉规范见 [设计系统](DESIGN_SYSTEM.md)，参考与取舍见 [UI 参考](../docs/research/UI_REFERENCES.md)。
+放线框、可点击原型、图标源文件、样式规范与交互录像。文字线框位于 [UX](../docs/product/UX.md)，可交互原型源码位于 apps/desktop。样式实现见 [样式源码](../apps/desktop/src/styles/)，参考与取舍见 [UI 参考](../docs/research/UI_REFERENCES.md)。
 
 原型用合成任务；导出图与源文件一同标注版本。浏览器原型只验证布局和操作理解，不能证明真实桌面窗口的 hover、置顶、多屏与焦点行为。
 
