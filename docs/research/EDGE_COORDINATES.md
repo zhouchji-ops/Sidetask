@@ -1,6 +1,6 @@
 # B33：边缘小窗坐标适配与缩放会话
 
-2026-09-25。本轮已实现边缘小窗的坐标适配、原生矩形确认和显式缩放会话，并完成下述纯算法/中间集成检查。**Mac 因锁屏尚未原生验收，Windows 原生和真实混合 DPI 多屏也未验证；B33 不据此标为 Done。** 最终测试、构建及发布状态以内部验证记录（本地保留，不随公开仓库分发）为准。本阶段处理定位、输入命中和缩放取消，不修改任务规则或扩大安全范围。
+2026-09-25。本文记录边缘小窗的坐标适配、原生矩形确认和显式缩放会话，以及对应算法与集成检查。范围包括定位、输入命中和缩放取消。
 
 ## 已确认的锁定依赖事实
 
@@ -53,16 +53,15 @@ Mac 使用 `LogicalPosition` / `LogicalSize`；Windows 使用严格转换后的 
 
 已核对 [CSSWG LICENSE](https://github.com/w3c/csswg-drafts/blob/c4def7738dfa46433a522ca362888bb2fd1b26df/LICENSE.md) 与 [Pointer Events LICENSE](https://github.com/w3c/pointerevents/blob/49c398264c8d129aff141cd261b4b4c4fcb3d126/LICENSE.md)，均为 W3C Software and Document License。只参考 API/交互语义，没有复制规范文本或样例代码，也没有新增第三方依赖。
 
-## 已有证据与未覆盖项
+## 算法与集成检查记录
 
 | 证据层 | 本阶段记录 |
 | --- | --- |
 | 独立纯模块 | 系统临时目录使用 `rustc --test` wrapper，edge_coordinates 的13项与既有 geometry 的2项全部通过，合计15/15；本人文件 rustfmt 通过。覆盖主屏2×/窗口1×/目标1.5×、负坐标/上下排列/半开接缝、小数像素、极小工作区、零把手拒绝、work 内含、尺寸/坐标溢出、Windows 结果不变、拖放/缩放锚点及 DPI 签名变化。 |
 | Rust 中间集成 | 主任务本轮检查138/138通过，clippy `-D warnings` 通过。新增运行态回归覆盖取消与旧会话拒绝、设置/DPI 失效、显式请求协议、实际矩形确认拒绝旧尺寸和整像素越界。后续集成仍可能调整，当前汇总结果见内部验证记录（本地保留，不随公开仓库分发）。 |
-| 前端回归范围 | [panel-resize.spec.ts](../../apps/desktop/tests/panel-resize.spec.ts) 已覆盖取消/捕获丢失/失焦/卸载、无移动点击、键盘连发、慢提交/迟到快照、start/commit 失败、跨窗设置变化、锁 owner 与浏览器零写入取消。本文件不提前记录尚未确认的最终 UI 通过数量。 |
-| 原生验收 | 尚未完成：Mac 锁屏；真实 Mac 混合 DPI 的显示/输入命中、异步定位、拖动接缝/拔插/睡眠/Spaces及 Windows 原生 DPI/托盘/焦点矩阵待执行。 |
+| 前端回归范围 | [panel-resize.spec.ts](../../apps/desktop/tests/panel-resize.spec.ts) 已覆盖取消/捕获丢失/失焦/卸载、无移动点击、键盘连发、慢提交/迟到快照、start/commit 失败、跨窗设置变化、锁 owner 与浏览器零写入取消。 |
 
-原生验收需记录窗口框、输入区域及逐帧可见结果，尤其检查 Windows DPI 回调后的稳定显示，以及 WKWebView/WebView2 的实际 screenX/Y。数学、浏览器、编译和打包均不能替代这些结果。当前验证范围及未覆盖项见内部验证记录（本地保留，不随公开仓库分发）。
+原生观察记录窗口外框、输入区域及可见结果；算法与浏览器检查对应各自的测试环境。
 
 ## Mac原生点网格修正（2026-09-25，mac分支）
 

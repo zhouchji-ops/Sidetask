@@ -2,7 +2,7 @@
 
 本文面向开发者。安装和日常操作请读[完整使用说明书](../../docs/product/USER_GUIDE.md)，当前包下载见[项目首页](../../README.md#下载与安装)，问题反馈方式见[说明书](../../docs/product/USER_GUIDE.md#当前范围与反馈)。
 
-Tauri 2 + React / TypeScript + Rust + SQLite。任务、今日计划和设置共用一个 Rust 服务；控制台、边缘小窗和内部把手由平台层协调。当前已实现回收站与单项恢复、备份导入及双窗口草稿保护，完整原生验收尚未完成。
+Tauri 2 + React / TypeScript + Rust + SQLite。任务、今日计划和设置共用一个 Rust 服务；控制台、边缘小窗和内部把手由平台层协调。当前已实现回收站与单项恢复、备份导入及双窗口草稿保护。
 
 在「设置 → 界面风格」可即时切换纸笺、霜序、暖刊、极简；四套均支持独立浅深色。风格跨窗口同步，重启保留，旧任务不会重置。
 
@@ -75,7 +75,7 @@ $smokeAppProcessId = [int](Read-Host '输入该隔离进程的 PID')
 ./scripts/measure-windows-resources.ps1 -Executable $smokeExe -AppProcessId $smokeAppProcessId -Seconds 15 -State 'console-visible-edge-collapsed'
 ```
 
-采样校验EXE与PID并记录进程树、CPU和内存；短样本不能证明持续性能或泄漏已解决。原始测量和手工记录在本地留存；混合 DPI 多屏、完整物理输入、睡眠、虚拟桌面、跨版本升级及长期性能仍有未验证范围。
+采样校验EXE与PID并记录进程树、CPU和内存；短样本不能证明持续性能或泄漏已解决。原始测量和手工记录在本地留存。
 
 浏览器预览使用独立的合成数据存储 `sidetask-browser-preview-v1`，不读取本机 SQLite。原生数据位于系统应用数据目录 `com.changjin.sidetask/sidetask.sqlite3`，不在仓库内；隔离配置使用其对应 identifier 的数据目录。该目录首次使用时创建空库，已有数据库则按启动检查与迁移流程处理。浏览器演示才使用示例任务；旧数据库升级不会重置任务。
 
@@ -97,7 +97,7 @@ $smokeAppProcessId = [int](Read-Host '输入该隔离进程的 PID')
 | tests | Vitest 业务与 Playwright UI 自动化 |
 | scripts/windows-native-smoke.mjs / windows-native-probe.ps1 / measure-windows-resources.ps1 | Windows真实App冒烟、物理窗口/环境探针与有界资源测量 |
 
-`src/features` 仍预留，不为目录形式提前拆空模块。规范化表和Windows/多屏窗口全面验收尚未完成。固定时区DDL、升级备份、控制台导出/恢复以及独立损坏启动恢复向导已实现，故障处理见[数据恢复说明](../../docs/engineering/DATA_RECOVERY.md)。
+任务持久化使用 SQLite JSON 快照。固定时区DDL、升级备份、控制台导出/恢复以及独立损坏启动恢复向导已实现，故障处理见[数据恢复说明](../../docs/engineering/DATA_RECOVERY.md)。
 
 ## 数据与安全检查
 

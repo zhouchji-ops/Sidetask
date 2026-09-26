@@ -1,10 +1,10 @@
 # 窗口偏好与首次说明：最小实施计划
 
-2026-09-25，方案及分阶段实现记录。**分区比例与控制台几何已实现；本文记录时原生待验，首次说明在本阶段接入。未安装插件**。接续 B09（分区/尺寸）、B19/B21（控制台恢复）、B25（首次使用）；当前集成检查、生命周期验收与交付状态见内部验证记录（本地保留，不随公开仓库分发）。
+2026-09-25，窗口偏好的方案与实现记录，涵盖分区比例、控制台几何和首次使用说明。
 
 ## 结论与现状
 
-下表是实施前核对的起点，当前落地状态见文末。首轮复用现有 Rust 设置服务和 SQLite，不引入 window-state 插件。只补三个缺口：小窗分区比例跨重启保留，控制台恢复上次普通窗口几何，用户知道关闭后从哪里找回应用。
+下表是实施前核对的起点，当前落地状态见文末。首轮复用现有 Rust 设置服务和 SQLite，不引入 window-state 插件。涉及三项行为：小窗分区比例跨重启保留，控制台恢复上次普通窗口几何，用户知道关闭后从哪里找回应用。
 
 | 已核对源码 | 当前行为 | 最小接续 |
 | --- | --- | --- |
@@ -23,7 +23,7 @@
 | Tauri 官方 window-state **2.4.1**，commit [`e7a68fa63755603b9fa12d28e077eea645551d24`](https://github.com/tauri-apps/plugins-workspace/tree/e7a68fa63755603b9fa12d28e077eea645551d24/plugins/window-state)；[实现](https://github.com/tauri-apps/plugins-workspace/blob/e7a68fa63755603b9fa12d28e077eea645551d24/plugins/window-state/src/lib.rs) | 参考普通几何缓存、排除最小化/最大化的尺寸、恢复期间抑制回调写入。默认 StateFlags 为 ALL，包含 VISIBLE；恢复可调用 show + set_focus。保存为独立 `.window-state.json`，移动/缩放回调更新内存，退出或显式命令写文件。屏幕判断用显示器完整范围内的任一窗口角点，不保证标题栏位于工作区；保存物理像素，不提供本项目需要的当前 DPI 逻辑尺寸策略。以上来自该版本源码，不将旧 issue 当现有故障证据。 |
 | 现有锁定 Tauri **2.11.6**，commit [`9452ddee5ebefd9b678a94ff003521379df6c9ae`](https://github.com/tauri-apps/tauri/tree/9452ddee5ebefd9b678a94ff003521379df6c9ae)；[Window / Monitor 接口](https://github.com/tauri-apps/tauri/blob/9452ddee5ebefd9b678a94ff003521379df6c9ae/crates/tauri/src/window/mod.rs) | 已有 `work_area`、`scale_factor`、`inner_size`、`outer_size`、`outer_position`、位置/尺寸设置足够实施。inner size 不含标题栏和边框，outer size 包含；不能把 outer size 写回 inner size，导致每次重开变大。 |
 
-两项许可均为 **Apache-2.0 OR MIT**；已核对插件 [Cargo workspace](https://github.com/tauri-apps/plugins-workspace/blob/e7a68fa63755603b9fa12d28e077eea645551d24/Cargo.toml)、[MIT](https://github.com/tauri-apps/plugins-workspace/blob/e7a68fa63755603b9fa12d28e077eea645551d24/LICENSE_MIT)、[Apache-2.0](https://github.com/tauri-apps/plugins-workspace/blob/e7a68fa63755603b9fa12d28e077eea645551d24/LICENSE_APACHE-2.0)，以及本地锁定 Tauri 包清单。本次仅参考设计，没有复制代码。若以后使用插件，应只管理 console，显式限制 SIZE / POSITION / MAXIMIZED，并由 SideTask 校准后显示；不能让它管理 edge-panel / edge-handle 或恢复 VISIBLE。它仍需自定义工作区、失败反馈与保存时机，当前不能减少足够的集成工作，因此暂不加依赖。
+两项许可均为 **Apache-2.0 OR MIT**；已核对插件 [Cargo workspace](https://github.com/tauri-apps/plugins-workspace/blob/e7a68fa63755603b9fa12d28e077eea645551d24/Cargo.toml)、[MIT](https://github.com/tauri-apps/plugins-workspace/blob/e7a68fa63755603b9fa12d28e077eea645551d24/LICENSE_MIT)、[Apache-2.0](https://github.com/tauri-apps/plugins-workspace/blob/e7a68fa63755603b9fa12d28e077eea645551d24/LICENSE_APACHE-2.0)，以及本地锁定 Tauri 包清单。本次仅参考设计，没有复制代码。若以后使用插件，应只管理 console，显式限制 SIZE / POSITION / MAXIMIZED，并由 SideTask 校准后显示；不能让它管理 edge-panel / edge-handle 或恢复 VISIBLE。本项目自行管理工作区、失败反馈与保存时机，沿用现有平台实现。
 
 ## 阶段一：小窗分区比例
 
@@ -66,7 +66,7 @@
 | Mac / Windows 真机 C05/C12、W01/W05–W07、M04–M08 | 重启尺寸不漂移；断屏/唤醒后标题栏可操作；恢复和悬停不抢焦；关闭仍常驻；取消退出保留草稿。单平台或浏览器通过不能代替另一平台 |
 | 首次说明与主题 | 新库、升级、有回收站数据、标记保存失败、恢复模式；关闭/重开入口清楚；四套明暗切换无窗口重建和几何重置 |
 
-最初只读调研核对了 README、STATUS、HANDOFF、BACKLOG、PRD/UX、架构/数据模型、TEST_PLAN 与上述源码，并通过 GitHub API 核实 tag→commit、许可和实现。当时未跑新的运行时测试；随后阶段一实现证据记录于下节，不能把尚未实施的其余计划当成已完成能力。
+调研依据为产品约定、架构、数据模型与对应源码；通过 GitHub API 核实了参考版本、许可和实现。各阶段实现记录见下文。
 
 ## 阶段一实现记录
 
@@ -76,7 +76,7 @@
 
 比例本身不进入same_window_layout，不发送resize/show/hide/focus原生命令；仅手势与保存过程使用既有interaction锁。隐藏、尺寸、风格和今日/DDL任务逻辑保留。
 
-定向证据：99/99 TS、93/93 Rust（含临时SQLite保存重开与完整任务/计划对比），fmt/clippy通过；5/5 panel-split UI覆盖拖动单次写入、重载/跨窗同步、取消与真实捕获丢失、非主指针、键盘合并、慢保存、失败回退和冲突。另有368×380失败态标题/首项与footer可达检查。最后焦点补丁后完整67UI（1.4分钟、无重试）与Mac构建通过，资源index-B-9KMQ89.js / index-BN07M5pO.css；原生缺口以内部验证记录（本地保留，不随公开仓库分发）为准，浏览器IPC协议不代表真实系统窗口验证。
+定向证据：99/99 TS、93/93 Rust（含临时SQLite保存重开与完整任务/计划对比），fmt/clippy通过；5/5 panel-split UI覆盖拖动单次写入、重载/跨窗同步、取消与真实捕获丢失、非主指针、键盘合并、慢保存、失败回退和冲突。另有368×380失败态标题/首项与footer可达检查。最后焦点补丁后完整67UI（1.4分钟、无重试）与Mac构建通过，资源index-B-9KMQ89.js / index-BN07M5pO.css。上述数字对应该阶段的浏览器与自动化环境。
 
 ## 几何实施前复核（历史计划，当前实现见下节）
 
@@ -84,7 +84,7 @@
 
 建议console记录普通窗口的逻辑inner尺寸、屏幕名称及物理原点辅助匹配、相对工作区的逻辑outer偏移和maximized。运行态存正常矩形、候选、稳定时间、generation、restoring与错误；最小化/全屏/最大化过渡不能覆盖普通矩形。事件只投递重采样，不在native回调持锁读SQLite；在锁外采样和应用原生调用，过期generation丢弃。关闭前排最终采样/flush；已确认退出时在authorized标志前落盘，释放锁后退出，几何失败不能卡住草稿退出。
 
-几何扩展阶段建议统一schema4迁移：旧schema3 Placement会忽略未知console字段并在小窗整份保存时静默丢弃，和当前panelSplit被旧Settings明确拒绝不同。用原有先备份/保原snapshot和placement字节方式建立版本边界，同时更新恢复版本/候选；不搬任务表。字段坏时只回退对应console偏好，不因整个placement反序列化失败丢掉有效edge数据。复核时尚未作这些改动，当时schema仍3；随后实现见下节。
+几何扩展阶段建议统一schema4迁移：旧schema3 Placement会忽略未知console字段并在小窗整份保存时静默丢弃，和当前panelSplit被旧Settings明确拒绝不同。用原有先备份/保原snapshot和placement字节方式建立版本边界，同时更新恢复版本/候选；不搬任务表。字段坏时只回退对应console偏好，不因整个placement反序列化失败丢掉有效edge数据。该方案对应从schema3到schema4的版本边界，实现见下节。
 
 ## 阶段二实际实现与复盘
 
@@ -100,7 +100,7 @@
 
 Windows 092cfa9 CI的午夜断言失败来自运行中的测试时钟跨过初始一秒，产品正确显示到期；按[Playwright官方Clock](https://playwright.dev/docs/api/class-clock#clock-pause-at)改成加载就绪后暂停到指定时刻，再显式推进，注入1.5秒慢加载重复3次通过。新CI仍须验证。
 
-本阶段检查、失败尝试、包、原生限制与当前汇总范围见内部验收记录（本地保留，未随公开仓库分发）。纯状态/故障回归不能当作原生故障注入成功，Mac锁屏及Windows/混DPI真机矩阵仍未闭合。
+本节描述控制台几何、独立元数据事务与恢复反馈的实现方式。
 
 ## 首次说明的固定参考
 

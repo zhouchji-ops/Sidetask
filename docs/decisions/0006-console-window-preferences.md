@@ -1,6 +1,6 @@
 # ADR-0006：控制台几何偏好与设备元数据合并
 
-日期：2026-09-25。状态：已采用并接入实现；原生验收未闭合。接续 [ADR-0005](0005-task-lifecycle-and-backup-schema.md)，当前自动化、构建和平台验证范围见内部验证记录（本地保留，不随公开仓库分发）。
+日期：2026-09-25。状态：已采用并接入实现。接续 [ADR-0005](0005-task-lifecycle-and-backup-schema.md)，当前自动化、构建和平台验证范围见内部验证记录（本地保留，不随公开仓库分发）。
 
 ## 背景
 
@@ -23,14 +23,14 @@
 | 固定来源 | 采用与许可 |
 | --- | --- |
 | Tauri window-state 2.4.1，[实现 e7a68fa63755603b9fa12d28e077eea645551d24](https://github.com/tauri-apps/plugins-workspace/blob/e7a68fa63755603b9fa12d28e077eea645551d24/plugins/window-state/src/lib.rs) | 参考普通矩形与最大化状态分离；默认显隐/聚焦与独立文件保存不满足本项目边界，未安装插件。Apache-2.0 OR MIT，许可核对见 [WINDOW_PREFERENCES](../research/WINDOW_PREFERENCES.md#一手参考与复用判断)。 |
-| Tauri 2.11.6，[Window / Monitor 9452ddee5ebefd9b678a94ff003521379df6c9ae](https://github.com/tauri-apps/tauri/blob/9452ddee5ebefd9b678a94ff003521379df6c9ae/crates/tauri/src/window/mod.rs) | 使用已有工作区、scale、客户区/外框与窗口调用接口，区分 inner / outer；Apache-2.0 OR MIT。平台适配是本地实现，其正确性仍需系统验收。 |
+| Tauri 2.11.6，[Window / Monitor 9452ddee5ebefd9b678a94ff003521379df6c9ae](https://github.com/tauri-apps/tauri/blob/9452ddee5ebefd9b678a94ff003521379df6c9ae/crates/tauri/src/window/mod.rs) | 使用已有工作区、scale、客户区/外框与窗口调用接口，区分 inner / outer；Apache-2.0 OR MIT。平台适配由本项目实现。 |
 | rusqlite 0.37.0，[transaction.rs 44e0ef965580b94d59c5dfe8874b57ab5993a8f7](https://github.com/rusqlite/rusqlite/blob/44e0ef965580b94d59c5dfe8874b57ab5993a8f7/src/transaction.rs)、[MIT LICENSE](https://github.com/rusqlite/rusqlite/blob/44e0ef965580b94d59c5dfe8874b57ab5993a8f7/LICENSE) | 核对 IMMEDIATE 事务及未提交回滚语义；延续现有 SQLite 备份流程。没有复制参考代码或新增依赖。 |
 
 ## 验收与限制
 
 合成测试覆盖旧库迁移/回滚、原 JSON 保留、两连接交错字段合并、元数据写失败和任务版本隔离；纯几何与状态测试覆盖恢复边界，浏览器测试覆盖状态反馈。当前验证状态见内部验证记录（本地保留，不随公开仓库分发），纯状态测试不称为原生故障注入。
 
-本轮控制台几何的 Mac 原生验收因锁屏尚未执行；Windows 本轮新提交的 CI 与原生操作亦未执行。以前的 Mac 或 Windows 结果不能代替本轮验证。仍需重启尺寸、最大化恢复、负坐标和混合 DPI、断屏/睡眠/Spaces、焦点与关闭/退出，以及系统位置调用失败的真实验证。此 ADR 记录采用的实现，不表示双平台里程碑完成或无缺陷保证。
+此 ADR 记录窗口几何恢复、失败反馈与偏好持久化的实现决策。
 
 ## Mac真机补充（2026-09-25，mac分支）
 

@@ -46,6 +46,6 @@ if ($LASTEXITCODE -ne 0) { throw '原生冒烟失败，查看 evidence' }
 
 ## 报告与 CI
 
-所有断言输出 JSON 行，退出码 0 表示请求范围通过，1 表示失败；最终状态还明确区分 `session-only-pass`。证据在生成配置旁的 `evidence/`，合成数据在该配置的独立 Roaming 目录。`GITHUB_STEP_SUMMARY` 存在时写摘要，不依赖 artifact 上传额度。CI 应把本段放在构建后、artifact 上传前，并设置 job/step timeout；不要用 continue-on-error 将失败变成 Windows 验收通过。现有工作流运行本工具的语法检查、Windows PowerShell解析和清理故障契约测试（`npm run test:tools`），尚未执行真实WebDriver冒烟。日志或诊断写入失败仍会尝试进程清理，并保留`evidenceErrors`，最终返回失败。
+所有断言输出 JSON 行，退出码 0 表示请求范围通过，1 表示失败；最终状态还明确区分 `session-only-pass`。证据在生成配置旁的 `evidence/`，合成数据在该配置的独立 Roaming 目录。`GITHUB_STEP_SUMMARY` 存在时写摘要，不依赖 artifact 上传额度。CI 应把本段放在构建后、artifact 上传前，并设置 job/step timeout；不要用 continue-on-error 将失败变成 Windows 验收通过。现有工作流运行本工具的语法检查、Windows PowerShell解析和清理故障契约测试（`npm run test:tools`）；真实 WebDriver 冒烟按本文在 Windows 交互桌面中运行。日志或诊断写入失败仍会尝试进程清理，并保留`evidenceErrors`，最终返回失败。
 
 排查 `DevToolsActivePort` 时先保留日志与完整版本，不自动反复启动，不把页面切换到 mock。新的 attach 方案应作为另一次有界实验单独记录。

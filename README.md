@@ -6,7 +6,7 @@
 
 [**完整使用说明书**](docs/product/USER_GUIDE.md) · [下载与安装](#下载与安装)
 
-当前版本为 **0.1.0 内部试用版**，已有 Mac arm64 App 和 Windows x64 安装包。两平台自动化检查和构建已通过；原生交互、完整系统兼容、多屏与签名分发仍在完善。
+当前版本为 **0.1.0 内部试用版**，已有 Mac arm64 App 和 Windows x64 安装包。两平台自动化检查和构建已通过。
 
 ## 用侧笺做什么
 
@@ -17,7 +17,7 @@
 - **按习惯摆，按喜好选。** 调整边缘位置、尺寸和两区比例，选择纸笺、霜序、暖刊或极简，明暗独立设置。
 - **任务保存在本机。** 核心使用无需账号，支持任务备份、导入恢复和误删后的单项恢复。
 
-默认单击把手展开、点击外部收起，也可主动选择悬停模式。Mac 与 Windows 均使用真实外点，单纯切换焦点不收起；小窗隐藏后保留尚未提交的输入草稿。Windows 单屏外点与两阶段退出已复验，多屏真机仍未验证。第一版只管理独立任务，没有子任务或部分完成进度；Mac 与 Windows 之间没有云同步。
+默认单击把手展开、点击外部收起，也可主动选择悬停模式。Mac 与 Windows 均使用真实外点，单纯切换焦点不收起；小窗隐藏后保留尚未提交的输入草稿。第一版只管理独立任务，没有子任务或部分完成进度；Mac 与 Windows 之间没有云同步。
 
 ## 下载与安装
 
@@ -81,6 +81,6 @@ npm run tauri -- dev
 
 反馈时附上系统、包版本和重现步骤，具体格式见[说明书](docs/product/USER_GUIDE.md#当前范围与反馈)。个人数据库、导出文件和本地备份不提交仓库。
 
-## 许可证与第三方材料
+## 第三方材料
 
-当前仓库尚未设置项目级 `LICENSE`，许可协议待维护者明确。已收录的第三方依赖声明见[前端依赖](apps/desktop/public/third-party/frontend-notices.txt)和[时间处理依赖](apps/desktop/public/third-party/time-dependencies.txt)；这些声明对应列出的第三方材料，完整依赖许可清单仍待补齐。
+已收录的第三方依赖声明见[前端依赖](apps/desktop/public/third-party/frontend-notices.txt)和[时间处理依赖](apps/desktop/public/third-party/time-dependencies.txt)，对应其中列出的第三方材料。

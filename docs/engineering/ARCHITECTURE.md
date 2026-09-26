@@ -1,17 +1,10 @@
 # 技术架构与实现边界
 
-状态：架构契约与当前实现说明。采用 Tauri 2 + React/TypeScript + Rust + SQLite，决策见 [ADR-0003](../decisions/0003-prototype-implementation.md)。当前存储为 SQLite 中的 JSON 快照；schema 3 加入任务回收站，schema 4 增加控制台设备偏好的兼容边界，当前 schema 5 增加展开模式兼容边界，仍未完成规范化表设计。按窗口 IPC、固定 DDL、备份与退出的设计见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md)，控制台位置见 [ADR-0006](../decisions/0006-console-window-preferences.md)，生命周期细节见 [数据模型](DATA_MODEL.md)。具体完成状态、验证范围及平台差距见内部验证记录（本地保留，不随公开仓库分发）；本文契约不能视为全部验收通过。第一版同时支持两平台、只管理独立大任务、同时提供控制台和边缘小窗，已由用户明确。早期选型记录见 [ADR-0001](../decisions/0001-platform-and-reuse.md)；窗口职责和任务范围见 [ADR-0002](../decisions/0002-console-and-edge-panel.md)。
+状态：架构契约与当前实现说明。采用 Tauri 2 + React/TypeScript + Rust + SQLite，决策见 [ADR-0003](../decisions/0003-prototype-implementation.md)。当前存储为 SQLite 中的 JSON 快照；schema 3 加入任务回收站，schema 4 增加控制台设备偏好的兼容边界，当前 schema 5 增加展开模式兼容边界。按窗口 IPC、固定 DDL、备份与退出的设计见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md)，控制台位置见 [ADR-0006](../decisions/0006-console-window-preferences.md)，生命周期细节见 [数据模型](DATA_MODEL.md)。第一版同时支持两平台、只管理独立大任务、同时提供控制台和边缘小窗，已由用户明确。早期选型记录见 [ADR-0001](../decisions/0001-platform-and-reuse.md)；窗口职责和任务范围见 [ADR-0002](../decisions/0002-console-and-edge-panel.md)。
 
-## 选型与早期方案
+## 技术选型
 
-| 方案 | 优点 | 代价/判断 |
-| --- | --- | --- |
-| Tauri 2 + React/TypeScript + Rust | 两平台共享界面和任务核心；能接原生窗口能力 | 已采用；悬停不抢焦点、DPI、全屏仍需平台适配与实测 |
-| SwiftUI + AppKit | Mac 窗口语义直接 | 不能单独实现 Windows 首版；AppKit 可作为 Tauri 平台层的实现 |
-| Electron | 共享界面、生态广 | 资源占用和边缘窗口行为仍需验证；如果 Tauri POC 遇到实质阻断再评估 |
-| 整体 fork Todobar | 已有两平台产品壳与发布流程 | 需要补窗口和数据核心；先做有边界的复用评估 |
-
-实际依赖版本以工程清单和锁文件为准，当前构建结果见内部验证记录（本地保留，不随公开仓库分发）。其余选项保留为早期评估记录，不表示正在并行实现多个产品壳。
+使用 Tauri 2、React / TypeScript、Rust 和 SQLite。平台适配集中在 Rust 平台层，任务与设置通过共享业务服务提交。实际依赖版本以工程清单和锁文件为准。
 
 ## 一个应用，两种用户界面
 
@@ -23,7 +16,7 @@
 | `edge-panel` | 上方今日、下方 DDL；快速完成/撤销和简短操作；进入控制台管理 | 小窗；可拖动停靠、默认单击展开/外点收起，可选悬停且不抢焦点、允许固定展开；停靠后遵守屏幕边界 |
 | `edge-handle` | 小窗折叠后的边缘触发区 | 内部实现窗口，不是第三个管理界面；不进入任务切换器、不取得输入焦点、不访问任务内容 |
 
-三个标签由 Rust 的 `WindowCoordinator` 统一持有和恢复，每个标签至多一个实例；设置是 `console` 内的页面，不另开常驻设置窗口。UI 请求「打开设置」或「打开任务详情」，由协调器显示/恢复已有控制台并跳转；不能每点一次就创建新窗口。Tauri 的普通多窗口可使用 `WebviewWindow`，窗口标签必须唯一；平台特殊小窗行为仍需适配。[Tauri 多窗口 API](https://v2.tauri.app/reference/javascript/api/namespacewebviewwindow/)、[窗口配置](https://v2.tauri.app/reference/config/#windowconfig)
+三个标签由 Rust 的 `WindowCoordinator` 统一持有和恢复，每个标签至多一个实例；设置是 `console` 内的页面，不另开常驻设置窗口。UI 请求「打开设置」或「打开任务详情」，由协调器显示/恢复已有控制台并跳转；不能每点一次就创建新窗口。Tauri 的普通多窗口可使用 `WebviewWindow`，窗口标签必须唯一；平台特殊小窗行为由平台层适配。[Tauri 多窗口 API](https://v2.tauri.app/reference/javascript/api/namespacewebviewwindow/)、[窗口配置](https://v2.tauri.app/reference/config/#windowconfig)
 
 ### 生命周期与恢复入口
 
@@ -96,7 +89,7 @@ SQLite 是任务和持久化设置的事实来源，React 状态只是各窗口�
 
 当前每次变更携带外层快照的 `expectedRevision`，更新任务、完成/撤销、移入回收站和恢复任务还携带 Task 的 `expectedRevision`。Rust 服务在同一写入锁内校验、交由 Repository 事务提交，成功后才发布新快照；计划和设置目前使用全局快照版本，没有独立的计划修订表。完成/撤销、移入/恢复均使用明确目标状态。旧表单与另一窗口并发冲突时保留草稿、刷新已提交值并提示重新确认，禁止静默最后写入覆盖。
 
-规范化后的目标协议另设事务级 `change_seq` 与数据集代次；当前 JSON 快照尚无这两个字段，使用 `Snapshot.revision`，整份备份恢复时提高当前全局及任务版本以拒绝旧写入。UI 先完成事件订阅，再请求快照；获取期间收到更新则继续刷新，旧响应不得覆盖较新快照。事件只通知版本变化，不传整份任务内容，也不是任务事实、可靠消息队列或写成功凭证。重新显示、重新连接、睡眠恢复时重新取快照，事件发送失败不能把已经提交的事务误报为未提交。当前与目标协议的边界见 [数据模型](DATA_MODEL.md)。Tauri 支持事件向指定窗口分发，但一致性协议需要 SideTask 自己实现。[Tauri Rust → Frontend](https://v2.tauri.app/develop/calling-frontend/)
+当前 JSON 快照使用 `Snapshot.revision`，整份备份恢复时提高当前全局及任务版本以拒绝旧写入。UI 先完成事件订阅，再请求快照；获取期间收到更新则继续刷新，旧响应不得覆盖较新快照。事件只通知版本变化，不传整份任务内容，也不是任务事实、可靠消息队列或写成功凭证。重新显示、重新连接、睡眠恢复时重新取快照，事件发送失败不能把已经提交的事务误报为未提交。当前协议见 [数据模型](DATA_MODEL.md)。Tauri 支持事件向指定窗口分发，但一致性协议需要 SideTask 自己实现。[Tauri Rust → Frontend](https://v2.tauri.app/develop/calling-frontend/)
 
 ### 设备设置与生效状态
 
@@ -145,7 +138,7 @@ UI 从同一快照派生普通列表与回收站。正常列表、全局搜索�
 
 ### B33 小窗坐标与尺寸会话的当前实现
 
-Windows 辅助窗显式设置最小客户区尺寸为 1×1 DIP，正常控制台保留自己的最小尺寸。旧分支150%单屏曾在首显采样到把手从27px短暂扩为202px，属于内部验收记录（本地保留，未随公开仓库分发）。后续 `windows_visibility.rs` 先以 `SW_SHOWNA` 保持已确认框，再同步 Tao 可见状态，并为迟到主线程回调保留显示事务取消；该 Windows 修复随本轮整合纳入，Mac 显示路径保留。显示后继续严格核对实际框与scale，失配先隐藏、确认隐藏，再重新定位并仅重试一次；再次失败保持隐藏/作废缓存/报告，不缓存错误边界。e4217f4 的原生A/B结果见[生命周期说明](../research/WINDOWS_WINDOW_LIFECYCLE.md)，整合版及混DPI多屏仍需分别复验。
+Windows 辅助窗显式设置最小客户区尺寸为 1×1 DIP，正常控制台保留自己的最小尺寸。旧分支150%单屏曾在首显采样到把手从27px短暂扩为202px，属于内部验收记录（本地保留，未随公开仓库分发）。后续 `windows_visibility.rs` 先以 `SW_SHOWNA` 保持已确认框，再同步 Tao 可见状态，并为迟到主线程回调保留显示事务取消；该 Windows 修复随本轮整合纳入，Mac 显示路径保留。显示后继续严格核对实际框与scale，失配先隐藏、确认隐藏，再重新定位并仅重试一次；再次失败保持隐藏/作废缓存/报告，不缓存错误边界。e4217f4 的原生A/B结果见[生命周期说明](../research/WINDOWS_WINDOW_LIFECYCLE.md)。
 
 Windows 最终退出在 requestId 草稿协议明确批准后才关闭各 WebView2 controller；取消退出、普通控制台关闭和小窗隐藏不进入清理。正常退出及恢复后重启的清理路径保留平台隔离；旧 e4217f4 未再出现1412的样本不替代整合版真实退出复验。
 
@@ -153,7 +146,7 @@ Windows 最终退出在 requestId 草稿协议明确批准后才关闭各 WebVie
 
 `edge_coordinates.rs`将Mac的cursor/monitor/window分别按主屏/目标屏/窗口自身scale归一到全局逻辑平面。停靠形状仍按真实目标DPI在局部物理像素计算，再投影成逻辑矩形交Logical setter；Windows继续使用物理桌面坐标和Physical setter。原始显示器原点仅作持久化身份提示，真实DPI参与缓存签名。工作区必须包含在屏幕内，NaN、零尺寸、不可表示坐标拒绝定位。
 
-隐藏迁移遇到不同DPI时先用小外框选中目标屏，确认scale后设置最终外框；Windows `WM_DPICHANGED` 会再次调整尺寸，不能仅凭setter返回成功。显示前要求两次实际外框采样与目标一致且在工作区内，并复核屏幕签名；失败隐藏辅助窗、作废缓存，控制台保留反馈/重试入口。同屏实时缩放仍先缩小、再移动、再放大；确认期间不盲目修复可见窗口，失败退回隐藏恢复。未变化的把手跳过重复定位；实际流畅度和系统瞬态仍待原生测量。
+隐藏迁移遇到不同DPI时先用小外框选中目标屏，确认scale后设置最终外框；Windows `WM_DPICHANGED` 会再次调整尺寸，不能仅凭setter返回成功。显示前要求两次实际外框采样与目标一致且在工作区内，并复核屏幕签名；失败隐藏辅助窗、作废缓存，控制台保留反馈/重试入口。同屏实时缩放仍先缩小、再移动、再放大；确认期间不盲目修复可见窗口，失败退回隐藏恢复。未变化的把手跳过重复定位。
 
 尺寸IPC采用带session的`start/preview/commit/cancel`。只有start能创建会话，需匹配开始时完整Settings；preview只更运行态，commit一次事务保存尺寸与沿边位置。取消/设置冲突/显示器变化/提交失败结束会话并恢复原placement；后续旧preview或commit不可重启。屏幕查询失败也取消并隐藏，不留下活动预览。设置在dock锁后读取，业务锁不跨原生调用；提交前复查最新设置与屏幕签名。前端尺寸仍为CSS逻辑单位，不乘devicePixelRatio。
 
@@ -191,7 +184,7 @@ P.bottom <= W.bottom - m
 - 悬停查看不激活应用；用户点击编辑再允许输入。Tauri 通用 API 不一定覆盖全部焦点语义，必要时使用 AppKit / Win32。
 - 使用明确状态机、可取消计时器和交互保护计数；输入法、菜单期间不因悬停离开自动收起，拖拽/缩放期间两种模式均保护；单击外点可隐藏编辑并保留草稿，详见 UX。
 - 把手检测优先使用窗口局部进入/离开事件和平台能力；若需指针采样，应有低频/空闲策略并测 CPU，不能无期限忙轮询。
-- 托盘/菜单栏提供恢复入口；全局快捷键与登录启动仍待办，若后续实施，注册失败需提示并允许改键。
+- 托盘/菜单栏提供显式恢复入口。
 - 默认不请求与核心场景无关的权限；若 POC 发现某平台实现需要额外权限，记录原因并评估替代路径。
 - 普通桌面和最大化窗口是基础要求；全屏、macOS Spaces、Windows 虚拟桌面必须分别验证。Windows 的所有虚拟桌面可见能力不能由 Tauri 通用接口直接承诺。独占全屏/安全桌面等不作为首版保证场景，必须在兼容性说明中明示。
 
@@ -213,7 +206,7 @@ POC 确定最低 OS / CPU 架构矩阵。之后使用 macOS 与 Windows 各自�
 - [Tauri Window API](https://v2.tauri.app/reference/javascript/api/namespacewindow/)：当前文档有 monitor workArea/scaleFactor；对锁定的发行版本需再次核实。`setVisibleOnAllWorkspaces` 不支持 Windows；macOS 已获焦窗口不能只靠 `setFocusable(false)` 取消焦点。
 - [Apple windowWillResize](https://developer.apple.com/documentation/appkit/nswindowdelegate/windowwillresize(_:to:))、[Windows WM_SIZING](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-sizing)：可用于约束将应用的窗口尺寸。
 - [Apple 屏幕参数变化通知](https://developer.apple.com/documentation/appkit/nsapplication/didchangescreenparametersnotification)、[Windows WM_DPICHANGED](https://learn.microsoft.com/en-us/windows/win32/hidpi/wm-dpichanged)：屏幕环境变化需要处理。
-- [Apple nonactivatingPanel](https://developer.apple.com/documentation/appkit/nswindow/stylemask-swift.struct/nonactivatingpanel)、[fullScreenAuxiliary](https://developer.apple.com/documentation/appkit/nswindow/collectionbehavior-swift.struct/fullscreenauxiliary)：相关面板机制仍需结合具体系统版本测试。
+- [Apple nonactivatingPanel](https://developer.apple.com/documentation/appkit/nswindow/stylemask-swift.struct/nonactivatingpanel)、[fullScreenAuxiliary](https://developer.apple.com/documentation/appkit/nswindow/collectionbehavior-swift.struct/fullscreenauxiliary)：描述非激活面板及全屏辅助窗口的系统机制。
 
 ### 首次常驻说明
 

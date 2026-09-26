@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | [Mobbin · iOS apps](https://mobbin.com/discover/apps/ios/latest) | 未登录页面显示介绍及登录/注册入口 | 保留为后续真实产品流程研究入口 | 本次没有看到库内流程，不声称依据其内部截图完成设计 |
 | [Task detail desktop app · Jakub Antalik](https://dribbble.com/shots/14794406-Task-detail-desktop-app) | 桌面详情白色面板、属性分组、便笺区与完成行 | 标题优先；日期/重要程度集中为属性组；说明文字降低视觉权重 | 不引入作品中的子任务、附件等超出首版的功能 |
-| [TaskFlow · Shantikumar](https://dribbble.com/shots/27246986-TaskFlow-Task-Management-App-Mobile-UI-UX) | 任务列表、方形勾选、次级优先级/时间标签、完成划线 | 明确区分任务标题和元信息；状态不用颜色单独表达；完成反馈克制 | 这是移动端概念；桌面仍需鼠标、键盘、窗口尺寸验证 |
+| [TaskFlow · Shantikumar](https://dribbble.com/shots/27246986-TaskFlow-Task-Management-App-Mobile-UI-UX) | 任务列表、方形勾选、次级优先级/时间标签、完成划线 | 明确区分任务标题和元信息；状态不用颜色单独表达；完成反馈克制 | 这是移动端概念；桌面交互按鼠标、键盘和窗口尺寸设计 |
 | [TaskFlow · Muhammad Subhan](https://www.behance.net/gallery/244125653/TaskFlow-Minimal-Task-Management-App-UIUX) | 公开案例封面、字体说明、品牌与任务优先级的设计说明 | 字阶、间距、图标和状态需形成统一系统 | 渐变、波浪装饰与大型统计面板不适合本项目小窗密度；未据此证明可用性 |
 | [Todoist Foundations · Doist](https://dribbble.com/shots/8233549-Todoist-Foundations-Task-view) | 公开任务详情交互说明 | 从任务行进入一个集中详情入口 | 仅核对文字说明；不复制子任务和团队功能 |
 

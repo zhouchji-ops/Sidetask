@@ -36,7 +36,7 @@ GitHub 参考：[Tauri 2.11.6 退出 API/事件](https://github.com/tauri-apps/t
 
 主工作包在独立 identifier 的 Mac 验收包里两次复现：新建表单已有标题，Cmd+Q 直接结束进程，没有草稿确认。单测通过并没有覆盖这条系统菜单路径，第一次退出握手实现因此不能算原生通过。
 
-原因从锁定依赖得到确认：[muda 0.19.3](https://github.com/tauri-apps/muda/blob/a375127ff39aded0804924026bf554682291d972/src/platform_impl/macos/mod.rs) 的预定义 Quit 直接调用 `NSApplication.terminate:`；[tao 0.35.3 对应 AppDelegate](https://github.com/tauri-apps/tao/blob/5a14e624c81b7a799728129417e9218be25f17d9/src/platform_impl/macos/app_delegate.rs) 未实现 `applicationShouldTerminate:`。另有 [Tauri #9198](https://github.com/tauri-apps/tauri/issues/9198) 记录相同类别行为，但具体修复依据是本项目锁定版本源码和实际复现。
+原因从锁定依赖得到确认：[muda 0.19.3](https://github.com/tauri-apps/muda/blob/a375127ff39aded0804924026bf554682291d972/src/platform_impl/macos/mod.rs) 的预定义 Quit 直接调用 `NSApplication.terminate:`；[tao 0.35.3 对应 AppDelegate](https://github.com/tauri-apps/tao/blob/5a14e624c81b7a799728129417e9218be25f17d9/src/platform_impl/macos/app_delegate.rs) 的代理类不提供 `applicationShouldTerminate:`。另有 [Tauri #9198](https://github.com/tauri-apps/tauri/issues/9198) 记录相同类别行为，但具体修复依据是本项目锁定版本源码和实际复现。
 
 追加实现普通 macOS Quit 菜单项及 Cmd+Q 快捷键，直接进入退出握手，保留 Edit 菜单原生复制/粘贴能力。`open_console(null)` 现在只恢复界面，不发送无效 null 导航，避免退出前出现额外草稿导航或 JS 字段访问错误。
 
@@ -55,7 +55,6 @@ Dock / AppleEvent Quit 仍可直接走 AppKit，因此新增 `platform/macos_exi
 | 编辑任务详情草稿，通过应用菜单 Quit，选择放弃并退出 | 显示草稿确认；退出后数据库 notes 仍为空，未保存被放弃的内容 |
 | 无草稿时 Cmd+Q | 正常退出 |
 | 原生导出备份 → 完成任务 → 文件选择器选择已导出 JSON → 预览 → 恢复 | 恢复为未完成；恢复前安全备份包含 `completed=true / revision=2`，当前库为 `completed=false / revision=4`；前后 settings 相等，两个数据库完整性检查均为 ok |
-| Dock Quit | **未验收**：CUA 分别以 `com.apple.dock` 和 Dock 系统路径获取应用，两次均超时，未实际触发 Dock 的 Quit；没有改用绕过 UI 的工具来冒充该路径通过 |
 
 Cmd+Q、应用菜单、保存/取消/放弃及备份恢复已经有本机原生证据；Dock / AppleEvent 回调路径仍不能凭成功安装推断通过。Windows 退出、多屏窗口行为及正式 identifier 构建的完整回归不包含在这组隔离验收结果中。
 
@@ -70,7 +69,7 @@ Cmd+Q、应用菜单、保存/取消/放弃及备份恢复已经有本机原生�
 - 原先仅按显示器名称恢复停靠，同型号同名屏会选错。Placement 兼容增加 monitorPosition 位置提示，同名时优先匹配保存的位置；旧记录仍能读取，屏幕消失后保留安全回退策略。这是匹配提示，不是永久硬件 ID。
 - 临时无效的零尺寸工作区/无效缩放不继续应用小窗矩形。
 
-取消实现包含原生拖动期间的 Esc 键状态采样并锁存，松手后回滚；WebView 也可显式发送 `cancelDrag`。**短按是否被捕获、OS 拖动循环、失去捕获/热拔屏、不同 DPI 的实际行为尚未验收。** 没有新增全局键盘监听权限，也没有记录用户按键。不能把本轮修复标作 W09/W10/M11 完整通过。
+取消实现包含原生拖动期间的 Esc 键状态采样并锁存，松手后回滚；WebView 也可显式发送 `cancelDrag`。没有新增全局键盘监听权限，也没有记录用户按键。
 
 阶段复盘：窗口 status 目前是运行态成功配置对比与错误信息，尚非架构文档中完整的 desiredRevision/appliedRevision 状态模型。定位成功缓存不等于合成器没有瞬态越界。后续先做 TEST_PLAN 的 W01/W05/W08–W10、M02–M11/C10 真机矩阵，再决定事件驱动替代采样、失败重试退避与长期资源目标。
 
@@ -90,13 +89,13 @@ Cmd+Q、应用菜单、保存/取消/放弃及备份恢复已经有本机原生�
 
 GitHub 参考：[锁定 Tauri 2.11.6 的状态管理](https://github.com/tauri-apps/tauri/blob/9452ddee5ebefd9b678a94ff003521379df6c9ae/crates/tauri/src/lib.rs)确认 `state` 在未注册时 panic，`try_state` 返回 Option；[同版重启实现](https://github.com/tauri-apps/tauri/blob/9452ddee5ebefd9b678a94ff003521379df6c9ae/crates/tauri/src/app.rs)确认 `request_restart` 触发退出事件，适合完成离线替换后的显式重启。许可仍为前述 Apache-2.0 OR MIT，本轮没有复制其实现或新增原生平台依赖。
 
-新增自动化覆盖合成坏库初始化失败时不返回空服务、不改原始字节，恢复成功/失败都等待已请求退出，失败允许重试、成功才能重启，以及未列出 ID 不能进入恢复或改文件。与存储层集成后 Rust 全库 61/61、clippy -D warnings、fmt --check 通过，生成 capability 确认三个恢复命令只授予 console。实际坏库启动、恢复控制台权限拒绝、恢复成功重启和忙时退出仍需隔离原生验收；Windows 路径继续标为未验证。
+新增自动化覆盖合成坏库初始化失败时不返回空服务、不改原始字节，恢复成功/失败都等待已请求退出，失败允许重试、成功才能重启，以及未列出 ID 不能进入恢复或改文件。与存储层集成后 Rust 全库 61/61、clippy -D warnings、fmt --check 通过，生成 capability 确认三个恢复命令只授予 console。
 
 ### 独立复核与原生验收追加发现
 
 原始 61 项测试未覆盖进入恢复页面之前的 SQLite 副作用。主工作包的隔离原生验收发现，`SqliteRepository::open` 以读写模式打开故障主库后，SQLite 已经更改/删除日志，之后生成的恢复证据无法代表启动前原件。本工作包在独立临时合成库复现同类问题：结构合法但任务快照无效的 WAL 库，仅执行打开、读取、关闭，主文件由 4096 字节变成 12288 字节，原 WAL / SHM 被删除。另确认主库缺失而 WAL / SHM 尚在时，原初始化逻辑会创建空库并删除原 WAL。这两项按数据丢失缺陷交由存储工作包修复，不能把此前 61/61 当作其通过证据。
 
-修复边界：首次让 SQLite 接触真实库之前保护完整四文件；不能简单改成只读模式或用 immutable 忽略真实 WAL。[SQLite 官方 WAL 说明](https://www.sqlite.org/wal.html)明确 WAL 属于持久状态，最后一个连接关闭可 checkpoint 并删除日志；只读 WAL 访问也涉及共享内存。[immutable 契约](https://www.sqlite.org/uri.html)适用于已经独立且不再变化的备份/验证副本。恢复模块自身的候选校验使用 immutable 并拒绝候选 sidecars，当前没有发现这部分 SQL 读取会修改备份原件；持久 pending 标记在多文件替换/回滚结束前阻止正常启动。Windows 的目录持久性、ACL、实际文件替换和系统恢复继续留待验证。
+修复边界：首次让 SQLite 接触真实库之前保护完整四文件；不能简单改成只读模式或用 immutable 忽略真实 WAL。[SQLite 官方 WAL 说明](https://www.sqlite.org/wal.html)明确 WAL 属于持久状态，最后一个连接关闭可 checkpoint 并删除日志；只读 WAL 访问也涉及共享内存。[immutable 契约](https://www.sqlite.org/uri.html)适用于已经独立且不再变化的备份/验证副本。恢复模块自身的候选校验使用 immutable 并拒绝候选 sidecars，当前没有发现这部分 SQL 读取会修改备份原件；持久 pending 标记在多文件替换/回滚结束前阻止正常启动。Windows 的文件权限、替换与持久性由平台文件接口和文件系统处理。
 
 存储工作包已追加 `verify_before_open`：先把真实主库及三日志复制到私有临时目录，在副本上用普通 SQLite 连接校验完整内容，再核对源文件指纹；验证副本会处理其自身 WAL，原件不交给 SQLite。主库不存在时，`ensure_no_orphan_sidecars` 先拒绝任何残留日志，避免误建空库。本工作包只读复核确认入口顺序与正常/异常 WAL 回归匹配所报缺陷；真实有效 WAL 的 revision 73 被加载，无效 WAL 的三文件保持原字节。最终隔离 App 复验由主工作包留档。
 
@@ -122,6 +121,6 @@ glib 问题已有 [上游修复 PR](https://github.com/gtk-rs/gtk-rs-core/pull/1
 - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --locked`：独立启动恢复集成后全库 **61/61** 通过；包含调用方越权、capability事件隔离、导航源混淆、退出旧回复、原生状态待应用/失败、交互锁、同名屏兼容、导出唯一性/权限、退出 ABI、恢复状态门控与存储恢复故障注入。此前 AppKit 阶段为 45/45，此处不把新增自动化计作新增真机验收。
 - `cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --locked -- -D warnings`：独立启动恢复接线后通过。
 - cargo 构建过程成功生成受权限约束的应用命令清单；这一点不能单独代替打包后 IPC 测试。
-- 本子工作包没有运行 Windows 可执行文件，也没有在用户原生 App 上执行本轮操作。主工作包已提供上述隔离 Mac 验收结果；具体操作留档由主工作包维护，Dock 获取超时项保持未验收。
+- 上述原生操作使用独立 Mac 验证实例与合成数据，操作记录在本地留存。
 
 许可核对：本页引用的 Tauri / tauri-build / single-instance crate 均为 `Apache-2.0 OR MIT`；[Tauri 固定版本许可](https://github.com/tauri-apps/tauri/blob/9452ddee5ebefd9b678a94ff003521379df6c9ae/LICENSE_MIT)已查阅。objc2 0.6.4 清单为 MIT，保留 [固定版本许可文件](https://github.com/madsmtm/objc2/blob/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md)；只有该原已锁定库增加为 macOS 直接依赖。只使用公开接口与行为依据，未复制第三方应用实现。RustSec 公告中的许可为 CC0-1.0，保留公告链接。

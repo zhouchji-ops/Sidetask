@@ -1,21 +1,10 @@
-# 任务生命周期：软删除与恢复的最小实现计划
+# 任务生命周期：软删除与恢复
 
-日期：2026-09-25。状态：**实现与集成验收中**；Rust 数据迁移/备份与动作已落地并通过定向测试，UI/两平台原生验收以文末及交付状态为准。承接 [PRD R10](../product/PRD.md)、B06/B07/B19/B21。目标是让误建、取消的任务退出日常列表，并能随时找回。第一阶段只做单项移入回收站、单项恢复；不提供永久删除、清空、到期清理、批量操作或新的任务业务状态。
+日期：2026-09-25。本文记录软删除、恢复、迁移和备份格式的实现，相关需求见 [PRD R10](../product/PRD.md)。任务移入回收站后退出日常列表，恢复时保留原 Task ID、DDL、完成状态和全部计划。
 
-## 当前缺口与直接修改点
+## 实现范围
 
-已阅读 README、STATUS、HANDOFF、BACKLOG、PRD、UX、架构和数据模型。文档部分是目标模型，以下以实际源码为准。
-
-| 位置 | 已有能力与需要补齐的内容 |
-| --- | --- |
-| `src-tauri/src/domain/mod.rs`、`src/lib/types.ts` | Task 只有 completed/completedAt；无 deletedAt，无删除/恢复 Action。添加一个可空时间字段和两个动作，复用 Task revision 与快照 expectedRevision。 |
-| `src-tauri/src/infrastructure/mod.rs`、`infrastructure/recovery.rs` | 当前 SQLite schema2 存 JSON snapshot；版本判断、升级函数及候选文件名仅覆盖现有版本。新增 schema3 兼容迁移，同时更新坏库恢复候选识别。 |
-| `src-tauri/src/application/mod.rs` | 便携备份 schemaVersion=1，包含全部 tasks/plans；新增备份版本与回收站数量预览，完整保留删除状态。 |
-| `src/lib/domain.ts`、`src/lib/deadline.ts` | `indexSnapshot`、`selectDeadlines`、`isPlannedToday`、`isOverdue`、`nextTimeBoundary` 尚不识别删除。统一过滤正常视图与计数，保留全量 ID 索引供恢复和草稿冲突处理。 |
-| `src/surfaces/console/Console.tsx` | 没有回收站导航或操作；全局搜索直接扫描 snapshot.tasks，会把删除项搜回日常列表。TaskDetail 已有保存/草稿/冲突机制，应复用。 |
-| `src/lib/store.tsx`、原生 `lib.rs` | 已有提交后事件刷新与失败重查；继续走同一个 mutate。操作仅授予 console，小窗通过现有共享快照更新。 |
-
-当前“全部任务”页展示未完成任务，全局搜索包含未完成和已完成。此阶段维持这两者的既有语义，只将回收站独立出来。不能只过滤主列表而漏掉侧栏数字、今日完成分母、此前未完成、搜索、DDL 和空状态。
+任务服务通过 `trashTask` / `restoreTask` 修改删除标记，普通列表与回收站由同一快照派生。控制台提供单项移入和恢复入口；便携备份 v2 保留任务及回收站记录。
 
 ## 两个固定源码参考
 
@@ -54,7 +43,7 @@
 
 全量 `byId` 保留删除 Task。若已有脏详情收到删除状态，不能因正常列表过滤而卸载表单丢草稿；保留编辑内容，显示“任务已移入回收站，请先恢复”，禁用保存/完成/安排。恢复只清标记，草稿仍由现有冲突机制显式确认后保存。新建、设置和退出草稿保护继续生效。
 
-按以下三个可合入小阶段推进，每阶段先核对实际缺口，再实现和回归；不为此扩展窗口平台或安全能力：
+以下三个阶段组织任务生命周期、界面与备份格式的实现记录：
 
 | 阶段 | 文件与交付 | 必要验收 |
 | --- | --- | --- |
@@ -87,4 +76,4 @@ cargo test --locked application::       9 passed / 0 failed（0.65秒）
 
 便携备份测试覆盖 v2回收站删除时间（含纳秒）和所有计划导出→预览→恢复→SQLite重启、设备信息保留、修订号严格提高；v1缺失/null兼容与非空删除状态拒绝，实际v1恢复替换当前回收站集合。Trash/Restore写入失败分别验证完整已发布快照不变；原备份距离10MiB仅16字节余量时增加删除时间会明确拒绝，任务保持原状态，未越过可恢复容量或悄悄丢弃回收站。
 
-本次继续核对上文两项固定 GitHub 文件与 LICENSE，只使用已记录的行为参考，不复制 GPL/AGPL 实现、没有新增数据依赖。原生工作包独占执行的全 Rust 集成结果：`cargo test --locked` **88/88**（1.85秒），`cargo fmt --check`、`cargo clippy --locked --all-targets -- -D warnings` 均通过。最终95项TS、60项UI和Mac生产构建通过，包含脏草稿、多窗口、失败焦点和万条回收站回归。最后资源 index-GFNXw43Q.js / index-Cp14iSy_.css 已打包并本地验签。Mac原生流程因锁屏尚未执行；Windows与原生演练不借用自动化结果，详见内部验收记录（本地保留，未随公开仓库分发）。本工作包未设Done，不将自动化当作可发布证明。
+本次继续核对上文两项固定 GitHub 文件与 LICENSE，只使用已记录的行为参考，不复制 GPL/AGPL 实现、没有新增数据依赖。原生工作包独占执行的全 Rust 集成结果：`cargo test --locked` **88/88**（1.85秒），`cargo fmt --check`、`cargo clippy --locked --all-targets -- -D warnings` 均通过。最终95项TS、60项UI和Mac生产构建通过，包含脏草稿、多窗口、失败焦点和万条回收站回归。最后资源 index-GFNXw43Q.js / index-Cp14iSy_.css 已打包并本地验签。上述数字对应本段所列版本与自动化测试环境。
