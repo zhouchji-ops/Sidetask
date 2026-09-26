@@ -1,6 +1,6 @@
 # SideTask 数据备份与故障恢复
 
-更新：2026-09-25。当前内部试用版本；操作依据为当前 Rust Repository / TaskService、恢复界面与 `tauri.conf.json`。Windows 的路径规则已核对 Tauri 2.11.6 源码，历史分支已有原生恢复记录；整合版及完整异常矩阵仍待复验，具体证据见[STATUS](../delivery/STATUS.md)。普通使用入口见[完整使用说明书](../product/USER_GUIDE.md)。
+更新：2026-09-25。当前内部试用版本；操作依据为当前 Rust Repository / TaskService、恢复界面与 `tauri.conf.json`。Windows 的路径规则已核对 Tauri 2.11.6 源码，历史分支已有原生恢复记录；整合版及完整异常矩阵仍待复验，当前范围见[验证摘要](../VALIDATION.md)。普通使用入口见[完整使用说明书](../product/USER_GUIDE.md)。
 
 ## 先区分两种文件
 
@@ -22,7 +22,7 @@ JSON 文件即使改名为 `.sqlite3` 也不是数据库。SQLite 安全副本�
 
 代码使用 Tauri `app_data_dir()`，应用标识为 `com.changjin.sidetask`：
 
-- macOS：`~/Library/Application Support/com.changjin.sidetask/`。本开发机对应 `/Users/changjin/Library/Application Support/com.changjin.sidetask/`。
+- macOS：`~/Library/Application Support/com.changjin.sidetask/`，其中 `~` 表示当前用户的个人目录。
 - Windows：`%APPDATA%\com.changjin.sidetask\`，通常位于当前用户 `AppData\Roaming`，以实际环境的 `%APPDATA%` 为准。
 
 macOS Finder 的「前往文件夹」可输入上面的路径；Windows 文件资源管理器地址栏可输入含 `%APPDATA%` 的路径。不要在项目源码仓库内寻找个人数据库或把备份提交到 Git。
@@ -79,7 +79,7 @@ sqlite3 -readonly "所选安全备份的绝对路径.sqlite3" "PRAGMA integrity_
 
 ## 未覆盖与后续
 
-现有单元测试使用临时合成数据库覆盖损坏拒绝覆盖、迁移回滚、WAL备份、恢复冲突与启动恢复；本轮另覆盖schema5迁移原文保留、两连接设备字段合并、元数据失败的事务回滚和任务版本隔离，没有用个人库演练。Mac与Windows的各阶段原生/CI证据分别记录，不能复用历史数字证明当前版本通过。真实磁盘满、物理断电和两平台离线恢复仍未验收，不能用异常注入等同硬件断电证明。具体自动化与原生结果以[最新STATUS](../delivery/STATUS.md)为准。
+现有单元测试使用临时合成数据库覆盖损坏拒绝覆盖、迁移回滚、WAL备份、恢复冲突与启动恢复；本轮另覆盖schema5迁移原文保留、两连接设备字段合并、元数据失败的事务回滚和任务版本隔离，没有用个人库演练。Mac与Windows的各阶段原生/CI证据分别记录，不能复用历史数字证明当前版本通过。真实磁盘满、物理断电和两平台离线恢复仍未验收，不能用异常注入等同硬件断电证明。当前自动化与原生验证范围见[验证摘要](../VALIDATION.md)。
 
 ## 附录：启动恢复的文件与实现边界
 
@@ -89,4 +89,4 @@ sqlite3 -readonly "所选安全备份的绝对路径.sqlite3" "PRAGMA integrity_
 - `sidetask-recovery-pending.json` 以已完整同步的临时记录通过同目录硬链接发布，先于任何主库/日志移动。重试沿用已验证的原始证据，避免把上次恢复一半的文件当原件。
 - 主库替换使用同目录文件重命名；不会先删除原主库。Unix 同步父目录；Windows 采用 Rust 标准库替换接口，但目录项断电持久性和真实 NTFS 恢复尚未验证。缺乏硬链接支持的文件系统会在移动前失败；当前恢复不支持 UNC 数据目录。
 - `sidetask-startup-check-<UUID>/` 是已有库启动前的完整检查副本，正常检查结束清理；强杀遗留副本可以在应用完全退出并确认目录身份后清理，不是用于自动恢复的已验证备份。
-- 底层恢复测试覆盖只读扫描、文件变化、路径过滤、四文件证据、错误回滚、中断后重试、回滚自身 I/O 失败、旧 schema、中文/URI 特殊字符路径，以及启动前原始 WAL 保留与有效提交加载。测试只操作 UUID 系统临时目录；本轮数量及执行结果引用最新 STATUS。
+- 底层恢复测试覆盖只读扫描、文件变化、路径过滤、四文件证据、错误回滚、中断后重试、回滚自身 I/O 失败、旧 schema、中文/URI 特殊字符路径，以及启动前原始 WAL 保留与有效提交加载。测试只操作 UUID 系统临时目录；当前汇总结果见[验证摘要](../VALIDATION.md)，原始执行证据见内部验收记录（本地保留，未随公开仓库分发）。

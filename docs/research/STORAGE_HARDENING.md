@@ -40,8 +40,8 @@ IPC、导出文件落盘、窗口权限与控制台 UI 由本轮其他工作包�
 在本机 macOS / Apple Silicon 执行：
 
 ```sh
-/Users/changjin/.cargo/bin/rustfmt --edition 2021 apps/desktop/src-tauri/src/infrastructure/mod.rs apps/desktop/src-tauri/src/application/mod.rs
-/Users/changjin/.cargo/bin/cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --locked
+rustfmt --edition 2021 apps/desktop/src-tauri/src/infrastructure/mod.rs apps/desktop/src-tauri/src/application/mod.rs
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --locked
 ```
 
 首轮30/30通过；容量防护与其他工作包集成后，最近一次44/44通过，0失败（0.25秒），无编译警告。这是执行时刻的全 Rust 测试总数；其他 agent 后续新增测试时，以最终集成结果为准。本包新增15项有意义的测试：

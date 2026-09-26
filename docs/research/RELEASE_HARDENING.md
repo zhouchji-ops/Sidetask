@@ -30,7 +30,7 @@ CI补前端业务/类型/生产构建/Playwright、Rust格式/clippy/测试、Ma
 
 ## 验证边界
 
-IPC模拟测试验证前端协议与失败流程，不验证Tauri ACL、系统焦点或SQLite。Mac隔离验证使用独立identifier和合成数据；Windows、多屏/混合DPI/热插拔/睡眠与长期资源验收另列路线门槛。最终集成命令和数字见STATUS，不将中途构建/测试结果混作最终结果。
+IPC模拟测试验证前端协议与失败流程，不验证Tauri ACL、系统焦点或SQLite。Mac隔离验证使用独立identifier和合成数据；Windows、多屏/混合DPI/热插拔/睡眠与长期资源验收另列路线门槛。当前集成结果见[验证摘要](../VALIDATION.md)，不将中途构建/测试结果混作最终结果。
 
 ## 推送后交叉复审
 
@@ -40,4 +40,4 @@ main基线2b04c6f已按用户明确授权推送。独立复审发现新增macOS�
 
 CI日志另提示旧Actions Node20运行时已弃用。已查[checkout v7.0.1](https://github.com/actions/checkout/blob/3d3c42e5aac5ba805825da76410c181273ba90b1/README.md)、[setup-node v7.0.0](https://github.com/actions/setup-node/blob/820762786026740c76f36085b0efc47a31fe5020/README.md)与[upload-artifact v7.0.1](https://github.com/actions/upload-artifact/blob/043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/README.md)，固定相应commit并保持现有输入/只读权限与不留凭据。MIT许可，仅调用官方Action，不复制源码；采用Node24支持版本，产物上传仍需单独解决配额。
 
-用户随后将功能完整与体验列为首要目标。必要的启动日志丢失修复与Mac恢复演练闭合后，转入列表性能、全局搜索和今日整理，不继续扩大安全加固范围。实际启动恢复初始失败及修复证据见[手工记录](../../tests/manual/2026-09-25-startup-recovery.md)。
+用户随后将功能完整与体验列为首要目标。必要的启动日志丢失修复与Mac恢复演练闭合后，转入列表性能、全局搜索和今日整理，不继续扩大安全加固范围。实际启动恢复初始失败及修复证据见内部验收记录（本地保留，未随公开仓库分发）。

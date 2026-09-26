@@ -1,6 +1,6 @@
 # Windows 真实外部点击
 
-日期：2026-09-25。对应 B45，实现位于 `apps/desktop/src-tauri/src/platform/windows_pointer.rs`，验证范围见[本轮记录](../../tests/manual/2026-09-25-windows-outside-click.md)。
+日期：2026-09-25。对应 B45，实现位于 `apps/desktop/src-tauri/src/platform/windows_pointer.rs`，验证范围见内部验收记录（本地保留，未随公开仓库分发）。
 
 ## 行为与事件源
 

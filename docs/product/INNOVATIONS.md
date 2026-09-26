@@ -1,8 +1,8 @@
 # 侧笺 · SideTask：项目创新点与产品价值
 
-整理日期：2026-09-25。依据：已合并的产品源码 `6d32d6c` 及后续 Windows 收尾产品 `065aa67`，以及仓库内的需求、源码和验收记录；最新产品已通过双平台 CI。当前为功能完善与内部试用阶段，实际交付状态见 [STATUS](../delivery/STATUS.md)。
+整理日期：2026-09-25。依据当前产品需求与源码，以及历史 CI 产品版本 `065aa67` 的检查结果。当前为 0.1.0 内部试用阶段，检查范围及限制见[验证状态](../VALIDATION.md)。
 
-面向用户的表达另见[卖点与宣传文案](SELLING_POINTS.md)：从原始需求和后续提示词出发，提供痛点对应、主卖点、首页及介绍文案。
+可直接用于图文与短视频的介绍见[社交平台宣传稿](PROMO_COPY.md)。
 
 侧笺的核心设计，是把任务管理放到学习和工作现场：需要时在屏幕边缘看一眼、记一项、勾一下，需要集中整理时再进入完整控制台。创新价值集中在这套连续的使用流程，以及支撑它的任务语义、窗口协作和草稿保护。
 
@@ -61,7 +61,7 @@
 
 小窗还支持沿边移动、主动换边或换屏后重新停靠。停靠后的显示和缩放按当前屏幕工作区约束；收起使用真正隐藏窗口的方式。固定展开仍允许移动，便于用户按手头内容调整位置。
 
-**当前验证边界：**Mac与Windows均已接入真实鼠标外点及隐藏保草稿，Windows限定单屏已覆盖跨应用左/右/中键、Alt-Tab不收起、固定和退出保护。完整实体输入及系统矩阵仍未齐；用户豁免本轮Windows多屏真机验收，多屏、混合DPI、拔插和睡眠仍保持未验证，不能把豁免表述为通过。
+**当前验证边界：**Mac与Windows均已接入真实鼠标外点及隐藏保草稿，Windows限定单屏已覆盖跨应用左/右/中键、Alt-Tab不收起、固定和退出保护。完整实体输入及系统矩阵仍未齐；多屏、混合 DPI、拔插和睡眠仍有未验证范围，详见[验证状态](../VALIDATION.md)。
 
 ## 5. 个性化不打断当前工作
 
@@ -83,14 +83,14 @@
 
 | 说明 | 可核对的实现 | 测试或记录 |
 | --- | --- | --- |
-| 双窗口与就地新增 | [EdgePanel](../../apps/desktop/src/surfaces/edge-panel/EdgePanel.tsx)、[QuickTodayAdd](../../apps/desktop/src/surfaces/edge-panel/QuickTodayAdd.tsx) | [快速新增回归](../../apps/desktop/tests/quick-today-add.spec.ts)、[整合版原生记录](../../tests/manual/2026-09-25-repository-integration.md) |
+| 双窗口与就地新增 | [EdgePanel](../../apps/desktop/src/surfaces/edge-panel/EdgePanel.tsx)、[QuickTodayAdd](../../apps/desktop/src/surfaces/edge-panel/QuickTodayAdd.tsx) | [快速新增回归](../../apps/desktop/tests/quick-today-add.spec.ts) |
 | 同源任务、今日计划和 DDL | [Rust 领域规则](../../apps/desktop/src-tauri/src/domain/mod.rs)、[DDL 规则](../../apps/desktop/src-tauri/src/domain/deadline.rs) | 领域文件内单元测试、[今日整理回归](../../apps/desktop/tests/today-planning.spec.ts)、[数据模型](../engineering/DATA_MODEL.md) |
-| 草稿与两窗口退出 | [PanelExitGuard](../../apps/desktop/src/components/PanelExitGuard.tsx)、[原生退出协调](../../apps/desktop/src-tauri/src/platform/exit.rs) | [退出回归](../../apps/desktop/tests/panel-exit.spec.ts)、[小窗新增原生记录](../../tests/manual/2026-09-25-quick-today-add.md) |
-| 展开模式与边界约束 | [Mac 外点事件](../../apps/desktop/src-tauri/src/platform/macos_pointer.rs)、[几何规则](../../apps/desktop/src-tauri/src/platform/geometry.rs) | [模式回归](../../apps/desktop/tests/panel-reveal-mode.spec.ts)、[ADR-0007](../decisions/0007-panel-reveal-mode.md)、[验收矩阵](../delivery/TEST_PLAN.md) |
-| 四风格与工作连续性 | [设计规范](../../design/DESIGN_SYSTEM.md)、[风格样式](../../apps/desktop/src/styles/variants.css) | [风格回归](../../apps/desktop/tests/styles.spec.ts)、[Mac 风格记录](../../tests/manual/2026-09-25-ui-styles.md) |
+| 草稿与两窗口退出 | [PanelExitGuard](../../apps/desktop/src/components/PanelExitGuard.tsx)、[原生退出协调](../../apps/desktop/src-tauri/src/platform/exit.rs) | [退出回归](../../apps/desktop/tests/panel-exit.spec.ts) |
+| 展开模式与边界约束 | [Mac 外点事件](../../apps/desktop/src-tauri/src/platform/macos_pointer.rs)、[几何规则](../../apps/desktop/src-tauri/src/platform/geometry.rs) | [模式回归](../../apps/desktop/tests/panel-reveal-mode.spec.ts)、[ADR-0007](../decisions/0007-panel-reveal-mode.md) |
+| 四风格与工作连续性 | [设计规范](../../design/DESIGN_SYSTEM.md)、[风格样式](../../apps/desktop/src/styles/variants.css) | [风格回归](../../apps/desktop/tests/styles.spec.ts) |
 | 本地一致性与恢复 | [任务服务](../../apps/desktop/src-tauri/src/application/mod.rs)、[存储实现](../../apps/desktop/src-tauri/src/infrastructure/mod.rs)、[启动恢复](../../apps/desktop/src-tauri/src/infrastructure/recovery.rs) | [生命周期回归](../../apps/desktop/tests/lifecycle.spec.ts)、[恢复回归](../../apps/desktop/tests/recovery.spec.ts)、[恢复说明](../engineering/DATA_RECOVERY.md) |
 
-最新产品 `065aa67` 的 [CI 36148843605](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605) 已通过 Mac、Windows 与 Rust 审计三个作业，并生成两平台内部包。浏览器回归、构建通过和原生记录各有覆盖范围，不能替代全部真机验收；多屏真机本轮按用户要求豁免、保持未验证，当前差距以 [B43–B45](../delivery/BACKLOG.md) 与 [STATUS](../delivery/STATUS.md) 为准。
+历史 CI 产品版本 `065aa67` 的 [CI 36148843605](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605) 已通过 Mac、Windows 与 Rust 审计三个作业，并生成两平台内部包。浏览器回归、构建通过与真机检查各有覆盖范围，不能替代全部原生验收。原生检查摘要及未验证范围见[验证状态](../VALIDATION.md)；原始手工记录在本地留存，公开摘要不替代原始证据。
 
 ## 可用于项目介绍的简版
 
@@ -102,4 +102,4 @@
 
 Windows真实外点已补齐，后续按实际发布范围补原生矩阵，并通过实际使用检验设计价值：记录“查看下一项任务”“随手新增一项”“完成并回到原工作”的操作路径、耗时、误触和重新输入情况。此处是验证方向，尚无用户研究数据证明注意力切换减少了多少，不能写成效率提升百分比。
 
-下一阶段不因“创新”增加 AI、云同步、任务树、重复任务或移动端范围。先把现有流程做完整、做顺手，并补齐签名分发与长期试用证据；具体责任和验收标准沿用[下一阶段分工](../delivery/NEXT_STAGE.md)。
+下一阶段不因“创新”增加 AI、云同步、任务树、重复任务或移动端范围。先把现有流程做完整、做顺手，并补齐签名分发与长期试用证据；未覆盖范围见[验证状态](../VALIDATION.md)。

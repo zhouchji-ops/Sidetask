@@ -1,6 +1,6 @@
 # ADR-0005：保留身份的回收站与备份版本
 
-日期：2026-09-25。状态：采用，实现已接入；原生及双平台验收进度见 [STATUS](../delivery/STATUS.md)。接续 [ADR-0004](0004-data-safety-and-fixed-deadlines.md)。
+日期：2026-09-25。状态：采用，实现已接入；原生及双平台验收进度见 [验证摘要](../VALIDATION.md)。接续 [ADR-0004](0004-data-safety-and-fixed-deadlines.md)。
 
 ## 背景
 

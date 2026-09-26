@@ -115,4 +115,4 @@
 - [EdgePanel.tsx](../apps/desktop/src/surfaces/edge-panel/EdgePanel.tsx)：今日 / DDL 小窗、分区比例、外框宽高抓手。
 - [EdgeHandle.tsx](../apps/desktop/src/surfaces/edge-panel/EdgeHandle.tsx)：悬停与移动入口。
 
-自动化浏览器截图证明页面布局和前端流程；不能证明 Windows 或 macOS 的真实窗口焦点、多屏接缝、缩放、Spaces 等行为。这些验收证据记录在项目 [STATUS](../docs/delivery/STATUS.md) 与 [TEST_PLAN](../docs/delivery/TEST_PLAN.md)。
+自动化浏览器截图证明页面布局和前端流程；不能证明 Windows 或 macOS 的真实窗口焦点、多屏接缝、缩放、Spaces 等行为。当前平台验证范围见[验证摘要](../docs/VALIDATION.md)；原始执行证据见内部验收记录（本地保留，未随公开仓库分发）。

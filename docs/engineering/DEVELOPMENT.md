@@ -20,13 +20,13 @@
 
 ## 现在处于哪里
 
-工程已实现任务管理、回收站、备份恢复、分区与窗口偏好，正做内部试用质量与原生验收；实际检查和包以 [STATUS](../delivery/STATUS.md) 为准。B03候选实机评估已按自建决策延后，不再作为下一步。按 [ROADMAP](../delivery/ROADMAP.md) 和 [BACKLOG](../delivery/BACKLOG.md) 选择当前工作。
+工程已实现任务管理、回收站、备份恢复、分区与窗口偏好，正做内部试用质量与原生验收；当前检查与未覆盖范围见[验证摘要](../VALIDATION.md)，可用安装包见[项目首页](../../README.md#下载与安装)。候选项目的实机评估已按自建决策延后，后续工作优先补齐现有产品的验证缺口。
 
-Mac 后续代码与文档固定在 `mac` 分支，跟踪 `origin/mac`。开始修改前运行 `git status --short --branch`，推送前再确认；不直接推 `main` 或自行合并。Windows开发机从 `main` 交接基线继续，共享提交通过比较和明确移植协调，见 [Windows交接](../delivery/WINDOWS_HANDOFF.md)。
+Mac 后续代码与文档固定在 `mac` 分支，跟踪 `origin/mac`。开始修改前运行 `git status --short --branch`，推送前再确认。Windows 开发机先保留本地未交接工作，获取并核对最新 `origin/mac` 的完整 SHA，再从该明确基线创建新的 `codex/windows-…` 任务分支。共享改动先比较提交关系再整合，避免重复移植或覆盖另一机器的工作；已退休的 Windows 分支不再接续。
 
 ## 环境与检查入口
 
-实际栈为 npm + Cargo；提交 `package-lock.json` 和 `Cargo.lock`。CI固定 Node **24.14.1** / Rust **1.98.1**；平台前置条件按 [Tauri官方说明](https://v2.tauri.app/start/prerequisites/) 核对。Mac构建需要 Xcode Command Line Tools，Windows前置条件和PowerShell步骤见Windows交接。最低OS和架构支持仍需实际验收，工具安装成功不等于产品通过。
+实际栈为 npm + Cargo；提交 `package-lock.json` 和 `Cargo.lock`。CI固定 Node **24.14.1** / Rust **1.98.1**；平台前置条件按 [Tauri官方说明](https://v2.tauri.app/start/prerequisites/) 核对。Mac构建需要 Xcode Command Line Tools；Windows 需要 Microsoft C++ Build Tools 与 WebView2，安装细节按上述官方前置条件核对。最低OS和架构支持仍需实际验收，工具安装成功不等于产品通过。
 
 开发、测试与打包的可执行命令集中在 [桌面开发说明](../../apps/desktop/README.md) 和 `.github/workflows/desktop-checks.yml`。浏览器预览使用合成数据；原生验证用独立identifier和数据库，不能以个人库造测试任务。首次环境验收记录OS版本、架构、显示器布局/缩放、工具链版本。
 
@@ -34,11 +34,11 @@ Windows 需要 Windows 环境运行测试；CI 可以验证构建，图形会话
 
 ## 一次开发迭代的标准动作
 
-1. 从 BACKLOG 选择一个依赖满足的事项，写清本次通过条件，状态改为 In progress。
+1. 选择一个依赖已满足的事项，写清本次范围、通过条件与平台分工。
 2. 做最小的完整改动。需求变化先同步 PRD，重要技术取舍写 ADR。
 3. 验证与改动相关的行为；失败就修复并复测。对文档只检查内容、链接与一致性。
 4. 自查差异、错误处理、对现有数据和平台的影响。
-5. 更新事项、STATUS、HANDOFF；可交付变化写 CHANGELOG。
+5. 记录实际结果与未完成项；验证范围变化更新[验证摘要](../VALIDATION.md)，可交付变化写 CHANGELOG。
 6. 向用户展示可检查成果，并明确哪些平台/场景还没验证。
 
 ## 测试分工
@@ -59,4 +59,4 @@ Windows 需要 Windows 环境运行测试；CI 可以验证构建，图形会话
 
 ## 当前原型的真实入口
 
-工程已初始化，按 [桌面开发说明](../../apps/desktop/README.md) 启动与测试。工具版本以本页与CI固定版本为准；锁文件、配置及 CI 在仓库内。具体执行结果见 STATUS；本文件其他里程碑描述表示开发流程，不表示两平台已经验收。
+工程已初始化，按 [桌面开发说明](../../apps/desktop/README.md) 启动与测试。工具版本以本页与CI固定版本为准；锁文件、配置及 CI 在仓库内。当前检查结果见[验证摘要](../VALIDATION.md)；本文件其他里程碑描述表示开发流程，不表示两平台已经验收。

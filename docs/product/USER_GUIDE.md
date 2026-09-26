@@ -1,10 +1,10 @@
 # 侧笺 · SideTask 使用说明书
 
-适用版本：**0.1.0 内部试用版**。更新：2026-09-25。说明依据整合版本及Windows最新收尾修复；菜单和按钮名称按现有界面整理，功能进度以[项目状态](../delivery/STATUS.md)为准。
+适用版本：**0.1.0 内部试用版**。更新：2026-09-25。说明依据整合版本及Windows最新收尾修复；菜单和按钮名称按现有界面整理，功能进度以[验证状态](../VALIDATION.md)为准。
 
 侧笺有两个界面：**小窗用于随手查看、添加和勾选，大窗用于集中管理和设置**。两者共用本机任务数据，核心使用无需注册账号。Mac 与 Windows 各自保存数据，目前没有云同步。
 
-[返回项目首页](../../README.md) · [产品卖点](SELLING_POINTS.md) · [详细故障恢复](../engineering/DATA_RECOVERY.md)
+[返回项目首页](../../README.md) · [产品价值](INNOVATIONS.md) · [详细故障恢复](../engineering/DATA_RECOVERY.md)
 
 ## 目录
 
@@ -26,14 +26,14 @@
 
 ### 获取内部试用包
 
-当前版本来自[已通过检查的构建](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605)，对应产品提交 `065aa67`，包含 Windows 最新收尾修复。以下是实际生成的包，不是源码压缩包。
+当前版本来自[已通过检查的构建](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605)，对应历史 CI 产品版本 `065aa67`，包含 Windows 最新收尾修复。以下是实际生成的包，不是源码压缩包。
 
 | 平台 | 下载入口 | 解压后要使用的文件 |
 | --- | --- | --- |
 | Mac，Apple Silicon / arm64 | [Mac 试用包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605/artifacts/10871746097) | `SideTask-macos.zip` 内的 `SideTask.app` |
 | Windows，x64 | [Windows 安装包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605/artifacts/10871976501) | 解压目录下 `src-tauri/target/release/bundle/nsis/SideTask_0.1.0_x64-setup.exe` |
 
-GitHub 下载的产物可能还有一层 ZIP，先解压外层；Mac 再解压里面的 `SideTask-macos.zip`。若 GitHub 要求登录，先登录后下载。此批产物保留 14 天，当前到期日为 **2026-10-09 UTC**；失效后查看 [STATUS](../delivery/STATUS.md) 的最新下载入口，或联系维护者获取新包。当前没有正式 Release 下载渠道。
+GitHub 下载的产物可能还有一层 ZIP，先解压外层；Mac 再解压里面的 `SideTask-macos.zip`。若 GitHub 要求登录，先登录后下载。此批产物保留 14 天，当前到期日为 **2026-10-09 UTC**；失效后查看 [项目首页](../../README.md#下载与安装)的最新下载入口，或联系维护者获取新包。当前没有正式 Release 下载渠道。
 
 本批没有 Intel Mac 或 Windows ARM 原生包。Mac 构建配置的最低版本为 macOS 12.0，但最低系统与完整兼容范围仍在验收，不等于所有符合版本号的设备均已验证。
 
@@ -302,7 +302,7 @@ GitHub 下载的产物可能还有一层 ZIP，先解压外层；Mac 再解压�
 | 关闭大窗后程序怎么还在？ | 这是常驻设计。菜单栏／托盘可恢复；要结束进程，选择“退出 SideTask” |
 | 找不到边缘把手或小窗 | 从菜单栏／托盘恢复控制台，检查“启用边缘入口”并保存，再点“打开边缘小窗”；若有窗口设置错误，先重试应用设置 |
 | 鼠标移过去没有展开 | 默认单击模式，需要点把手；想用悬停，在设置中主动选择并保存 |
-| 点击外部没有收起 | 检查是否保持展开、拖动／缩放／退出确认中；单纯切换焦点不会触发收起。若使用旧版Windows包，请更新到STATUS记录的最新修复包 |
+| 点击外部没有收起 | 检查是否保持展开、拖动／缩放／退出确认中；单纯切换焦点不会触发收起。若使用旧版Windows包，请查看[项目首页](../../README.md#下载与安装)的最新修复包 |
 | 为什么任务不在“全部任务”里？ | 先清空搜索；已完成去“已完成”，删除项去“回收站”。“全部任务”默认显示未完成 |
 | 移出今日后任务去哪了？ | 原任务在全部任务或已完成中，DDL 保留；有旧计划的未完成项可能回到“此前未完成” |
 | 今日勾选后 DDL 列表也没了？ | 同一任务已完成，退出了 DDL 未完成列表；去已完成查看或撤销 |
@@ -316,8 +316,8 @@ GitHub 下载的产物可能还有一层 ZIP，先解压外层；Mac 再解压�
 
 ## 当前范围与反馈
 
-已有 Mac arm64 App 和 Windows x64 安装包；当前仍为内部试用。Windows真实外点、隐藏草稿及两阶段退出已完成限定单屏复验；多屏／混合DPI真机验收按用户要求本轮豁免，保持未验证。完整系统手势、休眠／Spaces／虚拟桌面、长期试用和签名分发仍在完善。
+已有 Mac arm64 App 和 Windows x64 安装包；当前仍为内部试用。Windows真实外点、隐藏草稿及两阶段退出已完成限定单屏复验；多屏／混合 DPI 真机仍未验证。完整系统手势、休眠／Spaces／虚拟桌面、长期试用和签名分发仍在完善。
 
 当前不提供子任务、部分进度、重复任务、AI 规划、日历聚合、手机端、账号云同步、主动 DDL 提醒、全局快捷呼出或开机启动。设置中没有的选项不要按旧需求草案寻找。
 
-反馈问题时，可通过[仓库 Issues](https://github.com/zhouchji-ops/Sidetask/issues)或与维护者现有的沟通渠道提供：应用版本／包名、系统与芯片架构、显示器数量和缩放、展开模式、重现步骤、预期与实际结果、完整错误文字。截图隐藏个人任务；不要公开上传个人数据库、备份或敏感正文。产品验收与开发接续见 [STATUS](../delivery/STATUS.md) 和[平台任务分工](../delivery/NEXT_STAGE.md)。
+反馈问题时，可通过[仓库 Issues](https://github.com/zhouchji-ops/Sidetask/issues)或与维护者现有的沟通渠道提供：应用版本／包名、系统与芯片架构、显示器数量和缩放、展开模式、重现步骤、预期与实际结果、完整错误文字。截图隐藏个人任务；不要公开上传个人数据库、备份或敏感正文。产品验证范围见[验证状态](../VALIDATION.md)，开发方式见[桌面客户端说明](../../apps/desktop/README.md)。

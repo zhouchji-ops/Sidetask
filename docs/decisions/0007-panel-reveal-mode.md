@@ -16,8 +16,8 @@ Mac采用AppKit NSEvent local+global mouse-down monitor（left/right/other）。
 
 Windows 分支 `d05684b` 和首轮整合曾保留原生失焦收起与输入保护；该历史路径已被真实 mouse-down 观察替换。Windows 独立消息线程安装 WH_MOUSE_LL，事件物理点经 HWND child/root/owner 和 capture/menu 路由判断，观察所有鼠标键且始终放行原输入。事件时间戳转换为 Instant 后使用同一 outside_click_hides 门禁；纯失焦不触发，外点可隐藏草稿。正常退出卸载，安装失败可见。
 
-没有改用80ms按钮采样。API选择、Hook超时限制、固定依赖与许可见[Windows实现说明](../research/WINDOWS_OUTSIDE_CLICK.md)，实际单屏结果见[验收记录](../../tests/manual/2026-09-25-windows-outside-click.md)。侧键/交换主键、完整手势和混DPI多屏需补真实设备证据；B45 保持 In progress，旧分支或浏览器证据不能替代整合版通过。
+没有改用80ms按钮采样。API选择、Hook超时限制、固定依赖与许可见[Windows实现说明](../research/WINDOWS_OUTSIDE_CLICK.md)，实际单屏结果见内部验收记录（本地保留，未随公开仓库分发）。侧键/交换主键、完整手势和混DPI多屏需补真实设备证据；B45 保持 In progress，旧分支或浏览器证据不能替代整合版通过。
 
 ## 数据兼容
 
-旧程序Settings拒绝未知字段；因此schema5建立明确降级边界。旧schema1–4先创建完整一致性before-schema-5备份，再事务升级marker；不重编码原snapshot/placement。只读内存补click，后续正常成功写入使用新格式。便携任务备份仍v2并保留本机设置，完整SQLite恢复则恢复备份中的偏好。验证与实际平台边界见[STATUS](../delivery/STATUS.md)和[B45](../delivery/BACKLOG.md)。
+旧程序Settings拒绝未知字段；因此schema5建立明确降级边界。旧schema1–4先创建完整一致性before-schema-5备份，再事务升级marker；不重编码原snapshot/placement。只读内存补click，后续正常成功写入使用新格式。便携任务备份仍v2并保留本机设置，完整SQLite恢复则恢复备份中的偏好。当前验证状态与实际平台边界见[验证摘要](../VALIDATION.md)。

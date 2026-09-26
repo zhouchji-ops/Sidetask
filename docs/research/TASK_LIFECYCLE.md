@@ -87,4 +87,4 @@ cargo test --locked application::       9 passed / 0 failed（0.65秒）
 
 便携备份测试覆盖 v2回收站删除时间（含纳秒）和所有计划导出→预览→恢复→SQLite重启、设备信息保留、修订号严格提高；v1缺失/null兼容与非空删除状态拒绝，实际v1恢复替换当前回收站集合。Trash/Restore写入失败分别验证完整已发布快照不变；原备份距离10MiB仅16字节余量时增加删除时间会明确拒绝，任务保持原状态，未越过可恢复容量或悄悄丢弃回收站。
 
-本次继续核对上文两项固定 GitHub 文件与 LICENSE，只使用已记录的行为参考，不复制 GPL/AGPL 实现、没有新增数据依赖。原生工作包独占执行的全 Rust 集成结果：`cargo test --locked` **88/88**（1.85秒），`cargo fmt --check`、`cargo clippy --locked --all-targets -- -D warnings` 均通过。最终95项TS、60项UI和Mac生产构建通过，包含脏草稿、多窗口、失败焦点和万条回收站回归。最后资源 index-GFNXw43Q.js / index-Cp14iSy_.css 已打包并本地验签。Mac原生流程因锁屏尚未执行；Windows与原生演练不借用自动化结果，详见[生命周期验收记录](../../tests/manual/2026-09-25-task-lifecycle.md)。本工作包未设Done，不将自动化当作可发布证明。
+本次继续核对上文两项固定 GitHub 文件与 LICENSE，只使用已记录的行为参考，不复制 GPL/AGPL 实现、没有新增数据依赖。原生工作包独占执行的全 Rust 集成结果：`cargo test --locked` **88/88**（1.85秒），`cargo fmt --check`、`cargo clippy --locked --all-targets -- -D warnings` 均通过。最终95项TS、60项UI和Mac生产构建通过，包含脏草稿、多窗口、失败焦点和万条回收站回归。最后资源 index-GFNXw43Q.js / index-Cp14iSy_.css 已打包并本地验签。Mac原生流程因锁屏尚未执行；Windows与原生演练不借用自动化结果，详见内部验收记录（本地保留，未随公开仓库分发）。本工作包未设Done，不将自动化当作可发布证明。
