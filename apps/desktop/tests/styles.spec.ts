@@ -87,22 +87,33 @@ test('设置控件滚入视口后不被固定保存栏遮住', async ({ page }) 
   }
 });
 
-test('四款风格立即保存、跨窗口同步及逐款重载，保留全部任务与计划', async ({ page, context }) => {
-  const initial = createSeed(date);
-  initial.settings.theme = 'dark';
-  initial.tasks[1].notes = '验证换肤保留：备注、完成时间、任务版本和全部历史计划。';
-  initial.plans.push({ taskId: initial.tasks[1].id, date: '2026-09-23', sortOrder: 7 });
-  await seed(page, initial);
-  await page.goto('/?surface=console');
-  const panel = await context.newPage();
-  await panel.setViewportSize({ width: 368, height: 610 });
-  await panel.goto('/?surface=edge-panel');
-  const handle = await context.newPage();
-  await handle.goto('/?surface=edge-handle');
-  await settings(page);
+// Give each transition its own fixture and timeout: four rounds of three-window
+// checks and reloads exceeded the shared 30-second budget on Windows CI.
+// Seed the preceding style to preserve every edge of paper → studio → editorial → paper → mono.
+for (const [previous, style] of [
+  [styles[0], styles[1]],
+  [styles[1], styles[2]],
+  [styles[2], styles[0]],
+  [styles[0], styles[3]],
+] as const) {
+  test(`${previous.name}→${style.name}：立即保存、跨窗口同步及重载，保留全部任务与计划`, async ({ page, context }) => {
+    const initial = createSeed(date);
+    initial.settings.theme = 'dark';
+    initial.settings.uiStyle = previous.value;
+    initial.tasks[1].notes = '验证换肤保留：备注、完成时间、任务版本和全部历史计划。';
+    initial.plans.push({ taskId: initial.tasks[1].id, date: '2026-09-23', sortOrder: 7 });
+    await seed(page, initial);
+    await page.goto('/?surface=console');
+    const panel = await context.newPage();
+    await panel.setViewportSize({ width: 368, height: 610 });
+    await panel.goto('/?surface=edge-panel');
+    const handle = await context.newPage();
+    await handle.goto('/?surface=edge-handle');
+    await settings(page);
+    for (const surface of [page, panel, handle]) {
+      await expect(surface.locator('html')).toHaveAttribute('data-style', previous.value);
+    }
 
-  // End on a non-default style, so a reload cannot pass by silently resetting to paper.
-  for (const style of [styles[1], styles[2], styles[0], styles[3]]) {
     const option = page.getByRole('button', { name: `切换到${style.name}风格`, exact: true });
     await option.click();
     await expect(option).toHaveAttribute('aria-pressed', 'true');
@@ -122,8 +133,8 @@ test('四款风格立即保存、跨窗口同步及逐款重载，保留全部�
     await expect(panel.locator('html')).toHaveAttribute('data-style', style.value);
     await settings(page);
     await expect(page.getByRole('button', { name: `切换到${style.name}风格`, exact: true })).toHaveAttribute('aria-pressed', 'true');
-  }
-});
+  });
+}
 
 test('旧浏览器快照缺少风格字段时默认纸笺，不重置用户数据', async ({ page }) => {
   const initial = createSeed(date);
