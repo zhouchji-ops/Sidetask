@@ -1,5 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
-  <rect x="80" y="80" width="864" height="864" rx="220" fill="#244F43"/>
+  <defs>
+    <linearGradient id="lime-gradient" x1="80" y1="944" x2="944" y2="80" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#BDD77E"/>
+      <stop offset="1" stop-color="#6A9C50"/>
+    </linearGradient>
+  </defs>
+  <rect x="80" y="80" width="864" height="864" rx="220" fill="url(#lime-gradient)"/>
   <rect x="106" y="106" width="812" height="812" rx="202" stroke="#F7F8F2" stroke-opacity=".10" stroke-width="3"/>
   <path d="M327 330H641M327 504H548M327 678H455" stroke="#F9F8F3" stroke-width="57" stroke-linecap="round"/>
   <path d="M769 239V785" stroke="#C9D7BE" stroke-opacity=".55" stroke-width="24" stroke-linecap="round"/>
