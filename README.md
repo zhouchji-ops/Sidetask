@@ -6,7 +6,7 @@
 
 [**完整使用说明书**](docs/product/USER_GUIDE.md) · [下载与安装](#下载与安装)
 
-当前版本为 **0.1.0 内部试用版**。下方历史构建已有 Mac arm64 App 和 Windows x64 安装包；当前源码新增的三列表拖动排序需要包含本次变更的新构建。
+当前版本为 **0.1.0 内部试用版**。下方提供 Mac arm64 App 和 Windows x64 安装包，均已包含今日计划、全部任务和截止日期的拖动排序。
 
 ## 用侧笺做什么
 
@@ -22,16 +22,16 @@
 
 ## 下载与安装
 
-这批安装包来自[已通过检查的 CI](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605)，对应历史 CI 产品版本 `065aa67`，包含 2026-09-25 Windows 收尾修复，不含当前源码新增的三列表拖动排序。
+这批安装包来自[已通过检查的 CI](https://github.com/zhouchji-ops/Sidetask/actions/runs/36426381908)，对应产品版本 `5dc3a23`，包含 2026-09-28 三列表拖动排序及紧凑小窗布局修复。
 
 | 平台 | 下载 | 文件 |
 | --- | --- | --- |
-| Mac · Apple Silicon / arm64 | [下载 Mac 内部试用包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605/artifacts/10871746097) | `SideTask-macos.zip` 内的 `SideTask.app` |
-| Windows · x64 | [下载 Windows 内部安装包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605/artifacts/10871976501) | `SideTask_0.1.0_x64-setup.exe` |
+| Mac · Apple Silicon / arm64 | [下载 Mac 内部试用包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36426381908/artifacts/10972335597) | `SideTask-macos.zip` 内的 `SideTask.app` |
+| Windows · x64 | [下载 Windows 内部安装包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36426381908/artifacts/10973710003) | `SideTask_0.1.0_x64-setup.exe` |
 
 先解压 GitHub 产物的外层 ZIP。Mac 再解压其中的 App 压缩包；Windows 在解压目录内找到安装器。完整步骤、包摘要、更新和首次启动见[使用说明书：安装与更新](docs/product/USER_GUIDE.md#安装与更新)。
 
-当前 Mac 包为临时签名、未公证，Windows 包未签名；没有正式 Release。这批 CI 产物保留 14 天，到期日为 **2026-10-09 UTC**。链接失效后请查看本节更新或联系维护者，不把源码 ZIP 当作安装包。
+当前 Mac 包为临时签名、未公证，Windows 包未签名；没有正式 Release。这批 CI 产物保留 14 天，到期日为 **2026-10-12 UTC**。链接失效后请查看本节更新或联系维护者，不把源码 ZIP 当作安装包。
 
 ## 第一次使用
 

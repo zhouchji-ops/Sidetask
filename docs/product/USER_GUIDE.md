@@ -1,6 +1,6 @@
 # 侧笺 · SideTask 使用说明书
 
-适用版本：**0.1.0 内部试用版源码**。更新：2026-09-28。说明包含当前源码的三列表拖动排序；下方历史试用包尚不含这次排序更新，使用该功能需要包含本次变更的新构建。
+适用版本：**0.1.0 内部试用版**（构建 `5dc3a23`）。更新：2026-09-28。说明与下方试用包均包含今日计划、全部任务和截止日期的拖动排序。
 
 侧笺有两个界面：**小窗用于随手查看、添加和勾选，大窗用于集中管理和设置**。两者共用本机任务数据，核心使用无需注册账号。Mac 与 Windows 各自保存数据，目前没有云同步。
 
@@ -26,14 +26,14 @@
 
 ### 获取内部试用包
 
-以下历史试用包来自[已通过检查的构建](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605)，对应产品版本 `065aa67`，包含 2026-09-25 Windows 收尾修复，不含 2026-09-28 三列表拖动排序。以下是实际生成的包，不是源码压缩包。
+以下试用包来自[已通过检查的构建](https://github.com/zhouchji-ops/Sidetask/actions/runs/36426381908)，对应产品版本 `5dc3a23`，包含 2026-09-28 三列表拖动排序及紧凑小窗布局修复。以下是实际生成的包，不是源码压缩包。
 
 | 平台 | 下载入口 | 解压后要使用的文件 |
 | --- | --- | --- |
-| Mac，Apple Silicon / arm64 | [Mac 试用包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605/artifacts/10871746097) | `SideTask-macos.zip` 内的 `SideTask.app` |
-| Windows，x64 | [Windows 安装包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605/artifacts/10871976501) | 解压目录下 `src-tauri/target/release/bundle/nsis/SideTask_0.1.0_x64-setup.exe` |
+| Mac，Apple Silicon / arm64 | [Mac 试用包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36426381908/artifacts/10972335597) | `SideTask-macos.zip` 内的 `SideTask.app` |
+| Windows，x64 | [Windows 安装包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36426381908/artifacts/10973710003) | 解压目录下 `src-tauri/target/release/bundle/nsis/SideTask_0.1.0_x64-setup.exe` |
 
-GitHub 下载的产物可能还有一层 ZIP，先解压外层；Mac 再解压里面的 `SideTask-macos.zip`。若 GitHub 要求登录，先登录后下载。此批产物保留 14 天，当前到期日为 **2026-10-09 UTC**；失效后查看 [项目首页](../../README.md#下载与安装)的最新下载入口，或联系维护者获取新包。当前没有正式 Release 下载渠道。
+GitHub 下载的产物可能还有一层 ZIP，先解压外层；Mac 再解压里面的 `SideTask-macos.zip`。若 GitHub 要求登录，先登录后下载。此批产物保留 14 天，当前到期日为 **2026-10-12 UTC**；失效后查看 [项目首页](../../README.md#下载与安装)的最新下载入口，或联系维护者获取新包。当前没有正式 Release 下载渠道。
 
 本批没有 Intel Mac 或 Windows ARM 原生包。Mac 构建配置的最低版本为 macOS 12.0，但最低系统与完整兼容范围仍在验收，不等于所有符合版本号的设备均已验证。
 
@@ -66,8 +66,8 @@ GitHub 下载的产物可能还有一层 ZIP，先解压外层；Mac 再解压�
 
 | 文件 | SHA-256 |
 | --- | --- |
-| `SideTask-macos.zip` | `ae9c6ee8a081d872d30a6a7e571aaca7f8d1675db8a6cbf0cc01328689cbcbf0` |
-| `SideTask_0.1.0_x64-setup.exe` | `83c57b2bd0945095ea17bd8496681836543d631a9d09fb15d35b7b6c9961ea78` |
+| `SideTask-macos.zip` | `f6175f5a42d61a701ece79c4191c97f81b1dfcdc07fa30c719deed96b7bb1454` |
+| `SideTask_0.1.0_x64-setup.exe` | `cb2f9c8989c67ef08040af94e06864ef6e54fbe5fd419583ff04f00b9a47ecb1` |
 
 ## 第一次使用
 
