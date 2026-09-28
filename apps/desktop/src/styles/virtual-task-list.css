@@ -16,6 +16,11 @@
 .reorder-notice.is-error { color: var(--danger, #b53a35); }
 .edge-sort select { max-width: 106px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; padding: 0; }
 .edge-sort select option { background: var(--surface); color: var(--ink); }
+/* Reserve room for the handle without making compact deadline metadata wrap. */
+@container edge (max-width: 340px) {
+  :root[data-style] .edge-panel .virtual-task-item[data-sortable] > .task-row-compact { padding-left: 2px; padding-right: 2px; gap: 4px; }
+  :root[data-style] .edge-panel .virtual-task-item[data-sortable] .task-meta { column-gap: 6px; }
+}
 :root[data-style='studio'] .virtual-task-list.task-list > [data-first] .task-row,
 :root[data-style='studio'] .task-list > .virtual-task-list > [data-first] .task-row { border-radius: 7px 7px 0 0; }
 :root[data-style='studio'] .virtual-task-list.task-list > [data-last] .task-row,

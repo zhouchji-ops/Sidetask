@@ -235,6 +235,12 @@ for (const surface of ['console', 'edge-panel'] as const) {
     await expect(titleList(list)).toHaveText([titles[2], titles[0], titles[1]]);
     expect((await probe(page)).writes).toBe(1);
     await expect(page.locator('.reorder-notice').filter({ hasText: '顺序已保存' })).toBeVisible();
+    // The previous drop may leave this short panel partially scrolled. Start
+    // this notice-layout check at the top: otherwise edge auto-scroll can move
+    // the first row below the stale target point before mouse-up, legitimately
+    // turning the drop into an outside-list cancellation.
+    await list.evaluate(element => { element.closest<HTMLElement>('.main-content,.edge-scroll')!.scrollTop = 0; });
+    await settle(page);
     await handle(list, titles[0]).scrollIntoViewIfNeeded();
     const beforeSecondDrag = await row(list, titles[0]).boundingBox();
     await beginDrag(page, list, titles[0]);
