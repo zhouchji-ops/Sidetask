@@ -1,6 +1,6 @@
 # 数据模型与业务一致性
 
-状态：当前实现继续使用 SQLite 的 app_state JSON snapshot。schema 3 加入 Task.deletedAt；schema 4 为 placement.console 及字段合并建立兼容边界；当前 schema 5 为 Settings.revealMode 建立新边界，任务协议保持不变。类型见 `apps/desktop/src/lib/types.ts` 与 Rust 平台几何类型，实际协议见本文末尾各扩展小节。下方实体关系与目标协议用于说明模型设计；实际存储格式为 `app_state` JSON 快照，版本控制使用 `Snapshot.revision` 和 `Task.revision`，具体格式以各“实际”协议小节为准。控制台与边缘小窗共享 Rust 服务和数据库。架构取舍见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md) 与 [ADR-0006](../decisions/0006-console-window-preferences.md)，实际完成度、测试数字与双平台验收见内部验证记录（本地保留，不随公开仓库分发）。
+状态：当前实现继续使用 SQLite 的 app_state JSON snapshot。schema 3 加入 Task.deletedAt；schema 4 为 placement.console 及字段合并建立兼容边界；schema 5 为 Settings.revealMode 建立边界；当前 schema 6 保存全部任务与 DDL 的独立手动顺序，便携备份为 v3。类型见 `apps/desktop/src/lib/types.ts` 与 Rust 平台几何类型，实际协议见本文末尾各扩展小节。下方实体关系与目标协议用于说明模型设计；实际存储格式为 `app_state` JSON 快照，版本控制使用 `Snapshot.revision` 和 `Task.revision`，具体格式以各“实际”协议小节为准。控制台与边缘小窗共享 Rust 服务和数据库。架构取舍见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md) 与 [ADR-0006](../decisions/0006-console-window-preferences.md)，实际完成度、测试数字与双平台验收见内部验证记录（本地保留，不随公开仓库分发）。
 
 首版仅有独立的大任务。模型中不设 `parent_id`、子任务表、任务依赖、步骤清单、百分比进度或父子完成聚合；备注是普通文本，不支持可独立勾选的步骤。一次勾选表示整项任务完成，加入今日也不会创建一天的小任务或进度记录。见 [ADR-0002](../decisions/0002-console-and-edge-panel.md)。
 
@@ -42,7 +42,7 @@
 
 每个 `plan_date` 保存一个 `revision`，用于检查同一天计划引用与排序的并发修改。添加、移出或重排计划在同一事务更新引用及该日 revision；一天尚无安排时按初始 revision 处理。任务内容修改不必递增计划 revision，任务完成状态依然只在 Task 内存一份。
 
-当前 schema 5 延续 schema 3 的 Snapshot.revision，保护全部计划操作，不新增每日 revision 字段。软删除/恢复另校验 Task.revision；同一服务内先验证版本，再保存并发布提交结果。
+当前 schema 6 延续 schema 3 的 Snapshot.revision，保护全部计划和列表排序操作，不新增每日 revision 字段。软删除/恢复另校验 Task.revision；同一服务内先验证版本，再保存并发布提交结果。
 
 ### DevicePreferences / PreferenceApplyState（目标）
 
@@ -91,6 +91,7 @@ MVP 历史计划仅记录「安排过」，不提供按历史日期统计完成�
 | addToToday | 校验计划 revision，插入今日引用并更新该日 revision；重复已存在引用无额外效果 | 不克隆任务，不改 DDL |
 | removeFromToday | 校验计划 revision，删除该日引用并更新该日 revision | 不删除 Task，不改变完成状态 |
 | reorderToday | 校验计划 revision，原子更新该日排序键并递增 revision | 不改变任务 DDL 或优先级 |
+| reorderTasks | 当前实际命令；校验快照 revision 和完整活动集合，原子更新全部任务或 DDL 手动顺序；DDL 同事务切手动模式 | 不改变 Task 内容、Task revision、DDL 或 DailyPlan |
 | completeTask | 校验任务 revision，置 done，写 completed_at，revision + 1 | 不逐列表分别勾选 |
 | reopenTask | 校验任务 revision，置 open，清 completed_at，revision + 1 | 不丢失计划、优先级或 DDL |
 | editTask | 校验 revision 后更新允许字段 | 不让过期界面静默覆盖较新数据 |
@@ -141,7 +142,7 @@ MVP 可在提交期间禁用重复提交按钮，等待服务端确认后更新 
 - 切换时区后，date 的约定仍按已保存时区解释；来源时区与当前时区不同则展示提示。MVP 可默认系统时区，后续再提供完整手动时区选择。
 - 对有夏令时的当地时间，不存在/歧义时刻需在输入转换时提示或让用户选择，不能静默漂移。
 
-默认 DDL 排序使用有效截止瞬间升序；date 使用下一日开始作为比较边界。同键再按 created_at、id。优先级模式的键为 `(priorityRank, effectiveDue, created_at, id)`；没有 DDL 的任务不参加 DDL 列表排序。
+默认 DDL 排序使用有效截止瞬间升序；date 使用下一日开始作为比较边界。同键再按 created_at、id。优先级模式的键为 `(priorityRank, effectiveDue, created_at, id)`；没有 DDL 的任务不参加 DDL 列表排序。手动模式先按保存的 deadlineOrder，未记录项目追加在后且彼此按默认日期键排序；没有保存过顺序时沿用默认日期顺序。全部任务独立使用 taskOrder，未记录项目按原 tasks 数组顺序追加。今日继续使用当天 Plan.sortOrder，三者互不重排，具体保存与恢复规则见 schema 6 小节。
 
 排序键不用于直接生成显示日期：date 用 due_date 及其保存时区的当前日历日判断「今天」；datetime 按当前显示时区的日历日判断「今天」，必要时显示原时区。逾期判断优先，依据有效截止瞬间。优先级模式以优先级分组，只保留日期标签，不用日期分组改变优先级主排序。
 
@@ -149,7 +150,7 @@ MVP 可在提交期间禁用重复提交按钮，等待服务端确认后更新 
 
 ## 备份、恢复与迁移
 
-- 导出内容含全部任务（含回收站）、全部计划、版本和导出时间；首版任务备份排除 DevicePreferences 等设备专属设置，恢复保留当前设备配置并重新校验窗口几何。便携 v2 读取 v1/v2 的实际兼容规则见末节。
+- 导出内容含全部任务（含回收站）、全部计划及其顺序、taskOrder、deadlineOrder、版本和导出时间；任务备份排除 DevicePreferences 等设备专属设置，恢复保留当前设备配置和 DDL 排序模式。当前便携 v3 读取 v1/v2/v3 的兼容规则见末节。
 - 导入前验证字段/外键/唯一性/版本，展示条数和处理策略，再一次事务落盘。MVP 优先「备份后整体恢复」，不实现含糊的自动多库合并。
 - 恢复、数据库迁移前创建一致性备份；失败不能把半更新库当成正常数据继续使用。整体恢复成功后通知两个任务窗口丢弃旧查询结果并重新取快照；当前提高版本号，目标协议另更换数据集代次。
 - 任务数据库、个人备份与导出不在源码目录，不提交 Git。
@@ -162,7 +163,7 @@ schema1 原型时期已在 JSON Settings 增加 `uiStyle`。Rust serde 及浏览
 
 ## schema 3 实际兼容与生命周期契约
 
-本节保留生命周期阶段引入的规则和迁移历史；当前数据库已升为 schema 5，新增设备元数据边界见末节，下面的 Task / Plan 规则继续适用。
+本节保留生命周期阶段引入的规则和迁移历史；当前数据库已升为 schema 6，设备元数据和列表顺序边界见末节，下面的 Task / Plan 规则继续适用。
 
 当前 Task 用 `completed`/`completedAt` 和 `dueDate`/`dueTime` 表示完成与 DDL；新截止日期可带 `dueTimezone`，精确时刻带 `dueAtUtc`。旧记录缺时区字段时保留原截止语义，普通标题/备注编辑不能重新固定时区。新增 `deletedAt` 对应 Rust `deleted_at: Option<String>`，serde default/skip_none，旧记录缺失或 null 均为未删除；非空值必须通过既有严格 UTC RFC3339 校验。该字段只能由生命周期动作修改，普通字段编辑不能注入它。
 
@@ -170,19 +171,19 @@ schema1 原型时期已在 JSON Settings 增加 `uiStyle`。Rust serde 及浏览
 
 reorderToday 的精确集合只包括当天未删除、未完成任务；已删除及已完成计划的排序值不参与重排。追加今日计划仅稳定压缩当日未删除任务的计划，保留删除项原值。恢复不调整任何 Plan；排序值相同时沿用 Plan 数组的稳定顺序，因此其他任务重排后不保证恢复到删除前的绝对行号。跨日按原计划重新投影，不创建今天的新引用。
 
-生命周期阶段的 SQLite schema1/2→3 先对完整数据库做保留 WAL 的副本预检，再创建校验可读、已同步的一致性 `before-schema-3` 备份；迁移事务只更新版本/身份标记，保留 snapshot 与 placement 原字节，不重编码任务。当时识别 schema1/2/3，候选保留 `before-schema-2`、`before-schema-3` 与 `safety-backup`。后续 schema 4 与当前 schema 5 的版本及备份规则见末节。迁移失败不以空库或演示数据替代，首次新库仍写入空快照。
+生命周期阶段的 SQLite schema1/2→3 先对完整数据库做保留 WAL 的副本预检，再创建校验可读、已同步的一致性 `before-schema-3` 备份；迁移事务只更新版本/身份标记，保留 snapshot 与 placement 原字节，不重编码任务。当时识别 schema1/2/3，候选保留 `before-schema-2`、`before-schema-3` 与 `safety-backup`。后续 schema 4/5 与当前 schema 6 的版本及备份规则见末节。迁移失败不以空库或演示数据替代，首次新库仍写入空快照。
 
-便携 JSON 的 schemaVersion 与 SQLite 版本独立：新导出 v2，导入接受 v1/v2，均包含完整 tasks/plans；v1 缺失或 null 的 deletedAt 作为未删除，v1 携带非空删除状态则拒绝。预览提供 taskCount、trashedTaskCount、planCount 和 exportedAt。整份恢复先备份当前库，再替换任务及回收站、保留设备设置，并将全局及所有导入任务 revision 提高到已见值以上；当前没有 dataset_epoch 字段。旧备份按备份时的完整集合恢复，不与现有回收站合并。回收站仍计入现有容量限制，元数据增长超限时保持原已提交状态并提示失败。
+便携 JSON 的 schemaVersion 与 SQLite 版本独立：生命周期阶段开始导出 v2、接受 v1/v2，均包含完整 tasks/plans；当前 v3 在末节补充顺序。v1 缺失或 null 的 deletedAt 作为未删除，v1 携带非空删除状态则拒绝。预览提供 taskCount、trashedTaskCount、planCount 和 exportedAt。整份恢复先备份当前库，再替换任务及回收站、保留设备设置，并将全局及所有导入任务 revision 提高到已见值以上；当前没有 dataset_epoch 字段。旧备份按备份时的完整集合恢复，不与现有回收站合并。回收站仍计入现有容量限制，元数据增长超限时保持原已提交状态并提示失败。
 
-本节任务规则在 schema 5 继续有效，不将自动化测试、文档同步或 Mac 证据写成双平台验收完成。来源与分阶段检查见 [TASK_LIFECYCLE](../research/TASK_LIFECYCLE.md)，当前验证范围与原始执行证据见内部验收记录（本地保留，未随公开仓库分发）。
+本节任务规则在 schema 6 继续有效，不将自动化测试、文档同步或 Mac 证据写成双平台验收完成。来源与分阶段检查见 [TASK_LIFECYCLE](../research/TASK_LIFECYCLE.md)，当前验证范围与原始执行证据见内部验收记录（本地保留，未随公开仓库分发）。
 
 ## 展开模式偏好（2026-09-25）
 
-Settings新增 `revealMode`（Rust `reveal_mode`），只接受 `click` / `hover`；新建与旧记录缺失时均默认 `click`。旧 `revealDelay` / `hideDelay` 保留读取和校验，悬停模式继续采用已保存值且仅该模式显示延迟设置。只读补默认不重写旧原文，下一次合法事务保存新字段；模式更新不改Task/Plan、几何或其他偏好。当前采用下述 schema5 兼容边界，便携任务备份v2不带设备偏好。Windows旧分支曾在schema4只读补默认，其原生/安装证据仍按旧SHA保留，不能据此省略整合版升级与降级拒绝验收。
+Settings新增 `revealMode`（Rust `reveal_mode`），只接受 `click` / `hover`；新建与旧记录缺失时均默认 `click`。旧 `revealDelay` / `hideDelay` 保留读取和校验，悬停模式继续采用已保存值且仅该模式显示延迟设置。只读补默认不重写旧原文，下一次合法事务保存新字段；模式更新不改Task/Plan、几何或其他偏好。该阶段采用下述 schema5 兼容边界，现由 schema6 继承；当时便携v2和当前v3均不带设备偏好。Windows旧分支曾在schema4只读补默认，其原生/安装证据仍按旧SHA保留，不能据此省略整合版升级与降级拒绝验收。
 
 ## 分区偏好的当前扩展
 
-Settings新增panelSplit（Rust panel_split:u8），缺省54，只接受30–70整数；属于本机偏好，便携任务备份不携带，整份任务恢复保留本机值。比例修改沿用统一设置事务，不改Task/Plan字段；同一设置冲突由版本及前端的初始比例核对处理。旧快照缺字段只读补默认，不重编码原文；正常提交后保存。分区比例单独落地时保持schema3，与uiStyle一样只支持新程序读旧库；旧schema3程序可能因未知设置字段拒绝读取。当时控制台placement扩展采用下述schema4备份迁移，当前由schema5继承，不支持降级继续编辑。分阶段记录见[窗口偏好计划](../research/WINDOW_PREFERENCES.md)。
+Settings新增panelSplit（Rust panel_split:u8），缺省54，只接受30–70整数；属于本机偏好，便携任务备份不携带，整份任务恢复保留本机值。比例修改沿用统一设置事务，不改Task/Plan字段；同一设置冲突由版本及前端的初始比例核对处理。旧快照缺字段只读补默认，不重编码原文；正常提交后保存。分区比例单独落地时保持schema3，与uiStyle一样只支持新程序读旧库；旧schema3程序可能因未知设置字段拒绝读取。当时控制台placement扩展采用下述schema4备份迁移，后续schema5及当前schema6继承该规则，不支持降级继续编辑。分阶段记录见[窗口偏好计划](../research/WINDOW_PREFERENCES.md)。
 
 ## schema 4 控制台设备元数据契约
 
@@ -210,7 +211,7 @@ Mac 先把窗口和各工作区按各自来源 scale 转到统一 AppKit 逻辑�
 
 输入、已存 placement 与合并结果均限 64 KiB，且须为 JSON 对象。数据库层不依赖平台几何类型；平台负责 console 字段和坐标语义。合并会重新编码 placement，因此承诺字段值互保；只有升级事务及 console-only 写入的 snapshot 承诺原文保持。两连接依次写入时仍合并最新元数据，控制台写入不能使过期任务基线变成有效。
 
-位置候选/恢复错误/忽略状态只在 ConsoleRuntime 内，不加入任务草稿或 portable JSON。恢复失败阻止自动采样覆盖旧保存值；显式重试保存当前位置，丢弃先采样当前值后取消这次保存。便携任务格式继续为 v2，读取 v1/v2，任务恢复保留 Settings 与全部 placement；完整 SQLite 恢复包含备份时设备配置。启动候选扩展为 before-schema-2 / before-schema-3 / before-schema-4 / safety-backup。
+位置候选/恢复错误/忽略状态只在 ConsoleRuntime 内，不加入任务草稿或 portable JSON。恢复失败阻止自动采样覆盖旧保存值；显式重试保存当前位置，丢弃先采样当前值后取消这次保存。该阶段便携任务格式为 v2、读取 v1/v2；当前格式见末节。任务恢复保留 Settings 与全部 placement，完整 SQLite 恢复包含备份时设备配置。该阶段启动候选扩展为 before-schema-2 / before-schema-3 / before-schema-4 / safety-backup，后续版本继续保留这些候选。
 
 实现决策及固定许可参考见 [ADR-0006](../decisions/0006-console-window-preferences.md)。本阶段Mac已开始单屏原生复验，Windows由另一开发机负责；当前平台验证范围见内部验证记录（本地保留，不随公开仓库分发）。合成数据、几何与状态测试不能替代多屏窗口或断电恢复证据。
 
@@ -222,6 +223,31 @@ Mac 先把窗口和各工作区按各自来源 scale 转到统一 AppKit 逻辑�
 
 ## schema 5 小窗展开方式契约
 
-当前 `PRAGMA user_version=5`。Settings新增 `revealMode: "click" | "hover"`（Rust reveal_mode:String）；新建和旧快照缺字段均默认click，非法字符串/null/数值拒绝。保留revealDelay/hideDelay，切模式不清它们。模式属于本机设置；便携备份仍v2，不携带或覆盖本机Settings。
+schema 5 阶段采用 `PRAGMA user_version=5`，当前版本见下节。Settings新增 `revealMode: "click" | "hover"`（Rust reveal_mode:String）；新建和旧快照缺字段均默认click，非法字符串/null/数值拒绝。保留revealDelay/hideDelay，切模式不清它们。模式属于本机设置；当时便携备份为v2，不携带或覆盖本机Settings。
 
 schema1–4预检通过后先生成校验并同步的 `sidetask-before-schema-5-<UUID>.sqlite3`，再IMMEDIATE事务升级marker；snapshot/placement原文字节不重编码，备份保留旧版本。只读补默认不写入，下一次成功业务提交才按新格式写完整snapshot。备份失败或迁移失败不修改旧内容/版本；schema1沿用设置application_id。旧程序拒绝schema5，不手工改版本降级。恢复候选支持before-schema-2/3/4/5和safety-backup。历史schema4段保留其引入的设备字段/合并规则。
+
+## schema 6 三列表手动顺序与便携 v3
+
+当前 `PRAGMA user_version=6`。决定见 [ADR-0008](../decisions/0008-independent-task-order.md)。仍使用同一 `app_state` 快照，不新增任务副本、Task 排序字段或列表修订号。
+
+| 字段 | 当前协议 |
+| --- | --- |
+| Snapshot.taskOrder | 全部任务的 Task ID 序列；Rust 为 `Vec<String>`，旧快照缺失默认空 |
+| Snapshot.deadlineOrder | 截止列表独立的 Task ID 序列；缺失默认空 |
+| Settings.ddlSort | `date` / `priority` / `manual`；新建仍默认 `date` |
+| Plan.sortOrder | 今日继续使用的当天顺序，协议不变 |
+
+两份 ID 序列可以只覆盖部分任务，但每个 ID 必须引用已有 Task，序列内部不能重复；null、错误类型、未知引用或重复 ID 均拒绝。完成、回收站或清除 DDL 不移除已有 ID，便于任务恢复后继续使用保存位置。空序列在 Rust 序列化时省略；兼容读取只补内存默认值，不重写原库。
+
+`reorderTasks {scope:"all"|"deadlines", taskIds}` 通过既有 mutate 提交，外层 mutate 参数 `expectedRevision` 取手势开始时的 `Snapshot.revision`。`all` 的完整集合是所有未完成、未删除 Task；`deadlines` 另要求有 `dueDate`。必须提交精确的完整活动集合，不能只提交已渲染或搜索得到的部分，也不能混入无资格任务。未知 scope、旧版本、缺失/重复 ID 在写入前拒绝。
+
+保存时把尚未记录的活动 ID 追加为新槽位，再只按请求顺序替换活动 ID 所占槽位；非活动 ID 的槽位不动。`all` 只更新 taskOrder；`deadlines` 只更新 deadlineOrder 并在同一事务中设 ddlSort=manual。只推进快照修订号，不改 Task 内容、Task revision、截止字段、完成/删除状态或 Plan；写入失败不发布新快照。今日仍只修改指定日期的活动 Plan.sortOrder，已完成/删除计划按原有稳定同键规则恢复，不承诺旧绝对行号。
+
+UI 投影先显示有排名的活动任务，再显示无排名任务：全部任务的后者沿用 tasks 数组顺序，DDL 后者使用默认 `(effectiveDue, createdAt, id)`。未记录过手动顺序时保持此前自然顺序。切换日期/重要程度不会清空 deadlineOrder；手动模式不改逾期计算或时间标签。排序数据属于共享列表，DDL 当前模式仍属于本机 Settings。
+
+schema1–5 经完整副本预检后，先创建校验并同步的 `sidetask-before-schema-6-<UUID>.sqlite3`，再在 IMMEDIATE 事务中更新版本；schema1 同时补既有 application_id。snapshot / placement 原文保持，备份内仍为升级前版本。备份失败零迁移写入，迁移失败回滚旧版本与数据。旧程序拒绝 schema6，不提供手工改版本降级；恢复候选继续接受 before-schema-2/3/4/5，新增 before-schema-6，并保留 safety-backup。
+
+便携 JSON 当前导出 `schemaVersion:3`，包含 tasks、plans、taskOrder、deadlineOrder 和 exportedAt；空顺序可省略，继续接受 v1/v2 缺失或空顺序。v1/v2 若携带非空 taskOrder/deadlineOrder 则拒绝，v1 的非空 deletedAt 限制继续有效。所有版本均校验顺序引用及任务/计划关系，旧客户端通过备份版本拒绝 v3，避免静默丢失新顺序。
+
+整份 JSON 恢复先备份，再替换任务、计划和两份顺序，保留当前 Settings 与 placement，并提高全局及任务修订号以使旧编辑失效。因此导入 DDL 手动顺序后，若本机仍使用日期/重要程度模式，需要选择手动才能显示该顺序；恢复旧 v1/v2 会清除现有两份自定义顺序，使用其默认值，不与现有排序合并。导出容量上限及“不能提交当前版本无法导出和恢复的数据”的保护包含新增顺序字段。

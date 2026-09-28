@@ -9,13 +9,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 const APPLICATION_ID: i64 = 0x5344544b;
 const MAX_SNAPSHOT_BYTES: i64 = 16 * 1024 * 1024;
 const MAX_PLACEMENT_BYTES: usize = 64 * 1024;
 
 /// One shared database and one transaction per command. Older schemas are
-/// retained in a verified SQLite backup before the schema 5 marker upgrade.
+/// retained in a verified SQLite backup before the schema 6 marker upgrade.
 pub trait Repository: Send {
     fn load(&self) -> Result<Option<Snapshot>, String>;
     fn save(&mut self, snapshot: &Snapshot) -> Result<(), String>;
@@ -72,7 +72,7 @@ fn verify_schema(connection: &Connection) -> Result<i64, String> {
     let application: i64 = connection
         .query_row("PRAGMA application_id", [], |r| r.get(0))
         .map_err(storage_error)?;
-    if ![1, 2, 3, 4, SCHEMA_VERSION].contains(&version) {
+    if ![1, 2, 3, 4, 5, SCHEMA_VERSION].contains(&version) {
         return Err(format!(
             "数据库版本 {version} 不受此版本支持。原数据未覆盖。"
         ));
@@ -360,9 +360,9 @@ impl SqliteRepository {
                         path,
                         version,
                         if version == 1 {
-                            "PRAGMA application_id=1396986955; PRAGMA user_version=5;"
+                            "PRAGMA application_id=1396986955; PRAGMA user_version=6;"
                         } else {
-                            "PRAGMA user_version=5;"
+                            "PRAGMA user_version=6;"
                         },
                     )?;
                 }
@@ -642,6 +642,136 @@ mod tests {
         assert!(temp.backups().is_empty());
     }
     #[test]
+    fn schema_five_upgrade_preserves_raw_content_and_creates_recoverable_schema_six_backup() {
+        let temp = TempDatabase::new();
+        let legacy = temp.legacy_version(5);
+        let value: Value = serde_json::from_str(&legacy).unwrap();
+        let raw = format!("\n{}\n", serde_json::to_string_pretty(&value).unwrap());
+        let placement = r#"{ "offset":0.3, "console":{"width":1000}, "usageGuideSeen":true }"#;
+        let connection = Connection::open(&temp.path).unwrap();
+        connection
+            .execute("UPDATE app_state SET value=?1 WHERE key='snapshot'", [&raw])
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO app_state(key,value) VALUES('placement',?1)",
+                [placement],
+            )
+            .unwrap();
+        drop(connection);
+        let repo = SqliteRepository::open(&temp.path).unwrap();
+        assert_eq!(verify_database(&repo.connection).unwrap(), 6);
+        assert_eq!(read_snapshot(&repo.connection).unwrap().0, raw);
+        assert_eq!(repo.load_placement().unwrap().as_deref(), Some(placement));
+        let loaded = repo.load().unwrap().unwrap();
+        assert!(loaded.task_order.is_empty() && loaded.deadline_order.is_empty());
+        assert_eq!(serde_json::to_value(&loaded.tasks).unwrap(), value["tasks"]);
+        assert_eq!(serde_json::to_value(&loaded.plans).unwrap(), value["plans"]);
+        assert_eq!(loaded.revision, 42);
+        let candidates = recovery::list_candidates(&temp.directory).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].kind, "before-schema-6");
+        assert_eq!(candidates[0].schema_version, 5);
+        let backup = Connection::open_with_flags(
+            temp.directory.join(&candidates[0].file_name),
+            OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        assert_eq!(verify_database(&backup).unwrap(), 5);
+        assert_eq!(read_snapshot(&backup).unwrap().0, raw);
+        let backup_placement: String = backup
+            .query_row(
+                "SELECT value FROM app_state WHERE key='placement'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(backup_placement, placement);
+        drop(backup);
+        drop(repo);
+        let reopened = SqliteRepository::open(&temp.path).unwrap();
+        assert_eq!(read_snapshot(&reopened.connection).unwrap().0, raw);
+        assert_eq!(temp.backups().len(), 1);
+    }
+    #[test]
+    fn schema_five_migration_failure_rolls_back_and_backup_failure_prevents_writes() {
+        let temp = TempDatabase::new();
+        let raw = temp.legacy_version(5);
+        let mut connection = Connection::open(&temp.path).unwrap();
+        configure(&connection).unwrap();
+        let unavailable = temp
+            .directory
+            .join("missing-directory")
+            .join("tasks.sqlite3");
+        assert!(
+            migrate_schema(&mut connection, &unavailable, 5, "PRAGMA user_version=6;").is_err()
+        );
+        assert_eq!(verify_database(&connection).unwrap(), 5);
+        assert_eq!(read_snapshot(&connection).unwrap().0, raw);
+        assert!(temp.backups().is_empty());
+        let error = migrate_schema(&mut connection, &temp.path, 5,
+            "PRAGMA user_version=6; UPDATE app_state SET value='failed write'; SELECT missing_column FROM app_state;").unwrap_err();
+        assert!(error.contains("安全备份"));
+        assert_eq!(verify_database(&connection).unwrap(), 5);
+        assert_eq!(read_snapshot(&connection).unwrap().0, raw);
+        let candidates = recovery::list_candidates(&temp.directory).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].schema_version, 5);
+        assert_eq!(candidates[0].kind, "before-schema-6");
+    }
+    #[test]
+    fn manual_orders_survive_sqlite_restart_and_portable_restore() {
+        let temp = TempDatabase::new();
+        let mut initial = Snapshot::demo("2026-09-28");
+        initial.task_order = initial
+            .tasks
+            .iter()
+            .rev()
+            .map(|task| task.id.clone())
+            .collect();
+        initial.deadline_order = initial.tasks.iter().map(|task| task.id.clone()).collect();
+        initial.settings.ddl_sort = "manual".into();
+        let mut repo = SqliteRepository::open(&temp.path).unwrap();
+        repo.save(&initial).unwrap();
+        drop(repo);
+        let mut service =
+            TaskService::new(Box::new(SqliteRepository::open(&temp.path).unwrap())).unwrap();
+        assert_eq!(service.snapshot.task_order, initial.task_order);
+        assert_eq!(service.snapshot.deadline_order, initial.deadline_order);
+        assert_eq!(service.snapshot.settings.ddl_sort, "manual");
+        let backup = service.export_backup().unwrap();
+        service
+            .mutate(
+                Action::ResetDemo {
+                    date: "2026-09-29".into(),
+                },
+                service.snapshot.revision,
+            )
+            .unwrap();
+        assert!(
+            service.snapshot.task_order.is_empty() && service.snapshot.deadline_order.is_empty()
+        );
+        let restored = service
+            .restore_backup(&backup, service.snapshot.revision)
+            .unwrap();
+        assert_eq!(restored.snapshot.task_order, initial.task_order);
+        assert_eq!(restored.snapshot.deadline_order, initial.deadline_order);
+        assert_eq!(restored.snapshot.settings.ddl_sort, "manual");
+        drop(service);
+        let reopened = SqliteRepository::open(&temp.path)
+            .unwrap()
+            .load()
+            .unwrap()
+            .unwrap();
+        assert_eq!(reopened.task_order, initial.task_order);
+        assert_eq!(reopened.deadline_order, initial.deadline_order);
+        for (loaded, original) in reopened.tasks.iter().zip(&initial.tasks) {
+            assert_eq!(loaded.id, original.id);
+            assert_eq!(loaded.due_date, original.due_date);
+            assert_eq!(loaded.completed, original.completed);
+        }
+    }
+    #[test]
     fn legacy_upgrade_preserves_snapshot_bytes_and_verified_pre_upgrade_copy() {
         let temp = TempDatabase::new();
         let raw = temp.legacy();
@@ -655,7 +785,7 @@ mod tests {
             .file_name()
             .unwrap()
             .to_string_lossy()
-            .starts_with("sidetask-before-schema-5-"));
+            .starts_with("sidetask-before-schema-6-"));
         let backup =
             Connection::open_with_flags(&backups[0], OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         assert_eq!(verify_database(&backup).unwrap(), 1);
@@ -694,7 +824,7 @@ mod tests {
         assert_eq!(repo.load_placement().unwrap().as_deref(), Some(placement));
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].kind, "before-schema-5");
+        assert_eq!(candidates[0].kind, "before-schema-6");
         assert_eq!(candidates[0].schema_version, 2);
         let backup = Connection::open_with_flags(
             temp.directory.join(&candidates[0].file_name),
@@ -726,7 +856,7 @@ mod tests {
             &mut connection,
             &temp.path,
             2,
-            "PRAGMA user_version=5; SELECT missing_column FROM app_state;",
+            "PRAGMA user_version=6; SELECT missing_column FROM app_state;",
         )
         .unwrap_err();
         assert!(error.contains("安全备份"));
@@ -763,7 +893,7 @@ mod tests {
         assert_eq!(repo.load_placement().unwrap().as_deref(), Some(placement));
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].kind, "before-schema-5");
+        assert_eq!(candidates[0].kind, "before-schema-6");
         assert_eq!(candidates[0].schema_version, 3);
         let backup = Connection::open_with_flags(
             temp.directory.join(&candidates[0].file_name),
@@ -799,7 +929,7 @@ mod tests {
             )
             .unwrap();
         let error = migrate_schema(&mut connection, &temp.path, 3,
-            "PRAGMA user_version=5; UPDATE app_state SET value='injected failed change'; SELECT missing_column FROM app_state;").unwrap_err();
+            "PRAGMA user_version=6; UPDATE app_state SET value='injected failed change'; SELECT missing_column FROM app_state;").unwrap_err();
         assert!(error.contains("安全备份"));
         assert_eq!(verify_database(&connection).unwrap(), 3);
         assert_eq!(read_snapshot(&connection).unwrap().0, raw);
@@ -813,7 +943,7 @@ mod tests {
         assert_eq!(remaining, placement);
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].kind, "before-schema-5");
+        assert_eq!(candidates[0].kind, "before-schema-6");
         assert_eq!(candidates[0].schema_version, 3);
         let backup = Connection::open_with_flags(
             temp.directory.join(&candidates[0].file_name),
@@ -875,7 +1005,7 @@ mod tests {
 
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].kind, "before-schema-5");
+        assert_eq!(candidates[0].kind, "before-schema-6");
         assert_eq!(candidates[0].schema_version, 4);
         let backup = Connection::open_with_flags(
             temp.directory.join(&candidates[0].file_name),
@@ -899,7 +1029,7 @@ mod tests {
         assert_eq!(
             temp.backups().len(),
             1,
-            "opening schema 5 must not create another migration backup"
+            "opening schema 6 must not create another migration backup"
         );
     }
 
@@ -917,7 +1047,7 @@ mod tests {
             )
             .unwrap();
         let reason = migrate_schema(&mut connection, &temp.path, 4,
-            "PRAGMA user_version=5; UPDATE app_state SET value='injected failed change'; SELECT missing_column FROM app_state;").unwrap_err();
+            "PRAGMA user_version=6; UPDATE app_state SET value='injected failed change'; SELECT missing_column FROM app_state;").unwrap_err();
         assert!(reason.contains("安全备份"));
         assert_eq!(verify_database(&connection).unwrap(), 4);
         assert_eq!(read_snapshot(&connection).unwrap().0, raw);
@@ -931,7 +1061,7 @@ mod tests {
         assert_eq!(remaining, placement);
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].kind, "before-schema-5");
+        assert_eq!(candidates[0].kind, "before-schema-6");
         assert_eq!(candidates[0].schema_version, 4);
         let backup = Connection::open_with_flags(
             temp.directory.join(&candidates[0].file_name),
@@ -960,7 +1090,7 @@ mod tests {
             .join("missing-directory")
             .join("tasks.sqlite3");
         assert!(
-            migrate_schema(&mut connection, &unavailable, 4, "PRAGMA user_version=5;").is_err()
+            migrate_schema(&mut connection, &unavailable, 4, "PRAGMA user_version=6;").is_err()
         );
         assert_eq!(verify_database(&connection).unwrap(), 4);
         assert_eq!(read_snapshot(&connection).unwrap().0, raw);
@@ -1030,7 +1160,7 @@ mod tests {
         let mut service = TaskService::new(Box::new(repo)).unwrap();
         let content = service.export_backup().unwrap();
         let value: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert_eq!(value["schemaVersion"], 2);
+        assert_eq!(value["schemaVersion"], 3);
         let preview = service.preview_restore(&content).unwrap();
         assert_eq!(preview.task_count, original.tasks.len());
         assert_eq!(preview.trashed_task_count, 1);
@@ -1119,7 +1249,7 @@ mod tests {
         let mut connection = Connection::open(&temp.path).unwrap();
         configure(&connection).unwrap();
         let error = migrate_schema(&mut connection,&temp.path,1,
-            "PRAGMA application_id=1396986955; PRAGMA user_version=5; SELECT missing_column FROM app_state;").unwrap_err();
+            "PRAGMA application_id=1396986955; PRAGMA user_version=6; SELECT missing_column FROM app_state;").unwrap_err();
         assert!(error.contains("安全备份"));
         assert_eq!(verify_database(&connection).unwrap(), 1);
         assert_eq!(read_snapshot(&connection).unwrap().0, raw);

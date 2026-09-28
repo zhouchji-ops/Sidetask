@@ -12,10 +12,18 @@ export function normalizePreviewSnapshot(value: unknown): Snapshot {
   if (result.settings.uiStyle === undefined) result.settings.uiStyle = 'paper';
   if (result.settings.panelSplit === undefined) result.settings.panelSplit = 54;
   if (result.settings.revealMode === undefined) result.settings.revealMode = 'click';
+  if (result.taskOrder === undefined) result.taskOrder = [];
+  if (result.deadlineOrder === undefined) result.deadlineOrder = [];
   validateSnapshot(result);
   return result;
 }
 export const priorityLabel: Record<Priority, string> = { high: '高优先级', normal: '普通', low: '低优先级' };
+/** Unranked tasks append in their existing natural order; never mutate task records. */
+function manuallyOrdered(tasks: Task[], order: readonly string[] = []): Task[] {
+  if (tasks.length < 2 || order.length === 0) return tasks;
+  const ranks = new Map(order.map((id, index) => [id, index]));
+  return tasks.sort((a, b) => (ranks.get(a.id) ?? order.length) - (ranks.get(b.id) ?? order.length));
+}
 export function isPlannedToday(snapshot: Snapshot, taskId: string): boolean {
   const task = snapshot.tasks.find(task => task.id === taskId);
   if (!task || task.deletedAt != null) return false;
@@ -54,7 +62,7 @@ export function indexSnapshot(snapshot: Snapshot, date = localDate()) {
   const earlier = active.filter(task => latest.has(task.id) && latest.get(task.id)! < date)
     .sort((a, b) => latest.get(b.id)!.localeCompare(latest.get(a.id)!) || a.id.localeCompare(b.id));
   const trashed = trashKeys.sort((a, b) => (a.deleted > b.deleted ? -1 : a.deleted < b.deleted ? 1 : 0) || a.task.id.localeCompare(b.task.id)).map(item => item.task);
-  return { byId, visibleTasks, trashed, active, completed, today, todayIds, activeToday: today.filter(task => !task.completed), completedToday: today.filter(task => task.completed), earlier, deadlineCount };
+  return { byId, visibleTasks: manuallyOrdered(visibleTasks, snapshot.taskOrder), trashed, active: manuallyOrdered(active, snapshot.taskOrder), completed, today, todayIds, activeToday: today.filter(task => !task.completed), completedToday: today.filter(task => task.completed), earlier, deadlineCount };
 }
 export function selectToday(snapshot: Snapshot): Task[] {
   return indexSnapshot(snapshot).today;
@@ -63,12 +71,13 @@ export function selectDeadlines(snapshot: Snapshot, localZone = currentTimeZone(
   const ranks = { high: 0, normal: 1, low: 2 };
   // Temporal/IANA conversion belongs outside the O(n log n) comparator. The
   // original task objects are retained, including imported nanosecond timestamps.
-  return snapshot.tasks.filter(task => task.deletedAt == null && !!task.dueDate && !task.completed)
+  const tasks = snapshot.tasks.filter(task => task.deletedAt == null && !!task.dueDate && !task.completed)
     .map(task => ({ task, deadline: effectiveDeadline(task, localZone), created: utcInstantNanoseconds(task.createdAt) }))
     .sort((a, b) => {
       if (snapshot.settings.ddlSort === 'priority' && a.task.priority !== b.task.priority) return ranks[a.task.priority] - ranks[b.task.priority];
       return a.deadline - b.deadline || (a.created < b.created ? -1 : a.created > b.created ? 1 : 0) || a.task.id.localeCompare(b.task.id);
     }).map(item => item.task);
+  return snapshot.settings.ddlSort === 'manual' ? manuallyOrdered(tasks, snapshot.deadlineOrder) : tasks;
 }
 export function isOverdue(task: Task, now = Date.now()): boolean {
   return task.deletedAt == null && !task.completed && effectiveDeadline(task) <= now;
@@ -97,6 +106,8 @@ export function createSeed(date = localDate()): Snapshot {
   });
   return {
     revision: 1,
+    taskOrder: [],
+    deadlineOrder: [],
     tasks: [
       task('demo-design', '完成交互设计课程作业', '把想法整理成完整的作品。检查交互流程和最终呈现，完成后提交到课程平台。', 'high', dateOffset(date, 1), false, '18:00'),
       task('demo-read', '读完《设计心理学》', '留一点完整的时间给阅读，记下真正想带走的观点。', 'normal', null),
@@ -124,13 +135,13 @@ function validateTask(task: Task): void {
 }
 function validateSettings(s: Settings): void {
   assertKnown(s, settingsFields);
-  if (!['left', 'right'].includes(s.edge) || !['click', 'hover'].includes(s.revealMode) || !['light', 'dark', 'system'].includes(s.theme) || !['date', 'priority'].includes(s.ddlSort) || !uiStyles.includes(s.uiStyle) || typeof s.pinned !== 'boolean' || typeof s.edgeEnabled !== 'boolean') throw new Error('设置选项无效');
+  if (!['left', 'right'].includes(s.edge) || !['click', 'hover'].includes(s.revealMode) || !['light', 'dark', 'system'].includes(s.theme) || !['date', 'priority', 'manual'].includes(s.ddlSort) || !uiStyles.includes(s.uiStyle) || typeof s.pinned !== 'boolean' || typeof s.edgeEnabled !== 'boolean') throw new Error('设置选项无效');
   if (!Number.isFinite(s.panelWidth) || !Number.isFinite(s.panelHeight) || s.panelWidth < 300 || s.panelWidth > 640 || s.panelHeight < 380 || s.panelHeight > 1000) throw new Error('小窗尺寸超出可用范围');
   if (!Number.isInteger(s.panelSplit) || s.panelSplit < 30 || s.panelSplit > 70) throw new Error('小窗分区比例须为 30 至 70 的整数');
   if (!Number.isInteger(s.revealDelay) || !Number.isInteger(s.hideDelay) || s.revealDelay < 0 || s.revealDelay > 1500 || s.hideDelay < 100 || s.hideDelay > 2500) throw new Error('请选择合适的展开与收起延迟');
 }
 export function validateSnapshot(snapshot: Snapshot): void {
-  assertKnown(snapshot, ['tasks', 'plans', 'settings', 'revision']);
+  assertKnown(snapshot, ['tasks', 'plans', 'settings', 'revision', 'taskOrder', 'deadlineOrder']);
   if (!Array.isArray(snapshot.tasks) || !Array.isArray(snapshot.plans)) throw new Error('任务或计划列表无效');
   if (!validRevision(snapshot.revision)) throw new Error('数据版本无效');
   validateSettings(snapshot.settings);
@@ -143,6 +154,9 @@ export function validateSnapshot(snapshot: Snapshot): void {
     if (!validUtcInstant(task.createdAt) || typeof task.completed !== 'boolean' || (task.completed ? !validUtcInstant(task.completedAt) : task.completedAt !== null)) throw new Error('任务完成状态或时间记录无效');
     if (task.deletedAt != null && !validUtcInstant(task.deletedAt)) throw new Error('任务删除时间记录无效');
     ids.add(task.id);
+  }
+  for (const order of [snapshot.taskOrder, snapshot.deadlineOrder]) {
+    if (order !== undefined && (!Array.isArray(order) || new Set(order).size !== order.length || order.some(id => !ids.has(id)))) throw new Error('任务排序引用无效或重复');
   }
   const plans = new Set<string>();
   for (const plan of snapshot.plans) {
@@ -199,6 +213,17 @@ export function applyPreviewAction(current: Snapshot, action: Action, expectedRe
     if (!Array.isArray(action.taskIds) || action.taskIds.length !== expected.size || new Set(action.taskIds).size !== expected.size || action.taskIds.some(id => !expected.has(id))) throw new Error('今日计划已更新，请刷新后重新排序');
     const order = new Map(action.taskIds.map((id, index) => [id, index]));
     for (const plan of next.plans) if (plan.date === action.date && order.has(plan.taskId)) plan.sortOrder = order.get(plan.taskId)!;
+  } else if (action.type === 'reorderTasks') {
+    if (!['all', 'deadlines'].includes(action.scope)) throw new Error('排序列表无效');
+    const expected = new Set(next.tasks.filter(task => task.deletedAt == null && !task.completed && (action.scope === 'all' || !!task.dueDate)).map(task => task.id));
+    if (!Array.isArray(action.taskIds) || action.taskIds.length !== expected.size || new Set(action.taskIds).size !== expected.size || action.taskIds.some(id => !expected.has(id))) throw new Error('任务列表已更新，请刷新后重新排序');
+    const key = action.scope === 'all' ? 'taskOrder' : 'deadlineOrder';
+    const saved = next[key] ?? [];
+    const known = new Set(saved);
+    const slots = [...saved, ...action.taskIds.filter(id => !known.has(id))];
+    let position = 0;
+    next[key] = slots.map(id => expected.has(id) ? action.taskIds[position++] : id);
+    if (action.scope === 'deadlines') next.settings.ddlSort = 'manual';
   } else {
     const task = next.tasks.find(item => item.id === action.id);
     if (!task) throw new Error('这个任务已不存在，请刷新后重试');

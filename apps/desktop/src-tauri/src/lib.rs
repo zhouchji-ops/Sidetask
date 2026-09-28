@@ -89,7 +89,10 @@ fn authorize_mutation(label: &str, action: &Action) -> Result<(), String> {
         {
             Ok(())
         }
-        Action::SetCompleted { .. } | Action::PlanTask { .. } => Ok(()),
+        Action::SetCompleted { .. } | Action::PlanTask { .. } | Action::ReorderToday { .. } => {
+            Ok(())
+        }
+        Action::ReorderTasks { scope, .. } if scope == "deadlines" => Ok(()),
         Action::UpdateSettings { changes }
             if changes.as_object().is_some_and(|object| {
                 !object.is_empty()
@@ -115,6 +118,8 @@ fn get_snapshot(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<S
     if window.label() == "edge-handle" {
         snapshot.tasks.clear();
         snapshot.plans.clear();
+        snapshot.task_order.clear();
+        snapshot.deadline_order.clear();
     }
     Ok(snapshot)
 }
@@ -611,6 +616,30 @@ mod security_tests {
             }
         )
         .is_err());
+    }
+
+    #[test]
+    fn task_order_permissions_match_each_surface() {
+        let today = Action::ReorderToday {
+            date: "2026-09-28".into(),
+            task_ids: vec!["task".into()],
+        };
+        let deadlines = Action::ReorderTasks {
+            scope: "deadlines".into(),
+            task_ids: vec!["task".into()],
+        };
+        let all = Action::ReorderTasks {
+            scope: "all".into(),
+            task_ids: vec!["task".into()],
+        };
+        for action in [&today, &deadlines, &all] {
+            assert!(authorize_mutation("console", action).is_ok());
+            assert!(authorize_mutation("edge-handle", action).is_err());
+            assert!(authorize_mutation("untrusted", action).is_err());
+        }
+        assert!(authorize_mutation("edge-panel", &today).is_ok());
+        assert!(authorize_mutation("edge-panel", &deadlines).is_ok());
+        assert!(authorize_mutation("edge-panel", &all).is_err());
     }
 
     #[test]

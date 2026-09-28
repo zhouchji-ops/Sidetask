@@ -33,11 +33,14 @@ export interface Settings {
   edgeEnabled: boolean;
   theme: 'light' | 'dark' | 'system';
   uiStyle: UIStyle;
-  ddlSort: 'date' | 'priority';
+  ddlSort: 'date' | 'priority' | 'manual';
 }
 export interface Snapshot {
   tasks: Task[];
   plans: Plan[];
+  /** Independent manual orders; absent in legacy snapshots. Hidden tasks retain their positions. */
+  taskOrder?: string[];
+  deadlineOrder?: string[];
   settings: Settings;
   revision: number;
 }
@@ -50,6 +53,7 @@ export type Action =
   | { type: 'restoreTask'; id: string; expectedRevision: number }
   | { type: 'planTask'; id: string; planned: boolean; date: string }
   | { type: 'reorderToday'; date: string; taskIds: string[] }
+  | { type: 'reorderTasks'; scope: 'all' | 'deadlines'; taskIds: string[] }
   | { type: 'updateSettings'; changes: Partial<Settings> }
   | { type: 'resetDemo'; date: string };
 export interface MonitorInfo { name: string; width: number; height: number; scaleFactor: number; current: boolean }

@@ -102,6 +102,8 @@ fn candidate_kind(name: &str) -> Option<&'static str> {
         Some("before-schema-4")
     } else if uuid_suffix(name, "sidetask-before-schema-5-") {
         Some("before-schema-5")
+    } else if uuid_suffix(name, "sidetask-before-schema-6-") {
+        Some("before-schema-6")
     } else if uuid_suffix(name, "sidetask-safety-backup-") {
         Some("safety-backup")
     } else {
@@ -1186,6 +1188,7 @@ mod tests {
             (2, "before-schema-3"),
             (3, "before-schema-4"),
             (4, "before-schema-5"),
+            (5, "before-schema-6"),
         ] {
             let temp = Temp::new();
             let (original_backup, _) = temp.valid_backup();

@@ -91,7 +91,7 @@ $smokeAppProcessId = [int](Read-Host '输入该隔离进程的 PID')
 | src/lib | 类型、派生视图、Tauri 调用、统一 Store；另含浏览器演示适配器 |
 | src-tauri/src/domain | 独立 Task、计划引用、校验、revision 冲突 |
 | src-tauri/src/application | 事务用例与统一提交入口 |
-| src-tauri/src/infrastructure | SQLite Repository，schema5版本化snapshot及独立设备metadata、升级前安全备份与严格验证 |
+| src-tauri/src/infrastructure | SQLite Repository，schema6版本化snapshot及独立设备metadata、升级前安全备份与严格验证 |
 | src-tauri/src/platform | 窗口协调、分平台坐标适配、实际矩形确认、拖动/尺寸会话、hover |
 | src-tauri/migrations | 实际数据库初始化 SQL |
 | tests | Vitest 业务与 Playwright UI 自动化 |
@@ -101,7 +101,9 @@ $smokeAppProcessId = [int](Read-Host '输入该隔离进程的 PID')
 
 ## 数据与安全检查
 
-设置页导出便携 v2 JSON 任务备份，包含回收站记录与全部计划；导入接受合法 v1/v2，预览显示回收站数量，恢复前自动保留完整 SQLite 安全备份。v1 不能携带非空删除时间，避免旧格式悄悄丢失生命周期含义。文件路径和损坏启动时的安全离线流程见 [恢复说明](../../docs/engineering/DATA_RECOVERY.md)。任务备份恢复保留本机设备设置。
+设置页导出便携 v3 JSON 任务备份，包含回收站记录、全部计划及其顺序，以及全部任务/DDL 的独立手动顺序；导入接受合法 v1/v2/v3，预览显示回收站数量，恢复前自动保留完整 SQLite 安全备份。v1 不能携带非空删除时间；v1/v2 不能携带非空 taskOrder/deadlineOrder，缺失时按空顺序恢复。SQLite schema1–5 先生成 before-schema-6 备份，再事务升级到6，保留 snapshot / placement 原文。文件路径和损坏启动时的安全离线流程见 [恢复说明](../../docs/engineering/DATA_RECOVERY.md)。任务备份恢复保留本机设备设置和 DDL 排序模式。
+
+今日、全部任务与 DDL 的拖动排序复用同一虚拟列表；小窗提供今日与 DDL 两份排序。拖动松手提交一次完整活动集合及开始时的快照版本，DDL 成功重排同事务切为手动模式，不修改截止字段或 Task revision。把手支持 Alt+上下键，Esc 取消拖动，搜索结果不能局部重排。协议与迁移取舍见 [ADR-0008](../../docs/decisions/0008-independent-task-order.md)。
 
 ```sh
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check

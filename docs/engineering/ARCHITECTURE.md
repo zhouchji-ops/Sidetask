@@ -1,6 +1,6 @@
 # 技术架构与实现边界
 
-状态：架构契约与当前实现说明。采用 Tauri 2 + React/TypeScript + Rust + SQLite，决策见 [ADR-0003](../decisions/0003-prototype-implementation.md)。当前存储为 SQLite 中的 JSON 快照；schema 3 加入任务回收站，schema 4 增加控制台设备偏好的兼容边界，当前 schema 5 增加展开模式兼容边界。按窗口 IPC、固定 DDL、备份与退出的设计见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md)，控制台位置见 [ADR-0006](../decisions/0006-console-window-preferences.md)，生命周期细节见 [数据模型](DATA_MODEL.md)。第一版同时支持两平台、只管理独立大任务、同时提供控制台和边缘小窗，已由用户明确。早期选型记录见 [ADR-0001](../decisions/0001-platform-and-reuse.md)；窗口职责和任务范围见 [ADR-0002](../decisions/0002-console-and-edge-panel.md)。
+状态：架构契约与当前实现说明。采用 Tauri 2 + React/TypeScript + Rust + SQLite，决策见 [ADR-0003](../decisions/0003-prototype-implementation.md)。当前存储为 SQLite 中的 JSON 快照；schema 3 加入任务回收站，schema 4 增加控制台设备偏好的兼容边界，schema 5 增加展开模式兼容边界，当前 schema 6 增加全部任务与 DDL 的独立手动顺序。按窗口 IPC、固定 DDL、备份与退出的设计见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md)，控制台位置见 [ADR-0006](../decisions/0006-console-window-preferences.md)，三列表顺序见 [ADR-0008](../decisions/0008-independent-task-order.md)，实际协议见 [数据模型](DATA_MODEL.md)。第一版同时支持两平台、只管理独立大任务、同时提供控制台和边缘小窗，已由用户明确。早期选型记录见 [ADR-0001](../decisions/0001-platform-and-reuse.md)；窗口职责和任务范围见 [ADR-0002](../decisions/0002-console-and-edge-panel.md)。
 
 ## 技术选型
 
@@ -109,7 +109,7 @@ SQLite 是任务和持久化设置的事实来源，React 状态只是各窗口�
 
 ### 按窗口限制系统能力
 
-控制台允许完整任务管理和设置命令，小窗只获得完成/撤销、计划和快速新建等必要能力；完整任务编辑按 Task ID 跳转控制台，把手仅能请求展开/位置调整。窗口创建、退出、备份文件访问和系统设置由 Rust 入口集中校验。Tauri capability 以窗口标签划定权限；自定义应用命令默认可被各窗口调用，初始化时必须显式纳入权限清单或执行调用方校验，不能只隐藏按钮。事件只发给需要刷新的已知窗口，也不经事件触发可信写入。[Tauri Capabilities](https://v2.tauri.app/security/capabilities/)
+控制台允许完整任务管理和设置命令，小窗只获得完成/撤销、计划、今日/DDL 排序和快速新建等必要能力；完整任务编辑按 Task ID 跳转控制台，把手仅能请求展开/位置调整。`reorderToday` 允许两个任务窗口调用；`reorderTasks` 的 all 仅允许控制台，deadlines 允许控制台和小窗，内部边缘把手没有任务写权限。窗口创建、退出、备份文件访问和系统设置由 Rust 入口集中校验。Tauri capability 以窗口标签划定权限；自定义应用命令默认可被各窗口调用，初始化时必须显式纳入权限清单或执行调用方校验，不能只隐藏按钮。事件只发给需要刷新的已知窗口，也不经事件触发可信写入。[Tauri Capabilities](https://v2.tauri.app/security/capabilities/)
 
 ### 任务生命周期与恢复边界
 
@@ -117,9 +117,15 @@ SQLite 是任务和持久化设置的事实来源，React 状态只是各窗口�
 
 UI 从同一快照派生普通列表与回收站。正常列表、全局搜索、小窗和计数排除已删除记录；回收站独立搜索并展示原完成状态。全量 Task 索引仍保留已删除记录，使另一窗口删除任务时，正在编辑的详情能够保留本地草稿并显示冲突。详情是否挂载不能只由当前列表成员资格决定；行内、详情或提示条恢复同一任务均不得丢弃草稿，保存前需显式重新确认最新版本。移入回收站前的“继续编辑 / 保存后移入 / 放弃修改并移入”与恢复后“查看任务”的导航保护遵循 [UX](../product/UX.md#回收站与任务恢复)。后台同步不主动抢焦点；显式查看才把焦点移到详情。
 
-生命周期阶段曾将数据库 schema 1 / 2 升到 3，控制台元数据阶段升到4；当前识别1–5，旧1–4先对完整四文件检查副本验证、创建 `before-schema-5` 一致性备份，再事务升级到5，保留 snapshot / placement 原字节。启动时坏库恢复入口只在真实服务未建立时使用，与正常回收站恢复不同；不得以空服务伪装健康空库。可移植 JSON 仍导出 v2、读取 v1 / v2，包含回收站与全部计划；整份导入先备份，再替换任务/计划并保留本机设置及 console / edge 偏好。旧版 JSON 没有回收站记录时也按整集合恢复，不隐含合并。文件格式和旧版校验细节见数据模型。
+生命周期阶段曾将数据库 schema 1 / 2 升到 3，控制台元数据和展开模式阶段分别升到4/5；当前识别1–6，旧1–5先对完整四文件检查副本验证、创建 `before-schema-6` 一致性备份，再事务升级到6，保留 snapshot / placement 原字节。启动时坏库恢复入口只在真实服务未建立时使用，与正常回收站恢复不同；不得以空服务伪装健康空库。可移植 JSON 导出 v3、读取 v1 / v2 / v3，包含回收站、全部计划及两份独立手动顺序；整份导入先备份，再替换任务/计划/顺序并保留本机设置及 console / edge 偏好。旧版 JSON 按整集合恢复，缺失的手动顺序默认空，不隐含合并。文件格式和旧版校验细节见数据模型。
 
 本轮只提供单任务软删除和恢复，不提供自动过期清空、永久删除或批量清空。方案来源与范围见 [生命周期计划](../research/TASK_LIFECYCLE.md)；当前验收范围见内部验证记录（本地保留，不随公开仓库分发），尤其不能从浏览器回归推断 Windows 或多屏通过。
+
+### 三列表排序的职责边界
+
+今日使用原有 `Plan.sortOrder`，全部任务和 DDL 分别使用 `Snapshot.taskOrder` / `deadlineOrder`。三份顺序属于列表，不写入 Task；任务勾选、DDL 修改和计划关系仍只有一份事实。`reorderTasks` 通过相同 TaskService 事务校验完整活动集合与旧快照版本，只有 DDL 重排同时把本机 ddlSort 切成 manual，不改变截止信息或任务修订号。
+
+前端 `useTaskReorder` 管理指针捕获、插入线、滚动与键盘意图，复用 `VirtualTaskList`，不把已挂载的可见行当成完整集合。手势开始记住列表上下文和版本，松手只提交一次，拖回原位或取消不提交；失败继续显示已提交顺序。已拖动行在虚拟滚动中保持挂载，小窗每个排序会话持有独立交互保护。搜索、已完成及回收站不开放部分集合排序。两个任务窗口共用同一已提交快照，不保存第二套本地列表顺序。
 
 ## 多屏：不把「收起」实现成移出屏幕
 

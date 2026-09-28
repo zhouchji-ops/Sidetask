@@ -34,7 +34,7 @@ if (args.prepare) {
 
 const outputDir = typeof args.config === 'string' ? join(dirname(resolve(args.config)), 'evidence', `${Date.now()}-${process.pid}`) : join(tmpdir(), `sidetask-windows-smoke-error-${Date.now()}`);
 mkdirSync(outputDir, { recursive: true });
-const report = { startedAt: new Date().toISOString(), scope: 'real Windows console + edge-panel UI sync + existing IPC lifecycle + SQLite', assertions: [], bounds, outcome: 'running' };
+const report = { startedAt: new Date().toISOString(), scope: 'real Windows console + edge-panel UI sync + five pointer task reorders + existing IPC lifecycle + SQLite', assertions: [], bounds, outcome: 'running' };
 const eventsPath = join(outputDir, 'events.jsonl');
 let phase = 'preflight';
 let sessionId;
@@ -151,6 +151,79 @@ async function switchSurface(surface) {
   });
 }
 async function taskState(id, predicate) { return poll(`committed task ${id}`, async () => { const state = await snapshot(); const task = state.tasks.find(task => task.id === id); return task && predicate(task, state) ? state : false; }); }
+const same = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
+const listOrder = scope => execute('return [...document.querySelectorAll(arguments[0] + " [data-task-list-id]")].map(row => row.dataset.taskListId);', scope);
+async function expectList(scope, expected) {
+  return poll(`rendered list order ${scope}`, async () => {
+    const actual = await listOrder(scope);
+    return same(actual, expected) ? actual : false;
+  });
+}
+function orderState(state) {
+  return { taskOrder: state.taskOrder ?? [], deadlineOrder: state.deadlineOrder ?? [], ddlSort: state.settings.ddlSort, plans: state.plans };
+}
+async function dragTask(scope, sourceId, targetId, position, expected, kind) {
+  const surface = await execute('return new URL(location.href).searchParams.get("surface");');
+  if (surface === 'console') {
+    const page = await execute('return ({"今日":"today","全部任务":"all","截止日期":"deadlines"})[document.querySelector(".page-heading h1")?.textContent];');
+    assert.ok(page, 'Drag requires one of the three task pages');
+    await invoke('window_action', { action: 'openConsole', payload: { page } });
+  } else {
+    assert.equal(surface, 'edge-panel');
+    await invoke('window_action', { action: 'focusPanel', payload: {} });
+  }
+  // Switching WebDriver handles only selects a WebView. A background WebView
+  // receives synthetic driver events without acquiring native pointer capture;
+  // focus the real HWND using its existing production entry before pointer input.
+  const before = await snapshot();
+  const sourceSelector = `${scope} [data-task-list-id=${JSON.stringify(sourceId)}] .task-drag-handle`;
+  const targetSelector = `${scope} [data-task-list-id=${JSON.stringify(targetId)}]`;
+  const source = await find(sourceSelector);
+  await find(targetSelector);
+  await execute('document.querySelector(arguments[0]).scrollIntoView({block:"center", behavior:"instant"});', sourceSelector);
+  // Actual WebDriver pointer input reaches React and the production Rust service.
+  // No injected pointer events, mutation IPC, or direct database writes are used.
+  try {
+    await command('POST', '/actions', { actions: [{ type: 'pointer', id: 'smoke-mouse', parameters: { pointerType: 'mouse' }, actions: [
+      { type: 'pointerMove', duration: 120, origin: { 'element-6066-11e4-a52e-4f735466cecf': source }, x: 0, y: 0 },
+      { type: 'pointerDown', button: 0 }, { type: 'pause', duration: 180 },
+    ] }] });
+    // Pointer-down clears the previous save notice and can move the list. Read
+    // the new geometry before choosing the drop point, as a user sees it now.
+    const points = await execute(`const source = document.querySelector(arguments[0]).getBoundingClientRect(); const target = document.querySelector(arguments[1]).getBoundingClientRect();
+      return {x: Math.round(source.left + source.width / 2), fromY: Math.round(source.top + source.height / 2), toY: Math.round(arguments[2] === 'before' ? target.top + Math.min(8, target.height / 4) : target.bottom - Math.min(8, target.height / 4)), width: innerWidth, height: innerHeight};`, sourceSelector, targetSelector, position);
+    assert.ok(points.x > 0 && points.x < points.width && points.fromY > 0 && points.fromY < points.height && points.toY > 0 && points.toY < points.height, 'Both drag endpoints must be inside the real WebView viewport');
+    await command('POST', '/actions', { actions: [{ type: 'pointer', id: 'smoke-mouse', parameters: { pointerType: 'mouse' }, actions: [
+      { type: 'pointerMove', duration: 550, origin: 'viewport', x: points.x, y: points.toY },
+      { type: 'pause', duration: 120 }, { type: 'pointerUp', button: 0 },
+    ] }] });
+  } finally { await command('DELETE', '/actions'); }
+  const after = await poll(`native ${kind} drag committed`, async () => {
+    const value = await snapshot();
+    return value.revision > before.revision ? value : false;
+  });
+  assert.equal(after.revision, before.revision + 1, 'A single drop commits exactly once');
+  assert.deepEqual(after.tasks, before.tasks, 'Reordering cannot edit task content, DDL, completion, or task revisions');
+  if (kind === 'today') {
+    const date = before.plans.find(plan => plan.taskId === sourceId)?.date;
+    assert.ok(date, 'Synthetic task is planned');
+    assert.deepEqual(after.plans.filter(plan => plan.date === date).toSorted((a, b) => a.sortOrder - b.sortOrder).map(plan => plan.taskId), expected);
+    assert.deepEqual(after.plans.filter(plan => plan.date !== date), before.plans.filter(plan => plan.date !== date));
+    assert.deepEqual(after.taskOrder, before.taskOrder);
+    assert.deepEqual(after.deadlineOrder, before.deadlineOrder);
+    assert.deepEqual(after.settings, before.settings);
+  } else {
+    assert.deepEqual(after.plans, before.plans, 'All/DDL sorting cannot reorder today');
+    const changed = kind === 'all' ? 'taskOrder' : 'deadlineOrder';
+    const untouched = kind === 'all' ? 'deadlineOrder' : 'taskOrder';
+    assert.deepEqual(after[changed], expected);
+    assert.deepEqual(after[untouched], before[untouched]);
+    assert.deepEqual(after.settings, kind === 'deadlines' ? { ...before.settings, ddlSort: 'manual' } : before.settings);
+  }
+  await expectList(scope, expected);
+  event('native-pointer-task-reorder', 'pass', { scope, kind, sourceId, targetId, position, order: expected, revision: after.revision, input: 'WebDriver pointerMove/down/move/up' });
+  return after;
+}
 async function port() { const server = createServer(); await new Promise((r, j) => { server.once('error', j); server.listen(0, '127.0.0.1', r); }); const p = server.address().port; await new Promise(r => server.close(r)); return p; }
 
 async function startSession(number) {
@@ -224,14 +297,15 @@ async function sqliteCheck(expected, name) {
   let state;
   try {
     assert.equal(db.prepare('PRAGMA quick_check').get().quick_check, 'ok');
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 5);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 6);
     assert.equal(db.prepare('PRAGMA application_id').get().application_id, 0x5344544b);
     state = JSON.parse(db.prepare("SELECT value FROM app_state WHERE key='snapshot'").get().value);
     assert.deepEqual(state.tasks, expected.tasks);
     assert.deepEqual(state.plans, expected.plans);
+    assert.deepEqual(orderState(state), orderState(expected));
     assert.equal(state.revision, expected.revision);
   } finally { db.close(); }
-  event('sqlite-readonly-integrity-and-content', 'pass', { schema: 5, revision: state.revision, taskId: state.tasks[0]?.id, snapshotSha256: sha(JSON.stringify(state)), databaseSha256: sha(readFileSync(path)) });
+  event('sqlite-readonly-integrity-and-content', 'pass', { schema: 6, revision: state.revision, taskId: state.tasks[0]?.id, snapshotSha256: sha(JSON.stringify(state)), databaseSha256: sha(readFileSync(path)) });
   return state;
 }
 async function diagnostics() {
@@ -301,7 +375,7 @@ async function finish(error) {
   const exitCode = await finalizeNativeSmoke({ report, error, completed, phase, event, diagnostics, cleanup });
   report.finishedAt = new Date().toISOString();
   report.elapsedMs = Date.now() - started;
-  report.unverified = ['tray menu interaction', 'IME', 'mixed-DPI multi-monitor geometry', 'sleep/resume', 'installer/upgrade', 'sustained performance'];
+  report.unverified = ['tray menu interaction', 'IME', 'mixed-DPI multi-monitor geometry', 'sleep/resume', 'installer/upgrade', 'sustained performance', 'native long-list reorder auto-scroll, touch, and full cancellation matrix'];
   if (!report.assertions.some(a => a.name === 'real-two-window-completion-sync' && a.status === 'pass')) report.unverified.push('edge-panel cross-view UI');
   saveReport();
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n### Windows native smoke: ${report.outcome}\n\n- Business checks: ${report.businessOutcome}\n- Cleanup: ${report.cleanup.ok ? 'pass' : 'fail'}\n- Commit: \`${report.commit || 'unknown'}\`\n- EXE SHA-256: \`${report.exeSha256 || 'unknown'}\`\n- PIDs: ${report.pid1 || 'none'} / ${report.pid2 || 'none'}\n- Evidence: \`${outputDir}\`\n- Failure: ${report.failure?.message.split('\n')[0] || report.cleanup.errors.map(error => `${error.step}: ${error.message}`).join('; ') || 'none'}\n- Scope: ${report.scope}; listed manual acceptance scenarios remain unverified.\n`);
@@ -455,6 +529,47 @@ try {
     assert.deepEqual(deadline(syncedBack.tasks[0]), expectedDeadline);
     assert.deepEqual(syncedBack.plans, planned.plans);
     event('real-two-window-completion-sync', 'pass', { taskId: id, console: consoleIdentity, panel: edgeIdentity, revision: syncedBack.revision });
+
+    phase = 'native-task-drag-order';
+    await switchSurface('console');
+    await navigation('今日');
+    const addedIds = [];
+    for (const [suffix, date] of [['B', '2028-10-17'], ['C', '2028-10-18']]) {
+      const addedTitle = `${title} 排序${suffix}`;
+      await click('.new-task-button');
+      await fill('#new-title', addedTitle);
+      await dateValue('#new-date', date);
+      await button('创建任务', '[role="dialog"]');
+      const added = await poll(`synthetic task ${suffix} created through UI`, async () => (await snapshot()).tasks.find(task => task.title === addedTitle));
+      addedIds.push(added.id);
+    }
+    const [secondId, thirdId] = addedIds;
+    const consoleScope = '.main-content .task-list > .virtual-task-list';
+    const edgeTodayScope = '.edge-zone:first-of-type .virtual-task-list';
+    const edgeDeadlineScope = '.edge-zone:last-of-type .virtual-task-list';
+    await navigation('今日');
+    await expectList(consoleScope, [id, secondId, thirdId]);
+    await dragTask(consoleScope, thirdId, id, 'before', [thirdId, id, secondId], 'today');
+    await navigation('全部任务');
+    await expectList(consoleScope, [id, secondId, thirdId]);
+    await dragTask(consoleScope, id, thirdId, 'after', [secondId, thirdId, id], 'all');
+    await navigation('截止日期');
+    await expectList(consoleScope, [id, secondId, thirdId]);
+    await dragTask(consoleScope, secondId, id, 'before', [secondId, id, thirdId], 'deadlines');
+    assert.equal(await execute('return document.querySelector("select[aria-label=\"截止任务排序\"]").value;'), 'manual');
+    await switchSurface('edge-panel');
+    await expectList(edgeTodayScope, [thirdId, id, secondId]);
+    await expectList(edgeDeadlineScope, [secondId, id, thirdId]);
+    const finalTodayOrder = [id, thirdId, secondId];
+    const finalAllOrder = [secondId, thirdId, id];
+    const finalDeadlineOrder = [thirdId, secondId, id];
+    await dragTask(edgeTodayScope, id, thirdId, 'before', finalTodayOrder, 'today');
+    await expectList(edgeDeadlineScope, [secondId, id, thirdId]);
+    const ordered = await dragTask(edgeDeadlineScope, thirdId, secondId, 'before', finalDeadlineOrder, 'deadlines');
+    await expectList(edgeTodayScope, finalTodayOrder);
+    assert.deepEqual(ordered.taskOrder, finalAllOrder);
+    report.dragOrders = { today: finalTodayOrder, all: finalAllOrder, deadlines: finalDeadlineOrder };
+    event('independent-order-and-two-window-sync', 'pass', { ...report.dragOrders, revision: ordered.revision, pointerDrops: 5, syntheticTaskCount: ordered.tasks.length });
     await click(label('收起小窗'));
     await switchSurface('console');
     await navigation('今日');
@@ -477,17 +592,28 @@ try {
     const db = new DatabaseSync(join(dataDir, 'sidetask.sqlite3'), { readOnly: true });
     let persisted;
     try { persisted = JSON.parse(db.prepare("SELECT value FROM app_state WHERE key='snapshot'").get().value); } finally { db.close(); }
-    assert.equal(persisted.tasks.length, 1);
-    assert.equal(persisted.tasks[0].notes, '合成数据：退出门禁保存草稿。');
-    assert.deepEqual({ ...persisted.tasks[0], notes: restored.tasks[0].notes, revision: restored.tasks[0].revision }, restored.tasks[0]);
-    assert.deepEqual(persisted.plans, restored.plans);
-    assert.ok(persisted.revision > restored.revision && persisted.tasks[0].revision > restored.tasks[0].revision);
+    assert.equal(persisted.tasks.length, 3);
+    const originalTask = ordered.tasks.find(task => task.id === id);
+    const persistedTask = persisted.tasks.find(task => task.id === id);
+    assert.equal(persistedTask.notes, '合成数据：退出门禁保存草稿。');
+    assert.deepEqual(persisted.tasks.map(task => task.id === id ? { ...task, notes: originalTask.notes, revision: originalTask.revision } : task), ordered.tasks);
+    assert.deepEqual(orderState(persisted), orderState(ordered));
+    assert.ok(persisted.revision > ordered.revision && persistedTask.revision > originalTask.revision);
     await sqliteCheck(persisted, 'sqlite-after-exit');
     await startSession(2);
     assert.notEqual(report.pid1, report.pid2, 'Restart must have a new PID');
     const reopened = await snapshot();
     assert.deepEqual(reopened.tasks, persisted.tasks);
     assert.deepEqual(reopened.plans, persisted.plans);
+    assert.deepEqual(orderState(reopened), orderState(persisted));
+    await expectList(consoleScope, finalTodayOrder);
+    await navigation('全部任务');
+    await expectList(consoleScope, finalAllOrder);
+    await navigation('截止日期');
+    await expectList(consoleScope, finalDeadlineOrder);
+    assert.equal(await execute('return document.querySelector("select[aria-label=\"截止任务排序\"]").value;'), 'manual');
+    await navigation('今日');
+    event('native-drag-order-restart-persistence', 'pass', { ...report.dragOrders, revision: reopened.revision, pid: appPid, schema: 6 });
     await click(`.main-content ${label(`编辑任务：${title}`)}`);
     assert.equal(await execute('return document.querySelector("#detail-notes").value;'), '合成数据：退出门禁保存草稿。');
     event('restart-persistence', 'pass', { taskId: id, revision: reopened.revision, pid: appPid });

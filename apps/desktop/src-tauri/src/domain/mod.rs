@@ -6,6 +6,9 @@ pub const MAX_SAFE_REVISION: u64 = 9_007_199_254_740_991;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[cfg(test)]
+mod order_tests;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Task {
@@ -84,6 +87,10 @@ impl Default for Settings {
 pub struct Snapshot {
     pub tasks: Vec<Task>,
     pub plans: Vec<Plan>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_order: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deadline_order: Vec<String>,
     pub settings: Settings,
     pub revision: u64,
 }
@@ -116,6 +123,11 @@ pub enum Action {
     },
     #[serde(rename = "reorderToday", rename_all = "camelCase")]
     ReorderToday { date: String, task_ids: Vec<String> },
+    #[serde(rename = "reorderTasks", rename_all = "camelCase")]
+    ReorderTasks {
+        scope: String,
+        task_ids: Vec<String>,
+    },
     #[serde(rename = "updateSettings")]
     UpdateSettings { changes: Value },
     #[serde(rename = "resetDemo")]
@@ -150,7 +162,7 @@ fn validate_settings(settings: &Settings) -> Result<(), String> {
         || !["click", "hover"].contains(&settings.reveal_mode.as_str())
         || !["light", "dark", "system"].contains(&settings.theme.as_str())
         || !["paper", "studio", "editorial", "mono"].contains(&settings.ui_style.as_str())
-        || !["date", "priority"].contains(&settings.ddl_sort.as_str())
+        || !["date", "priority", "manual"].contains(&settings.ddl_sort.as_str())
     {
         return Err("设置选项无效。".into());
     }
@@ -180,6 +192,8 @@ impl Snapshot {
         Self {
             tasks: Vec::new(),
             plans: Vec::new(),
+            task_order: Vec::new(),
+            deadline_order: Vec::new(),
             settings: Settings::default(),
             revision: 1,
         }
@@ -206,6 +220,15 @@ impl Snapshot {
                 }
                 (false, None) => {}
                 _ => return Err("任务完成状态与完成时间不一致。".into()),
+            }
+        }
+        for order in [&self.task_order, &self.deadline_order] {
+            let mut ranked = HashSet::new();
+            if order
+                .iter()
+                .any(|id| !ids.contains(id) || !ranked.insert(id))
+            {
+                return Err("任务排序引用无效或重复。".into());
             }
         }
         let mut plans = HashSet::new();
@@ -306,6 +329,8 @@ impl Snapshot {
         Self {
             tasks,
             plans,
+            task_order: Vec::new(),
+            deadline_order: Vec::new(),
             settings: Settings::default(),
             revision: 1,
         }
@@ -512,6 +537,46 @@ impl Snapshot {
                     if let Some(position) = positions.get(plan.task_id.as_str()) {
                         plan.sort_order = *position;
                     }
+                }
+            }
+            Action::ReorderTasks { scope, task_ids } => {
+                if !["all", "deadlines"].contains(&scope.as_str()) {
+                    return Err("排序列表无效。".into());
+                }
+                let eligible: HashSet<_> = self
+                    .tasks
+                    .iter()
+                    .filter(|task| {
+                        !task.completed
+                            && task.deleted_at.is_none()
+                            && (scope == "all" || task.due_date.is_some())
+                    })
+                    .map(|task| task.id.as_str())
+                    .collect();
+                let requested: HashSet<_> = task_ids.iter().map(String::as_str).collect();
+                if requested.len() != task_ids.len() || requested != eligible {
+                    return Err(
+                        "任务列表已变化，排序需要包含全部未完成任务且不能重复。请刷新后重试。"
+                            .into(),
+                    );
+                }
+                let order = if scope == "all" {
+                    &mut next.task_order
+                } else {
+                    &mut next.deadline_order
+                };
+                let known: HashSet<_> = order.iter().cloned().collect();
+                order.extend(task_ids.iter().filter(|id| !known.contains(*id)).cloned());
+                // Keep hidden tasks in their existing slots; only active slots
+                // participate in this reorder. Restoring does not lose a rank.
+                let mut positions = task_ids.into_iter();
+                for id in order.iter_mut() {
+                    if eligible.contains(id.as_str()) {
+                        *id = positions.next().expect("validated complete active set");
+                    }
+                }
+                if scope == "deadlines" {
+                    next.settings.ddl_sort = "manual".into();
                 }
             }
             Action::UpdateSettings { changes } => {

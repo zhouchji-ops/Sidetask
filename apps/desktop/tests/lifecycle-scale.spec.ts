@@ -97,6 +97,9 @@ test('一万项回收站保留全量数据，末项可用键盘搜索恢复并�
 
   const committed = await page.evaluate(() => JSON.parse(localStorage.getItem('sidetask-browser-preview-v1')!) as Snapshot);
   const expected = structuredClone(initial);
+  // Legacy preview snapshots acquire empty list orders on their first write.
+  expected.taskOrder = [];
+  expected.deadlineOrder = [];
   expected.revision += 1;
   expected.tasks.at(-1)!.revision += 1;
   expected.tasks.at(-1)!.deletedAt = null;

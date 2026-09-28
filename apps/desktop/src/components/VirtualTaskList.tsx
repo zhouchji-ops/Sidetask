@@ -1,6 +1,8 @@
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode, RefObject } from 'react';
+import { GripVertical, X } from 'lucide-react';
+import { useTaskReorder, type TaskReorder } from '../lib/useTaskReorder';
 import '../styles/virtual-task-list.css';
 
 export interface VirtualTaskListProps<T extends { id: string }> {
@@ -13,6 +15,7 @@ export interface VirtualTaskListProps<T extends { id: string }> {
   estimateSize?: number;
   className?: string;
   label?: string;
+  reorder?: TaskReorder<T>;
 }
 
 type Focus = { id: string; index: number; control: number };
@@ -26,24 +29,26 @@ function controls(row: Element): HTMLElement[] {
  * Tab, arrows and Home/End; the focused row stays mounted outside the viewport.
  * Item IDs must be unique and stable, and renderItem must return normal content
  * rather than a second scrolling container. No task data is sliced or dropped. */
-export function VirtualTaskList<T extends { id: string }>({ items, renderItem, scrollRef, resetKey, estimateSize = 72, className = '', label = '任务列表' }: VirtualTaskListProps<T>) {
+export function VirtualTaskList<T extends { id: string }>({ items, renderItem, scrollRef, resetKey, estimateSize = 72, className = '', label = '任务列表', reorder }: VirtualTaskListProps<T>) {
   const root = useRef<HTMLDivElement>(null);
   const rows = useRef(new Map<string, HTMLDivElement>());
   const [margin, setMargin] = useState(0);
   const [mounted, setMounted] = useState(false);
   const [focused, setFocused] = useState<Focus | null>(null);
   const [request, setRequest] = useState<{ index: number; control: number } | null>(null);
+  const ordering = useTaskReorder(items, reorder, root, scrollRef, rows, index => setRequest({ index, control: 0 }));
   const indexById = useMemo(() => new Map(items.map((item, index) => [item.id, index])), [items]);
   const virtual = items.length > 80;
   const focusedIndex = focused ? indexById.get(focused.id) ?? Math.min(focused.index, items.length - 1) : -1;
+  const draggedIndex = ordering.marker ? indexById.get(ordering.marker.id) ?? -1 : -1;
   const getItemKey = useCallback((index: number) => items[index].id, [items]);
   const rangeExtractor = useCallback((range: Parameters<typeof defaultRangeExtractor>[0]) => {
     const indexes = defaultRangeExtractor(range);
-    for (const index of [focusedIndex, request?.index ?? -1]) {
+    for (const index of [focusedIndex, draggedIndex, request?.index ?? -1]) {
       if (index >= 0 && index < items.length && !indexes.includes(index)) indexes.push(index);
     }
     return indexes.sort((a, b) => a - b);
-  }, [focusedIndex, request?.index, items.length]);
+  }, [focusedIndex, draggedIndex, request?.index, items.length]);
   const virtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
     count: items.length,
     getScrollElement: () => scrollRef.current,
@@ -144,14 +149,24 @@ export function VirtualTaskList<T extends { id: string }>({ items, renderItem, s
     return <div key={item.id} role="listitem" aria-posinset={index + 1} aria-setsize={items.length}
       data-index={index} data-task-list-index={index} data-task-list-id={item.id}
       data-first={index === 0 || undefined} data-last={index === items.length - 1 || undefined}
+      data-sortable={!!reorder || undefined}
+      data-dragging={ordering.marker?.id === item.id || undefined}
+      data-drop-before={ordering.marker?.slot === index || undefined}
+      data-drop-after={index === items.length - 1 && ordering.marker?.slot === items.length || undefined}
       tabIndex={-1} className="virtual-task-item"
       ref={element => { if (element) rows.current.set(item.id, element); else rows.current.delete(item.id); if (virtual) virtualizer.measureElement(element); }}
       style={virtual ? { position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${offset}px)` } : undefined}>
+      {reorder && <button type="button" className="task-drag-handle" aria-label={`拖动排序：${reorder.title(item)}`}
+        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+        title="拖动调整顺序；Alt + ↑ / ↓ 移动，Esc 取消拖动" disabled={reorder.disabled || ordering.saving || items.length < 2}
+        onPointerDown={event => ordering.pointerDown(event, item.id)} onPointerMove={ordering.pointerMove} onPointerUp={ordering.pointerUp}
+        onPointerCancel={ordering.pointerCancel} onLostPointerCapture={ordering.pointerCancel}
+        onKeyDown={event => ordering.keyDown(event, item.id)} onClick={event => { event.preventDefault(); event.stopPropagation(); }}><GripVertical size={15}/></button>}
       {renderItem(item, index)}
     </div>;
   }
 
-  return <div ref={root} role="list" aria-label={label} tabIndex={-1} data-virtualized={virtual}
+  return <>{ordering.notice && <div className={`reorder-notice ${ordering.notice.error ? 'is-error' : ''}`} role={ordering.notice.error ? 'alert' : 'status'}><span>{ordering.notice.text}</span><button type="button" aria-label="关闭排序提示" onClick={ordering.dismiss}><X size={12}/></button></div>}<div ref={root} role="list" aria-label={label} tabIndex={-1} data-virtualized={virtual}
     className={`virtual-task-list ${className}`} style={virtual ? { height: virtualizer.getTotalSize() } : undefined}
     onKeyDownCapture={onKeyDown}
     onFocusCapture={event => {
@@ -161,5 +176,5 @@ export function VirtualTaskList<T extends { id: string }>({ items, renderItem, s
     }}
     onBlurCapture={event => { if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) setFocused(null); }}>
     {virtual ? virtualizer.getVirtualItems().map(item => render(item.index, item.start - margin)) : items.map((_, index) => render(index))}
-  </div>;
+  </div></>;
 }

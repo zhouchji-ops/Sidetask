@@ -15,6 +15,7 @@ import {
   selectEarlierIncomplete,
   nextTimeBoundary,
   selectToday,
+  validateSnapshot,
 } from '../src/lib/domain';
 import type { Action, Snapshot, Task } from '../src/lib/types';
 
@@ -113,6 +114,77 @@ describe('indexed task projections and daily ordering', () => {
   });
 });
 afterEach(() => vi.useRealTimers());
+
+describe('independent persistent manual task orders', () => {
+  it('reorders all and deadlines independently, without changing tasks, revisions, plans or date semantics', () => {
+    const initial = createSeed(today);
+    const allIds = indexSnapshot(initial).active.map(task => task.id).reverse();
+    const all = apply(initial, { type: 'reorderTasks', scope: 'all', taskIds: allIds });
+    const ddlIds = selectDeadlines(initial).map(task => task.id).reverse();
+    const ddl = apply(all, { type: 'reorderTasks', scope: 'deadlines', taskIds: ddlIds });
+    expect(indexSnapshot(ddl).active.map(task => task.id)).toEqual(allIds);
+    expect(selectDeadlines(ddl).map(task => task.id)).toEqual(ddlIds);
+    expect(ddl.settings.ddlSort).toBe('manual');
+    expect(ddl.tasks).toEqual(initial.tasks);
+    expect(ddl.plans).toEqual(initial.plans);
+    expect(ddl.revision).toBe(initial.revision + 2);
+    expect(selectDeadlines(all)).toEqual(selectDeadlines(initial));
+    const dated = apply(ddl, { type: 'updateSettings', changes: { ddlSort: 'date' } });
+    expect(selectDeadlines(dated)).toEqual(selectDeadlines(initial));
+    const manual = apply(dated, { type: 'updateSettings', changes: { ddlSort: 'manual' } });
+    expect(selectDeadlines(manual).map(task => task.id)).toEqual(ddlIds);
+    expect(selectDeadlines(normalizePreviewSnapshot(JSON.parse(JSON.stringify(manual))))).toEqual(selectDeadlines(manual));
+  });
+
+  it('preserves hidden ranked slots through completion, trash and removed DDL, then appends new tasks', () => {
+    const initial = createEmptySnapshot();
+    initial.tasks = ['a', 'b', 'c', 'd'].map(id => task(id));
+    let current = apply(initial, { type: 'reorderTasks', scope: 'deadlines', taskIds: ['d', 'c', 'b', 'a'] });
+    current = apply(current, { type: 'setCompleted', id: 'c', completed: true, expectedRevision: 1 });
+    current = apply(current, { type: 'trashTask', id: 'b', expectedRevision: 1 });
+    current = apply(current, { type: 'updateTask', id: 'a', changes: { dueDate: null }, expectedRevision: 1 });
+    current = apply(current, { type: 'createTask', date: today, task: { title: 'new', notes: '', priority: 'normal', dueDate: today, dueTime: null, addToToday: false } });
+    const added = current.tasks.at(-1)!.id;
+    expect(selectDeadlines(current).map(task => task.id)).toEqual(['d', added]);
+    current = apply(current, { type: 'reorderTasks', scope: 'deadlines', taskIds: [added, 'd'] });
+    expect(current.deadlineOrder).toEqual([added, 'c', 'b', 'a', 'd']);
+    current = apply(current, { type: 'setCompleted', id: 'c', completed: false, expectedRevision: 2 });
+    current = apply(current, { type: 'restoreTask', id: 'b', expectedRevision: 2 });
+    current = apply(current, { type: 'updateTask', id: 'a', changes: { dueDate: today }, expectedRevision: 2 });
+    expect(selectDeadlines(current).map(task => task.id)).toEqual([added, 'c', 'b', 'a', 'd']);
+    expect(indexSnapshot(current).active.map(task => task.id)).toEqual(['a', 'b', 'c', 'd', added]);
+  });
+
+  it('defaults legacy order to existing all/date order, and rejects malformed persisted orders', () => {
+    const initial = createSeed(today);
+    delete initial.taskOrder;
+    delete initial.deadlineOrder;
+    const normalized = normalizePreviewSnapshot(initial);
+    expect(normalized.taskOrder).toEqual([]);
+    expect(normalized.deadlineOrder).toEqual([]);
+    expect(indexSnapshot(normalized).active).toEqual(indexSnapshot(initial).active);
+    const manual = apply(normalized, { type: 'updateSettings', changes: { ddlSort: 'manual' } });
+    expect(selectDeadlines(manual)).toEqual(selectDeadlines(initial));
+    for (const order of [['missing'], ['demo-read', 'demo-read'], null, 'demo-read']) {
+      expect(() => validateSnapshot({ ...normalized, taskOrder: order } as Snapshot)).toThrow('排序');
+      expect(() => validateSnapshot({ ...normalized, deadlineOrder: order } as Snapshot)).toThrow('排序');
+    }
+  });
+
+  it('rejects incomplete, duplicate, ineligible and stale requests atomically', () => {
+    const initial = createSeed(today);
+    const before = structuredClone(initial);
+    for (const scope of ['all', 'deadlines'] as const) {
+      const ids = (scope === 'all' ? indexSnapshot(initial).active : selectDeadlines(initial)).map(task => task.id);
+      for (const taskIds of [ids.slice(1), [...ids, ids[0]], ['missing', ...ids.slice(1)], ['demo-review', ...ids.slice(1)]]) {
+        expect(() => apply(initial, { type: 'reorderTasks', scope, taskIds })).toThrow('重新排序');
+      }
+      const changed = apply(initial, { type: 'setCompleted', id: ids[0], completed: true, expectedRevision: 1 });
+      expect(() => applyPreviewAction(changed, { type: 'reorderTasks', scope, taskIds: ids }, initial.revision)).toThrow('另一窗口');
+    }
+    expect(initial).toEqual(before);
+  });
+});
 
 describe('single task identity across daily plans and deadlines', () => {
   it('appends a rejoined task after reordering and removing a plan, keeping history and task data', () => {

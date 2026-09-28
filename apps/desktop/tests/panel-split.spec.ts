@@ -246,7 +246,7 @@ test('另一窗口改变同一比例时保留草稿并明确确认，只改比�
   await repeatKey(other, 'ArrowDown', 2);
   await other.keyboard.up('ArrowDown');
   await expect.poll(async () => (await stored(other)).settings.panelSplit).toBe(64);
-  await other.getByRole('button', { name: '当前按日期排序，点击按重要程度排序', exact: true }).click();
+  await other.getByLabel('截止任务排序', { exact: true }).selectOption('priority');
   await expect.poll(async () => (await stored(other)).settings.ddlSort).toBe('priority');
   await expect(page.getByText('分区比例已在另一处改变，你的调整尚未保存。', { exact: true })).toBeVisible();
   await expect(separator(page)).toHaveAttribute('aria-valuenow', '59');

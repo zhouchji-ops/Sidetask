@@ -127,12 +127,12 @@ test('搜索空状态、备注查询与截止排序', async ({ page }) => {
   await expect(page.locator('.main-content .task-row')).toHaveCount(1);
   await page.getByRole('button', { name: '清除搜索' }).click();
   await navigate(page, '截止日期');
-  await page.getByLabel('截止任务排序').selectOption('priority');
-  await expect(page.getByLabel('截止任务排序')).toHaveValue('priority');
+  await page.getByRole('main').getByLabel('截止任务排序').selectOption('priority');
+  await expect(page.getByRole('main').getByLabel('截止任务排序')).toHaveValue('priority');
   await expect(page.locator('.main-content .task-row').first()).toContainText('高优先级');
   await page.reload();
   await navigate(page, '截止日期');
-  await expect(page.getByLabel('截止任务排序')).toHaveValue('priority');
+  await expect(page.getByRole('main').getByLabel('截止任务排序')).toHaveValue('priority');
 });
 
 test('另一个窗口修改任务时保留当前草稿，并要求显式解决冲突', async ({ page, context }) => {

@@ -20,7 +20,7 @@ interface Store {
   loading: boolean;
   error: string | null;
   busy: boolean;
-  mutate: (action: Action) => Promise<Snapshot>;
+  mutate: (action: Action, expectedRevision?: number) => Promise<Snapshot>;
   restoreBackup: (content: string, expectedRevision: number) => Promise<string>;
   clearError: () => void;
 }
@@ -81,13 +81,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       document.removeEventListener('visibilitychange', onFocus);
     };
   }, [refresh]);
-  const mutate = useCallback(async (action: Action) => {
+  const mutate = useCallback(async (action: Action, observedRevision?: number) => {
     if (inflight.current || !ref.current) throw new Error('正在保存，请稍后再试');
     inflight.current = true;
     setBusy(true);
     setError(null);
-    const expectedRevision = ref.current.revision;
+    const expectedRevision = observedRevision ?? ref.current.revision;
     try {
+      if (expectedRevision !== ref.current.revision) throw new Error('任务已在另一窗口更新，请重新排序');
       if (isDesktop) {
         const committed = await invoke<Snapshot>('mutate', { action, expectedRevision });
         apply(committed);

@@ -15,6 +15,10 @@ struct TaskBackup {
     exported_at: String,
     tasks: Vec<Task>,
     plans: Vec<Plan>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    task_order: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    deadline_order: Vec<String>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,10 +39,12 @@ fn encode_backup(snapshot: &Snapshot) -> Result<String, String> {
         return Err("任务或计划数量超出可恢复备份容量，未保存。".into());
     }
     let backup = TaskBackup {
-        schema_version: 2,
+        schema_version: 3,
         exported_at: chrono::Utc::now().to_rfc3339(),
         tasks: snapshot.tasks.clone(),
         plans: snapshot.plans.clone(),
+        task_order: snapshot.task_order.clone(),
+        deadline_order: snapshot.deadline_order.clone(),
     };
     let content = serde_json::to_string(&backup).map_err(|error| error.to_string())?;
     if content.len() > MAX_BACKUP_BYTES {
@@ -53,7 +59,7 @@ fn parse_backup(content: &str) -> Result<TaskBackup, String> {
     }
     let backup: TaskBackup =
         serde_json::from_str(content).map_err(|e| format!("备份格式无效，原数据未更改：{e}"))?;
-    if ![1, 2].contains(&backup.schema_version) {
+    if ![1, 2, 3].contains(&backup.schema_version) {
         return Err(format!(
             "备份版本 {} 不受支持，原数据未更改。",
             backup.schema_version
@@ -61,6 +67,11 @@ fn parse_backup(content: &str) -> Result<TaskBackup, String> {
     }
     if backup.schema_version == 1 && backup.tasks.iter().any(|task| task.deleted_at.is_some()) {
         return Err("旧版 v1 备份不能携带回收站状态，原数据未更改。".into());
+    }
+    if backup.schema_version < 3
+        && (!backup.task_order.is_empty() || !backup.deadline_order.is_empty())
+    {
+        return Err("旧版 v1/v2 备份不能携带自定义任务顺序，原数据未更改。".into());
     }
     if backup.tasks.len() > MAX_BACKUP_TASKS || backup.plans.len() > MAX_BACKUP_PLANS {
         return Err("备份任务或计划数量超出此版本限制，原数据未更改。".into());
@@ -70,6 +81,8 @@ fn parse_backup(content: &str) -> Result<TaskBackup, String> {
     let snapshot = Snapshot {
         tasks: backup.tasks.clone(),
         plans: backup.plans.clone(),
+        task_order: backup.task_order.clone(),
+        deadline_order: backup.deadline_order.clone(),
         revision: backup
             .tasks
             .iter()
@@ -154,6 +167,8 @@ impl TaskService {
         let mut next = Snapshot {
             tasks: backup.tasks,
             plans: backup.plans,
+            task_order: backup.task_order,
+            deadline_order: backup.deadline_order,
             settings: self.snapshot.settings.clone(),
             revision,
         };
@@ -194,6 +209,72 @@ mod tests {
         }
         fn save_placement(&mut self, _: &Snapshot, _: &str) -> Result<(), String> {
             Err("disk full".into())
+        }
+    }
+    #[test]
+    fn failed_order_write_never_publishes_order_or_sort_mode() {
+        for scope in ["all", "deadlines"] {
+            let mut service = TaskService::new(Box::new(FailingRepo)).unwrap();
+            let task_ids = service
+                .snapshot
+                .tasks
+                .iter()
+                .filter(|task| !task.completed && (scope == "all" || task.due_date.is_some()))
+                .rev()
+                .map(|task| task.id.clone())
+                .collect();
+            let before = serde_json::to_value(&service.snapshot).unwrap();
+            assert_eq!(
+                service
+                    .mutate(
+                        Action::ReorderTasks {
+                            scope: scope.into(),
+                            task_ids
+                        },
+                        service.snapshot.revision
+                    )
+                    .unwrap_err(),
+                "disk full"
+            );
+            assert_eq!(serde_json::to_value(&service.snapshot).unwrap(), before);
+        }
+    }
+    #[test]
+    fn portable_v3_validates_orders_and_older_versions_cannot_disguise_them() {
+        let mut service = TaskService::new(Box::new(FailingRepo)).unwrap();
+        service.snapshot.task_order = service
+            .snapshot
+            .tasks
+            .iter()
+            .rev()
+            .map(|task| task.id.clone())
+            .collect();
+        service.snapshot.deadline_order = service.snapshot.task_order.clone();
+        let content = service.export_backup().unwrap();
+        let backup = parse_backup(&content).unwrap();
+        assert_eq!(backup.schema_version, 3);
+        assert_eq!(backup.task_order, service.snapshot.task_order);
+        assert_eq!(backup.deadline_order, service.snapshot.deadline_order);
+        let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+        for version in [1, 2] {
+            let mut old = value.clone();
+            old["schemaVersion"] = serde_json::json!(version);
+            assert!(parse_backup(&serde_json::to_string(&old).unwrap()).is_err());
+            old.as_object_mut().unwrap().remove("taskOrder");
+            old.as_object_mut().unwrap().remove("deadlineOrder");
+            let parsed = parse_backup(&serde_json::to_string(&old).unwrap()).unwrap();
+            assert!(parsed.task_order.is_empty() && parsed.deadline_order.is_empty());
+        }
+        for key in ["taskOrder", "deadlineOrder"] {
+            for order in [
+                serde_json::json!(["missing"]),
+                serde_json::json!([service.snapshot.tasks[0].id, service.snapshot.tasks[0].id]),
+                serde_json::Value::Null,
+            ] {
+                let mut invalid = value.clone();
+                invalid[key] = order;
+                assert!(parse_backup(&serde_json::to_string(&invalid).unwrap()).is_err());
+            }
         }
     }
     #[test]
@@ -433,10 +514,12 @@ mod tests {
         // Leave a small but valid export margin. Adding a deletion timestamp
         // must not silently produce a state this app cannot back up/restore.
         let sized = TaskBackup {
-            schema_version: 2,
+            schema_version: 3,
             exported_at: chrono::Utc::now().to_rfc3339(),
             tasks: service.snapshot.tasks.clone(),
             plans: vec![],
+            task_order: vec![],
+            deadline_order: vec![],
         };
         let mut excess = serde_json::to_string(&sized).unwrap().len() - (MAX_BACKUP_BYTES - 16);
         for task in &mut service.snapshot.tasks {

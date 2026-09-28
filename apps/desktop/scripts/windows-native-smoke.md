@@ -35,8 +35,9 @@ if ($LASTEXITCODE -ne 0) { throw '原生冒烟失败，查看 evidence' }
 - 每次启动等待原生窗口设置完成后，确认控制台没有残留错误横幅，以真实 HWND 的物理矩形验证唯一可见把手：`18×92` 逻辑尺寸按该窗 DPI 换算（超出工作区时裁小），完整落在所属屏幕工作区。这个检查能检出 Windows 最小跟踪宽度把把手意外扩宽的问题，不能只信 `get_window_status` 无错误。
 - 控制台用真实 WebDriver 点击和输入创建任务、修改备注/精确 DDL、完成/撤销、移出/加入今日、软删除/恢复，读取既有 `get_snapshot` 辅助核验同一 ID 与计划保留。日期输入由原生 DOM setter 派发 input/change，避免系统日期格式干扰；这不验收日期键盘输入/IME。
 - 在真实设置 UI 固定展开后打开小窗，切换到独立 `edge-panel` WebView，在今日列表完成任务；回控制台的“已完成”页面观察并撤销，再切回小窗同时验证今日和 DDL 出现原任务。断言两个 WebDriver handle 不同、同 Task ID、日期/时刻/时区/UTC 和计划完整保留，完成后以 UI 收起小窗。
+- 经真实新建 UI 补足三条合成任务，在控制台分别拖动今日、全部、DDL，再在小窗拖动今日与 DDL。五次操作均使用 WebDriver `pointerMove / pointerDown / pointerUp`，不派发 JavaScript 指针事件、不直接调用排序 IPC。每次断言只提交一个 revision、任务字段和其他列表顺序不变，DDL 拖动自动变为手动排序；同时核对两个真实 WebView 的 DOM 顺序，最终让三种列表分别保留不同顺序。此三任务用例不覆盖长列表自动滚动、触摸、IME 或所有取消手势。
 - Win32 `WM_CLOSE` 触发真实宿主窗口关闭流程，核验窗口隐藏且进程存活，再以现有 `openConsole` IPC 恢复并核验唯一可见原生 HWND。这不验收托盘点击。
-- 现有 `window_action('quit')` 触发与托盘相同的退出服务；有草稿时点击真实“保存并退出”，观察主进程结束，再用 Node 内置 SQLite **只读**检查 schema5、application ID、完整性及内容。重启必须新 PID 并保留同 Task ID / DDL / 计划；再次明确退出后再核验数据库。`driver.quit` 或强杀不能算产品退出通过。
+- 现有 `window_action('quit')` 触发与托盘相同的退出服务；有草稿时点击真实“保存并退出”，观察主进程结束，再用 Node 内置 SQLite **只读**检查 schema6、application ID、完整性及内容。重启必须新 PID 并保留同 Task ID / DDL / 计划 / 三种列表顺序 / DDL 手动模式，逐页核对真实 DOM；再次明确退出后再核验数据库。`driver.quit` 或强杀不能算产品退出通过。
 - 单请求通常 15 秒，会话 90 秒，控制台 30 秒，退出 30 秒，总段 15 分钟；超时诊断/清理另有 45 秒硬上限。失败保留驱动日志、可获得的 HTML/截图、结构化报告和隔离数据库。不会无限重试会话。
 - 收尾只强制回收本工具本次独有 EXE 路径的进程和本次 driver 进程树，并确认退出；绝不按 `sidetask` 名称批量结束进程，绝不删除应用数据库。探测、结束或退出确认失败会记录 `cleanup.errors`，即使业务检查通过，最终仍为失败/退出码1；`businessOutcome`独立保留业务结果。准备构建目录应专用于该次运行。
 
