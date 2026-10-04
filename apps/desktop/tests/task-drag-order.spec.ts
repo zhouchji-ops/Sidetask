@@ -250,6 +250,10 @@ for (const surface of ['console', 'edge-panel'] as const) {
     expect(await snapshot(page)).toEqual(initial);
     await expect(titleList(list)).toHaveText(titles.slice(0, 3));
     if (surface === 'edge-panel') expect((await probe(page)).locks.at(-1)).toBe(false);
+    // Earlier cancelled drags can leave the panel scrolled. Keep the first
+    // row's target stable while edge auto-scroll continues during slow input.
+    await list.evaluate(element => { element.closest<HTMLElement>('.main-content,.edge-scroll')!.scrollTop = 0; });
+    await settle(page);
     await drag(page, list, titles[2], titles[0], false);
     await expect(titleList(list)).toHaveText([titles[2], titles[0], titles[1]]);
     expect((await probe(page)).writes).toBe(1);
