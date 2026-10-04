@@ -53,6 +53,25 @@ async function open(page: Page, surface: 'console' | 'edge-panel' = 'console') {
   await page.goto(`/?surface=${surface}`);
   await expect(today(page, surface)).toBeVisible();
 }
+async function openWithControlledFrames(page: Page, frameInterval: number) {
+  await page.clock.install({ time: new Date(fixedTime.getTime() - 60 * 60 * 1000) });
+  await page.goto('/?surface=console');
+  await expect(today(page)).toBeVisible();
+  await page.clock.pauseAt(fixedTime);
+  // Drive the real drag handler at a known refresh rate, independently of the
+  // runner's rendering speed. Use the clock's monotonic timestamp for each RAF.
+  await page.evaluate(interval => {
+    window.requestAnimationFrame = callback => window.setTimeout(() => callback(performance.now()), interval);
+    window.cancelAnimationFrame = id => window.clearTimeout(id);
+  }, frameInterval);
+}
+function longListFixture() {
+  const initial = fixture();
+  const template = initial.tasks[0];
+  initial.tasks = Array.from({ length: 250 }, (_, index) => ({ ...template, id: `drag-task-${index}`, title: `合成长列表第${String(index).padStart(3, '0')}项`, dueDate: null, dueTime: null }));
+  initial.plans = initial.tasks.map((task, sortOrder) => ({ taskId: task.id, date, sortOrder }));
+  return initial;
+}
 function today(page: Page, surface: 'console' | 'edge-panel' = 'console') {
   return page.getByRole('list', { name: surface === 'console' ? '今日' : '今日未完成任务', exact: true });
 }
@@ -367,13 +386,10 @@ test('松手后等待存储锁时其他窗口先提交，旧拖动版本被拒�
   expect(await snapshot(page)).toEqual(external);
 });
 
-test('250项虚拟列表拖动到边缘持续自动滚动，可放入起初未挂载的位置且只写一次', async ({ page, context }) => {
-  const initial = fixture();
-  const template = initial.tasks[0];
-  initial.tasks = Array.from({ length: 250 }, (_, index) => ({ ...template, id: `drag-task-${index}`, title: `合成长列表第${String(index).padStart(3, '0')}项`, dueDate: null, dueTime: null }));
-  initial.plans = initial.tasks.map((task, sortOrder) => ({ taskId: task.id, date, sortOrder }));
+test('250项虚拟列表在10Hz下持续自动滚动，可放入起初未挂载的位置且只写一次', async ({ page, context }) => {
+  const initial = longListFixture();
   await seed(context, initial);
-  await open(page);
+  await openWithControlledFrames(page, 100);
   const list = today(page);
   await expect(list).toHaveAttribute('data-virtualized', 'true');
   expect(await list.getByRole('listitem').count()).toBeLessThan(60);
@@ -382,7 +398,8 @@ test('250项虚拟列表拖动到边缘持续自动滚动，可放入起初未�
   const scroll = page.locator('main.main-content');
   const bounds = await scroll.boundingBox();
   await page.mouse.move(point.x, Math.min(bounds!.y + bounds!.height, 960) - 8, { steps: 10 });
-  await expect.poll(() => scroll.evaluate(element => element.scrollTop)).toBeGreaterThan(1_800);
+  await page.clock.runFor(2_500);
+  expect(await scroll.evaluate(element => element.scrollTop)).toBeGreaterThan(1_800);
   await expect(list.locator('[data-task-list-id="drag-task-0"][data-dragging]')).toHaveCount(1);
   expect(await list.getByRole('listitem').count()).toBeLessThan(60);
   expect((await probe(page)).writes).toBe(0);
@@ -401,6 +418,37 @@ test('250项虚拟列表拖动到边缘持续自动滚动，可放入起初未�
   await page.reload();
   await expect(today(page)).toHaveAttribute('data-virtualized', 'true');
   expect(await snapshot(page)).toEqual(committed);
+});
+
+test('高刷新率自动滚动保持正常速度，长帧恢复不大跳且取消后停止', async ({ page, context }) => {
+  const initial = longListFixture();
+  await seed(context, initial);
+  await openWithControlledFrames(page, 8);
+  const list = today(page);
+  const point = await beginDrag(page, list, initial.tasks[0].title);
+  const scroll = page.locator('main.main-content');
+  const bounds = await scroll.boundingBox();
+  await page.mouse.move(point.x, Math.min(bounds!.y + bounds!.height, 960) - 8, { steps: 10 });
+  const before = await scroll.evaluate(element => element.scrollTop);
+  await page.clock.runFor(1_000);
+  const after = await scroll.evaluate(element => element.scrollTop);
+  // The same near-edge position should travel about 864 px per second, not
+  // multiply its speed when 125 frames are delivered instead of 60.
+  expect(after - before).toBeGreaterThan(750);
+  expect(after - before).toBeLessThan(1_000);
+  await page.clock.fastForward(2_000);
+  const resumed = await scroll.evaluate(element => element.scrollTop);
+  expect(resumed - after).toBeGreaterThan(0);
+  expect(resumed - after).toBeLessThan(120);
+  expect((await probe(page)).writes).toBe(0);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await expect(list.locator('[data-dragging]')).toHaveCount(0);
+  const cancelled = await scroll.evaluate(element => element.scrollTop);
+  await page.clock.runFor(1_000);
+  expect(await scroll.evaluate(element => element.scrollTop)).toBe(cancelled);
+  expect(await snapshot(page)).toEqual(initial);
+  expect((await probe(page)).writes).toBe(0);
 });
 
 for (const completion of ['resolve', 'reject'] as const) {

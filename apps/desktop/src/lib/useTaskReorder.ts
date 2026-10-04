@@ -17,7 +17,7 @@ type Gesture = {
   id: string; pointer: number; button: HTMLButtonElement;
   ids: string[]; revision: number; context: string;
   startX: number; startY: number; x: number; y: number;
-  active: boolean; slot: number; ready: Promise<boolean>; preparation: Preparation;
+  active: boolean; slot: number; lastFrameTime: number; ready: Promise<boolean>; preparation: Preparation;
 };
 type Marker = { id: string; slot: number };
 
@@ -101,16 +101,20 @@ export function useTaskReorder<T extends { id: string }>(
     current.slot = next?.index ?? (measured.length ? measured[measured.length - 1].index + 1 : current.ids.indexOf(current.id));
     setMarker(previous => previous?.id === current.id && previous.slot === current.slot ? previous : { id: current.id, slot: current.slot });
   }
-  function tick() {
+  function tick(timestamp: number) {
     const current = gesture.current;
     if (!current?.active) return;
     if (!valid(current.revision, current.context)) { cancel('列表已更新，已取消本次排序，请重试。'); return; }
+    // Preserve the 60 Hz speed at other refresh rates. Bound catch-up after a
+    // long frame so a stalled renderer cannot jump across the list on resume.
+    const elapsed = Math.max(0, Math.min(timestamp - current.lastFrameTime, 100));
+    current.lastFrameTime = timestamp;
     const area = bounds(); const scroll = scrollRef.current;
     if (area && scroll && current.x >= area.left && current.x <= area.right && current.y >= area.top - 24 && current.y <= area.bottom + 24) {
       const band = Math.min(40, (area.bottom - area.top) / 3);
       const velocity = current.y < area.top + band ? -Math.min(18, (area.top + band - current.y) * .45)
         : current.y > area.bottom - band ? Math.min(18, (current.y - area.bottom + band) * .45) : 0;
-      if (velocity) scroll.scrollTop += velocity;
+      if (velocity) scroll.scrollTop += velocity * elapsed * .06;
       target(current);
     }
     frame.current = requestAnimationFrame(tick);
@@ -143,7 +147,7 @@ export function useTaskReorder<T extends { id: string }>(
     button.focus({ preventScroll: true });
     const session: Gesture = { id, pointer: event.pointerId, button, ids: items.map(item => item.id), revision: current.revision,
       context: current.context, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY,
-      active: false, slot: items.findIndex(item => item.id === id), ready: Promise.resolve(true), preparation: newPreparation() };
+      active: false, slot: items.findIndex(item => item.id === id), lastFrameTime: 0, ready: Promise.resolve(true), preparation: newPreparation() };
     // Keep the previous feedback's space until the next result. Removing it
     // here would shift the rows out from under the pointer on mouse-down.
     gesture.current = session;
@@ -163,6 +167,7 @@ export function useTaskReorder<T extends { id: string }>(
     current.x = event.clientX; current.y = event.clientY;
     if (!current.active && Math.hypot(current.x - current.startX, current.y - current.startY) >= 5) {
       current.active = true;
+      current.lastFrameTime = performance.now();
       target(current);
       frame.current = requestAnimationFrame(tick);
     }
