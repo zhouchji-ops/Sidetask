@@ -14,6 +14,8 @@
 
 成功后应有 `public.sidetask_sync_documents` 与 `sidetask_sync_head`、`sidetask_sync_get`、`sidetask_sync_put`。脚本开启 RLS，按登录用户隔离数据，只允许经过用户校验及版本检查的 RPC 写入。不要通过 Table Editor 手工改 `revision` 或删除记录，避免造成版本回退。
 
+项目的 **Data API** 须启用，暴露的 schema 包含 `public`；新项目通常已有此配置。已运行 SQL 仍提示找不到同步接口时，先核对这两项，再在 SQL Editor 执行 `NOTIFY pgrst, 'reload schema';` 刷新接口缓存。`PGRST202` 表示当前接口缓存未找到函数或匹配签名，不能单凭这个错误认定 SQL 没执行。参考 [API 配置](https://supabase.com/docs/guides/api/securing-your-api)、[刷新接口缓存](https://supabase.com/docs/guides/troubleshooting/refresh-postgrest-schema) 与 [错误定义](https://docs.postgrest.org/en/v14/references/errors.html)。
+
 ## 3. 创建应用登录账号
 
 进入 **Authentication → Users → Add user → Create new user**，为自己创建邮箱与独立的应用密码，并确认该用户已确认邮箱（创建界面可选 Auto Confirm）。这是同步账号，和 Supabase Dashboard 管理账号、数据库密码分别管理。
@@ -57,7 +59,8 @@
 
 | 提示或现象 | 处理 |
 | --- | --- |
-| 请先执行 SQL / 响应格式不兼容 | 检查项目是否完整运行本指南链接的同版 SQL |
+| 请先执行 SQL / 未找到接口（PGRST202） | 完整运行同版 SQL；若已执行，检查 Data API 启用及 `public` 暴露，再按第 2 节刷新接口缓存 |
+| 响应格式不兼容 | 检查客户端与 SQL 是否同版，不要替换或删改 RPC 返回字段 |
 | 登录失败、邮箱未确认 | 在 Authentication 确认用户与密码；这里不接受 Dashboard 密码 |
 | 项目已暂停或网络失败 | 在 Dashboard 恢复 Free 项目，检查网络；本机编辑继续保存 |
 | 登录已过期或被撤销 | 重新登录原项目与原账号，保留已有同步基线 |
@@ -69,6 +72,6 @@
 
 ## 开发验证与依赖来源
 
-三方合并、双库同步循环、离线重启、CAS、删除/计划移除/排序、HTTPS 请求解析、过期凭据与错误恢复由合成测试覆盖。SQL 测试使用独立 PostgreSQL 测试库中的合成 auth schema，不使用个人账号。自动化通过不等于真实 Supabase 部署或 Mac/Windows 系统凭据库验收；当前用户尚未创建项目，真实双端同步须按第 6 节接续。
+三方合并、双库同步循环、离线重启、CAS、删除/计划移除/排序、HTTPS 请求解析、过期凭据与错误恢复由合成测试覆盖。SQL 测试使用独立 PostgreSQL 测试库中的合成 auth schema，不使用个人账号。自动化通过不等于真实 Supabase 部署或 Mac/Windows 系统凭据库验收；项目须先完成第 2、3 节初始化，再按第 6 节验证真实双端同步。
 
 新增直接依赖固定版本：`reqwest 0.13.5`（HTTP/TLS，MIT OR Apache-2.0；[源码](https://github.com/seanmonstar/reqwest/tree/v0.13.5)）、`keyring 3.6.3`（系统凭据库，MIT OR Apache-2.0；[源码](https://github.com/hwchen/keyring-rs/tree/v3.6.3)）、`base64 0.22.1`（仅识别旧 anon key 声明，MIT OR Apache-2.0；[源码](https://github.com/marshallpierce/rust-base64/tree/v0.22.1)）。采用 crates.io 发布包及锁文件校验和，没有复制第三方业务源码。完整实际版本以 Cargo.lock 为准。

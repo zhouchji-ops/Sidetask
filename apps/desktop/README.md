@@ -4,7 +4,7 @@
 
 Tauri 2 + React / TypeScript + Rust + SQLite。任务、今日计划和设置共用一个 Rust 服务；控制台、边缘小窗和内部把手由平台层协调。当前已实现回收站与单项恢复、备份导入及双窗口草稿保护。
 
-当前 `codex/mac-windows-sync` 开发源码还实现可选 Mac ↔ Windows Supabase 同步，未启用时保持原本的本机模式。实际用户项目尚未配置，双端联网与系统凭据库验收待完成；项目首页仍提供 `5dc3a23` 旧包，**该包不含同步**。接入前阅读 [Supabase 配置说明](../../docs/engineering/SUPABASE_SETUP.md) 与 [ADR-0009](../../docs/decisions/0009-optional-desktop-sync.md)。
+本轮 `c922fea` 内部构建包含可选 Mac ↔ Windows Supabase 同步，未启用时保持原本的本机模式。使用前需初始化自己的 Supabase 项目并登录同一账号；真实 Supabase、系统凭据库与双端原生联网验收仍待完成。接入前阅读 [Supabase 配置说明](../../docs/engineering/SUPABASE_SETUP.md) 与 [ADR-0009](../../docs/decisions/0009-optional-desktop-sync.md)。
 
 在「设置 → 界面风格」可即时切换纸笺、霜序、暖刊、极简；四套均支持独立浅深色。风格跨窗口同步，重启保留，旧任务不会重置。
 
@@ -12,7 +12,7 @@ Tauri 2 + React / TypeScript + Rust + SQLite。任务、今日计划和设置共
 
 默认开发入口是 `mac`，已包含两平台的内部试用实现。Mac 使用 `mac` → `origin/mac`；Windows 同步远端后，从已确认的 `origin/mac` 完整提交 SHA 创建 `codex/<任务名>` 分支。已有工作副本按[接续说明](../../docs/UPDATING_CHECKOUT.md)保留原目录，在新目录克隆，不合并旧历史。
 
-历史 CI 产品版本 `065aa67` 的 [CI 36148843605](https://github.com/zhouchji-ops/Sidetask/actions/runs/36148843605)通过 Mac、Windows 和 Rust 审计三个作业，并生成内部包。当前下载与期限见[项目首页](../../README.md#下载与安装)，内层实际文件校验值见[使用说明书](../../docs/product/USER_GUIDE.md#更新重装和备份)。真机原始记录在本地留存；CI 结果不能代替完整原生验收。
+[CI 37221920357](https://github.com/zhouchji-ops/Sidetask/actions/runs/37221920357)对应完整提交 `c922fea31d02bc6550d34f3c6de24130965f0060`。两端均通过 113 项前端业务、6 项工具和 211 项 UI 测试；Rust 为 Windows 239 项、Mac 232 项，内部包构建与上传均成功。当前下载与到期时间见[项目首页](../../README.md#下载与安装)，内层实际文件校验值见[使用说明书](../../docs/product/USER_GUIDE.md#更新重装和备份)。CI 结果不能代替系统凭据库和真实双端联网验收。
 
 ## 开发
 

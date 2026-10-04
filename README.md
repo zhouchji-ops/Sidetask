@@ -6,9 +6,9 @@
 
 [**完整使用说明书**](docs/product/USER_GUIDE.md) · [下载与安装](#下载与安装)
 
-当前版本为 **0.1.0 内部试用版**。下方提供 Mac arm64 App 和 Windows x64 安装包，均已包含今日计划、全部任务和截止日期的拖动排序。
+当前版本为 **0.1.0 内部试用版**。本轮 Mac arm64 / Windows x64 构建包含三列表拖动排序和可选的双端同步；各平台产物状态见下方下载区。
 
-当前 `codex/mac-windows-sync` 开发源码新增可选的 **Mac ↔ Windows Supabase 同步**，还没有包含此功能的已验证下载包。实际项目配置与双端联网验收尚未完成；下方 `5dc3a23` 旧包不含云同步。接入方式见 [Supabase 配置说明](docs/engineering/SUPABASE_SETUP.md)。
+可选启用 **Mac ↔ Windows Supabase 同步**。使用前需自行初始化 Supabase 项目，并在两台电脑登录同一账号，步骤见 [Supabase 配置说明](docs/engineering/SUPABASE_SETUP.md)。真实 Supabase、系统凭据库及双端原生联网验收仍待完成；CI 构建不等于这些场景已通过。
 
 ## 用侧笺做什么
 
@@ -24,16 +24,16 @@
 
 ## 下载与安装
 
-这批旧版安装包来自[已通过检查的 CI](https://github.com/zhouchji-ops/Sidetask/actions/runs/36426381908)，对应产品版本 `5dc3a23`，包含 2026-09-28 三列表拖动排序及紧凑小窗布局修复，**不包含新开发的云同步功能**。
+本轮安装包来自 [CI 37221920357](https://github.com/zhouchji-ops/Sidetask/actions/runs/37221920357)，对应产品代码 [c922fea](https://github.com/zhouchji-ops/Sidetask/commit/c922fea31d02bc6550d34f3c6de24130965f0060)，包含可选同步。两平台检查、内部包构建与上传均已通过。
 
 | 平台 | 下载 | 文件 |
 | --- | --- | --- |
-| Mac · Apple Silicon / arm64 | [下载 Mac 内部试用包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36426381908/artifacts/10972335597) | `SideTask-macos.zip` 内的 `SideTask.app` |
-| Windows · x64 | [下载 Windows 内部安装包](https://github.com/zhouchji-ops/Sidetask/actions/runs/36426381908/artifacts/10973710003) | `SideTask_0.1.0_x64-setup.exe` |
+| Mac · Apple Silicon / arm64 | [下载 Mac 内部试用包](https://github.com/zhouchji-ops/Sidetask/actions/runs/37221920357/artifacts/11310721217) | `SideTask-macos.zip` 内的 `SideTask.app` |
+| Windows · x64 | [下载 Windows 内部安装包](https://github.com/zhouchji-ops/Sidetask/actions/runs/37221920357/artifacts/11311672093) | `SideTask_0.1.0_x64-setup.exe`（4,684,220 字节） |
 
 先解压 GitHub 产物的外层 ZIP。Mac 再解压其中的 App 压缩包；Windows 在解压目录内找到安装器。完整步骤、包摘要、更新和首次启动见[使用说明书：安装与更新](docs/product/USER_GUIDE.md#安装与更新)。
 
-当前 Mac 包为临时签名、未公证，Windows 包未签名；没有正式 Release。这批 CI 产物保留 14 天，到期日为 **2026-10-12 UTC**。链接失效后请查看本节更新或联系维护者，不把源码 ZIP 当作安装包。
+当前 Mac 包为临时签名、未公证，Windows 包未签名；没有正式 Release。这批 CI 产物保留 14 天，到期日为 **2026-10-18 UTC**。链接失效后请查看本节更新或联系维护者，不把源码 ZIP 当作安装包。
 
 ## 第一次使用
 
@@ -57,7 +57,7 @@
 | 调整展开方式、位置、大小和外观 | [边缘小窗](docs/product/USER_GUIDE.md#使用边缘小窗)、[设置](docs/product/USER_GUIDE.md#外观与窗口设置) |
 | 查找任务、恢复误删 | [搜索与回收站](docs/product/USER_GUIDE.md#搜索与回收站) |
 | 导出备份或恢复数据 | [备份与恢复](docs/product/USER_GUIDE.md#备份与恢复) |
-| 配置开发版的双端同步 | [同步使用说明](docs/product/USER_GUIDE.md#mac-与-windows-同步开发版)、[Supabase 项目配置](docs/engineering/SUPABASE_SETUP.md) |
+| 配置双端同步 | [同步使用说明](docs/product/USER_GUIDE.md#mac-与-windows-同步)、[Supabase 项目配置](docs/engineering/SUPABASE_SETUP.md) |
 | 关闭、退出、使用快捷键或排查问题 | [窗口与键盘](docs/product/USER_GUIDE.md#关闭退出与键盘操作)、[常见问题](docs/product/USER_GUIDE.md#常见问题) |
 
 ## 开发与协作
