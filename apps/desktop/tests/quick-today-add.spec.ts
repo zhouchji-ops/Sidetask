@@ -53,11 +53,16 @@ async function openPanel(page: Page) {
   await expect(headingAdd(page)).toBeVisible();
 }
 
-async function openPreview(page: Page) {
-  await page.clock.setFixedTime(fixedTime);
+async function openPreview(page: Page, revealDelay: number) {
+  // Install on the blank page, then pause at a later instant before app timers
+  // exist. Pausing at the installation instant can race the clock's own elapsed
+  // milliseconds on slower runners and try to move backwards.
+  await page.clock.install({ time: new Date(fixedTime.getTime() - 60 * 60 * 1000) });
+  await page.clock.pauseAt(fixedTime);
   await page.goto('/?surface=console');
   const preview = page.getByTestId('browser-edge-preview');
   await preview.getByRole('button', { name: '展开侧笺；按住拖动可调整位置', exact: true }).hover();
+  await page.clock.runFor(revealDelay);
   await expect(headingAdd(preview)).toBeVisible();
   return preview;
 }
@@ -314,9 +319,7 @@ test('保存并收起等待和失败都保留草稿，成功后才收起', async
 test('小窗草稿阻止悬停收起，显式隐藏再展开保留草稿且快捷键不打开控制台新建', async ({ page, context }) => {
   const snapshot = fixture(); snapshot.settings.revealMode = 'hover';
   const initial = await seed(context, snapshot);
-  const preview = await openPreview(page);
-  await page.clock.install({ time: fixedTime });
-  await page.clock.pauseAt(fixedTime);
+  const preview = await openPreview(page, snapshot.settings.revealDelay);
   await headingAdd(preview).click();
   await titleInput(preview).fill('合成隐藏期间保留');
   for (const modifier of ['Meta', 'Control']) {
@@ -346,9 +349,7 @@ test('小窗草稿阻止悬停收起，显式隐藏再展开保留草稿且快�
 test('收起快速添加只释放自己的交互锁，其他交互仍能阻止自动隐藏', async ({ page, context }) => {
   const snapshot = fixture(); snapshot.settings.revealMode = 'hover';
   await seed(context, snapshot);
-  const preview = await openPreview(page);
-  await page.clock.install({ time: fixedTime });
-  await page.clock.pauseAt(fixedTime);
+  const preview = await openPreview(page, snapshot.settings.revealDelay);
   await headingAdd(preview).click();
   await page.evaluate(async () => {
     const path = '/src/lib/native.ts';
