@@ -90,6 +90,37 @@ jobs:
           path: apps/desktop/tests/results/
           retention-days: 7
 
+  sync-sql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: sidetask-ci-only
+          POSTGRES_DB: sidetask_sync_test
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sidetask_sync_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify sync migration and account isolation on PostgreSQL 17
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          for sql in \
+            supabase/tests/bootstrap.sql \
+            supabase/migrations/202610040001_desktop_sync.sql \
+            supabase/migrations/202610040001_desktop_sync.sql \
+            supabase/tests/sync.sql; do
+            docker exec -i -e PGOPTIONS='-c sidetask.test_mode=on' "$POSTGRES_CONTAINER" \
+              psql -X --set=ON_ERROR_STOP=1 --username=postgres --dbname=sidetask_sync_test < "$sql"
+          done
+
   rust-advisories:
     runs-on: ubuntu-latest
     timeout-minutes: 15

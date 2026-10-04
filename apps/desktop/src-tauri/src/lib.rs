@@ -2,6 +2,7 @@ mod application;
 mod domain;
 mod infrastructure;
 mod platform;
+mod sync;
 #[cfg(target_os = "windows")]
 #[path = "platform/windows_webview_shutdown.rs"]
 mod windows_webview_shutdown;
@@ -146,7 +147,84 @@ fn mutate(
     ) {
         eprintln!("snapshot notification: {error}");
     }
+    if let Some(sync) = app.try_state::<sync::SyncRuntime>() {
+        sync.wake();
+    }
     Ok(snapshot)
+}
+
+#[tauri::command]
+fn sync_status(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<sync::SyncStatus, String> {
+    require_window(window.label(), &["console"])?;
+    app.try_state::<sync::SyncRuntime>()
+        .ok_or("同步服务尚未就绪。")?
+        .status(&app)
+}
+#[tauri::command]
+async fn sync_sign_in(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    project_url: String,
+    publishable_key: String,
+    email: String,
+    password: String,
+    merge_local: bool,
+) -> Result<sync::SyncStatus, String> {
+    require_window(window.label(), &["console"])?;
+    let config = sync::state::SyncConfig::new(project_url, publishable_key)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        app.try_state::<sync::SyncRuntime>()
+            .ok_or("同步服务尚未就绪。")?
+            .sign_in(&app, config, email, password, merge_local)
+    })
+    .await
+    .map_err(|_| "登录操作中断，请重试。")?
+}
+#[tauri::command]
+async fn sync_sign_out(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<sync::SyncStatus, String> {
+    require_window(window.label(), &["console"])?;
+    tauri::async_runtime::spawn_blocking(move || {
+        app.try_state::<sync::SyncRuntime>()
+            .ok_or("同步服务尚未就绪。")?
+            .sign_out(&app)
+    })
+    .await
+    .map_err(|_| "断开操作中断，请重试。")?
+}
+#[tauri::command]
+async fn sync_now(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<sync::SyncStatus, String> {
+    require_window(window.label(), &["console"])?;
+    tauri::async_runtime::spawn_blocking(move || {
+        app.try_state::<sync::SyncRuntime>()
+            .ok_or("同步服务尚未就绪。")?
+            .sync_now(&app)
+    })
+    .await
+    .map_err(|_| "同步操作中断，请重试。")?
+}
+#[tauri::command]
+async fn sync_resolve(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    choices: std::collections::BTreeMap<String, sync::data::ConflictChoice>,
+) -> Result<sync::SyncStatus, String> {
+    require_window(window.label(), &["console"])?;
+    tauri::async_runtime::spawn_blocking(move || {
+        app.try_state::<sync::SyncRuntime>()
+            .ok_or("同步服务尚未就绪。")?
+            .resolve(&app, choices)
+    })
+    .await
+    .map_err(|_| "冲突处理操作中断，请重试。")?
 }
 #[tauri::command]
 async fn window_action(
@@ -368,7 +446,12 @@ pub fn run() {
             restore_backup,
             get_startup_recovery,
             recover_startup_backup,
-            restart_after_recovery
+            restart_after_recovery,
+            sync_status,
+            sync_sign_in,
+            sync_sign_out,
+            sync_now,
+            sync_resolve
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
@@ -376,6 +459,15 @@ pub fn run() {
                 Ok(state) => {
                     app.manage(state);
                     platform::setup(app)?;
+                    match sync::SyncRuntime::new() {
+                        Ok(runtime) => {
+                            app.manage(runtime);
+                            sync::SyncRuntime::start(app.handle().clone());
+                        }
+                        Err(_) => eprintln!(
+                            "sync network initialization unavailable; local tasks remain usable"
+                        ),
+                    }
                 }
                 Err(error) => {
                     // The failed repository/service was dropped before entering
@@ -392,6 +484,9 @@ pub fn run() {
         .expect("SideTask could not initialize; existing data has not been reset");
     app.run(|app, event| match event {
         tauri::RunEvent::Exit => {
+            if let Some(sync) = app.try_state::<sync::SyncRuntime>() {
+                sync.stop();
+            }
             platform::cleanup();
             #[cfg(target_os = "windows")]
             windows_webview_shutdown::close_after_exit_authorized(app);
@@ -705,6 +800,11 @@ mod security_tests {
             "allow-acknowledge-usage-guide",
             "allow-recover-startup-backup",
             "allow-restart-after-recovery",
+            "allow-sync-status",
+            "allow-sync-sign-in",
+            "allow-sync-sign-out",
+            "allow-sync-now",
+            "allow-sync-resolve",
         ] {
             assert!(!shared["permissions"]
                 .as_array()
@@ -718,6 +818,11 @@ mod security_tests {
             "allow-acknowledge-usage-guide",
             "allow-recover-startup-backup",
             "allow-restart-after-recovery",
+            "allow-sync-status",
+            "allow-sync-sign-in",
+            "allow-sync-sign-out",
+            "allow-sync-now",
+            "allow-sync-resolve",
         ] {
             assert!(!tasks["permissions"]
                 .as_array()

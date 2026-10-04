@@ -1,5 +1,6 @@
 use crate::domain::{Action, Plan, Snapshot, Task};
 use crate::infrastructure::Repository;
+use crate::sync::{data::SyncData, state::SyncState};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_BACKUP_BYTES: usize = 10 * 1024 * 1024;
@@ -99,6 +100,7 @@ fn parse_backup(content: &str) -> Result<TaskBackup, String> {
 
 pub struct TaskService {
     pub snapshot: Snapshot,
+    pub sync: SyncState,
     pub repository: Box<dyn Repository>,
 }
 impl TaskService {
@@ -112,8 +114,11 @@ impl TaskService {
             }
         };
         snapshot.validate()?;
+        let sync = repository.load_sync()?.unwrap_or_default();
+        sync.validate()?;
         Ok(Self {
             snapshot,
+            sync,
             repository,
         })
     }
@@ -132,7 +137,38 @@ impl TaskService {
         parse_backup(&content)?;
         Ok(content)
     }
+    pub fn persist_sync(&mut self, state: SyncState) -> Result<(), String> {
+        state.validate()?;
+        self.repository.save_with_sync(&self.snapshot, &state)?;
+        self.sync = state;
+        Ok(())
+    }
+    pub fn commit_sync(
+        &mut self,
+        data: &SyncData,
+        state: SyncState,
+        expected_revision: u64,
+    ) -> Result<Snapshot, String> {
+        if self.snapshot.revision != expected_revision {
+            return Err("同步期间本地任务已更新，请重试同步；本地修改仍保留。".into());
+        }
+        state.validate()?;
+        let next = data.apply_to(&self.snapshot)?;
+        next.validate()?;
+        encode_backup(&next)?;
+        self.repository.save_with_sync(&next, &state)?;
+        self.snapshot = next;
+        self.sync = state;
+        Ok(self.snapshot.clone())
+    }
+    fn ensure_restore_disconnected(&self) -> Result<(), String> {
+        if self.sync.enabled || self.sync.binding.is_some() {
+            return Err("请先断开同步，再恢复备份；避免旧备份覆盖其他设备的数据。".into());
+        }
+        Ok(())
+    }
     pub fn preview_restore(&self, content: &str) -> Result<RestorePreview, String> {
+        self.ensure_restore_disconnected()?;
         let backup = parse_backup(content)?;
         Ok(RestorePreview {
             task_count: backup.tasks.len(),
@@ -150,6 +186,7 @@ impl TaskService {
         content: &str,
         expected_revision: u64,
     ) -> Result<RestoreResult, String> {
+        self.ensure_restore_disconnected()?;
         if self.snapshot.revision != expected_revision {
             return Err("数据在恢复预览后已更新，请重新预览备份。原数据未更改。".into());
         }
@@ -210,6 +247,73 @@ mod tests {
         fn save_placement(&mut self, _: &Snapshot, _: &str) -> Result<(), String> {
             Err("disk full".into())
         }
+    }
+    #[test]
+    fn unsupported_sync_storage_never_publishes_metadata_or_tasks() {
+        let mut service = TaskService::new(Box::new(FailingRepo)).unwrap();
+        let snapshot = serde_json::to_value(&service.snapshot).unwrap();
+        let sync = serde_json::to_value(&service.sync).unwrap();
+        let mut next_state = service.sync.clone();
+        next_state.device_id = uuid::Uuid::new_v4().to_string();
+        assert!(service.persist_sync(next_state.clone()).is_err());
+        let mut data = SyncData::from_snapshot(&service.snapshot);
+        data.tasks[0].title = "Synthetic remote change".into();
+        assert!(service
+            .commit_sync(&data, next_state, service.snapshot.revision)
+            .is_err());
+        assert_eq!(serde_json::to_value(&service.snapshot).unwrap(), snapshot);
+        assert_eq!(serde_json::to_value(&service.sync).unwrap(), sync);
+    }
+    #[test]
+    fn stale_sync_result_is_rejected_without_publication() {
+        let mut service = TaskService::new(Box::new(FailingRepo)).unwrap();
+        let before = serde_json::to_value(&service.snapshot).unwrap();
+        let data = SyncData::from_snapshot(&service.snapshot);
+        let error = service
+            .commit_sync(&data, service.sync.clone(), service.snapshot.revision + 1)
+            .unwrap_err();
+        assert!(error.contains("同步期间本地任务已更新"));
+        assert_eq!(serde_json::to_value(&service.snapshot).unwrap(), before);
+    }
+    #[test]
+    fn restore_and_preview_require_disconnecting_even_when_sync_is_paused() {
+        use crate::sync::state::{SyncBinding, SyncConfig};
+        let mut service = TaskService::new(Box::new(FailingRepo)).unwrap();
+        let content = service.export_backup().unwrap();
+        let before = serde_json::to_value(&service.snapshot).unwrap();
+        service.sync.enabled = true;
+        assert!(service
+            .preview_restore(&content)
+            .err()
+            .unwrap()
+            .contains("先断开同步"));
+        assert!(service
+            .restore_backup(&content, service.snapshot.revision)
+            .err()
+            .unwrap()
+            .contains("先断开同步"));
+        service.sync.enabled = false;
+        service.sync.binding = Some(SyncBinding {
+            user_id: uuid::Uuid::new_v4().to_string(),
+            email: "synthetic@example.test".into(),
+            config: SyncConfig {
+                project_url: "https://synthetic.supabase.co".into(),
+                publishable_key: "sb_publishable_synthetic_test_key".into(),
+            },
+        });
+        assert!(service
+            .preview_restore(&content)
+            .err()
+            .unwrap()
+            .contains("先断开同步"));
+        assert!(service
+            .restore_backup(&content, service.snapshot.revision)
+            .err()
+            .unwrap()
+            .contains("先断开同步"));
+        assert_eq!(serde_json::to_value(&service.snapshot).unwrap(), before);
+        service.sync.binding = None;
+        assert!(service.preview_restore(&content).is_ok());
     }
     #[test]
     fn failed_order_write_never_publishes_order_or_sort_mode() {

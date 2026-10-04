@@ -2,7 +2,7 @@
 //! connection, and must serialize recovery/exit under the single-instance gate.
 //! A persisted intent blocks normal startup until every DB/sidecar move finishes.
 use super::{
-    configure, parent_directory, private_new_file, read_snapshot, sync_parent, verify_schema,
+    configure, parent_directory, private_new_file, read_snapshot, sync_parent, verify_database,
 };
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ const FILES: [&str; 4] = [
 ];
 const PENDING: &str = "sidetask-recovery-pending.json";
 const EVIDENCE_PREFIX: &str = "sidetask-recovery-evidence-";
-const MAX_CANDIDATE_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_CANDIDATE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_EVIDENCE_BYTES: u64 = 1024 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize)]
@@ -104,6 +104,8 @@ fn candidate_kind(name: &str) -> Option<&'static str> {
         Some("before-schema-5")
     } else if uuid_suffix(name, "sidetask-before-schema-6-") {
         Some("before-schema-6")
+    } else if uuid_suffix(name, "sidetask-before-schema-7-") {
+        Some("before-schema-7")
     } else if uuid_suffix(name, "sidetask-safety-backup-") {
         Some("safety-backup")
     } else {
@@ -296,7 +298,7 @@ fn inspect_candidate(directory: &Path, name: &str) -> Result<RecoveryCandidate, 
     }
     let fingerprint = hash_file(&path)?;
     let connection = immutable_connection(&path)?;
-    let version = verify_schema(&connection)?;
+    let version = verify_database(&connection)?;
     let (_, snapshot) = read_snapshot(&connection)?;
     drop(connection);
     if hash_file(&path)? != fingerprint {
@@ -634,8 +636,7 @@ fn recover_with_hook(
             return Err(error("备份在复制期间发生变化。"));
         }
         let connection = immutable_connection(&staged)?;
-        verify_schema(&connection)?;
-        read_snapshot(&connection)?;
+        verify_database(&connection)?;
         drop(connection);
         hook(Step::Staged)?;
         if !interrupted {
@@ -1189,6 +1190,7 @@ mod tests {
             (3, "before-schema-4"),
             (4, "before-schema-5"),
             (5, "before-schema-6"),
+            (6, "before-schema-7"),
         ] {
             let temp = Temp::new();
             let (original_backup, _) = temp.valid_backup();
@@ -1197,6 +1199,9 @@ mod tests {
                 .join(format!("sidetask-{kind}-{}.sqlite3", uuid::Uuid::new_v4()));
             fs::rename(original_backup, &backup).unwrap();
             let connection = Connection::open(&backup).unwrap();
+            connection
+                .execute("DELETE FROM app_state WHERE key='sync'", [])
+                .unwrap();
             connection
                 .pragma_update(None, "user_version", version)
                 .unwrap();

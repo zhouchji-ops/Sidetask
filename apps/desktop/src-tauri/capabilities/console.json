@@ -3,5 +3,5 @@
   "identifier": "console",
   "description": "Only the management console may inspect displays, acknowledge the usage guide and export/restore data. Task surfaces resolve their own native exit stage.",
   "windows": ["console"],
-  "permissions": ["allow-get-monitors", "allow-get-window-status", "allow-get-console-position-status", "allow-get-usage-guide-seen", "allow-acknowledge-usage-guide", "allow-export-backup", "allow-preview-restore", "allow-restore-backup", "allow-get-startup-recovery", "allow-recover-startup-backup", "allow-restart-after-recovery"]
+  "permissions": ["allow-get-monitors", "allow-get-window-status", "allow-get-console-position-status", "allow-get-usage-guide-seen", "allow-acknowledge-usage-guide", "allow-export-backup", "allow-preview-restore", "allow-restore-backup", "allow-get-startup-recovery", "allow-recover-startup-backup", "allow-restart-after-recovery", "allow-sync-status", "allow-sync-sign-in", "allow-sync-sign-out", "allow-sync-now", "allow-sync-resolve"]
 }

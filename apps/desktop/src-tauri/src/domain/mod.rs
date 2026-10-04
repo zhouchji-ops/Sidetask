@@ -29,7 +29,7 @@ pub struct Task {
     pub deleted_at: Option<String>,
     pub revision: u64,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Plan {
     pub task_id: String,

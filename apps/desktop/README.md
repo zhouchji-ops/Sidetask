@@ -4,6 +4,8 @@
 
 Tauri 2 + React / TypeScript + Rust + SQLite。任务、今日计划和设置共用一个 Rust 服务；控制台、边缘小窗和内部把手由平台层协调。当前已实现回收站与单项恢复、备份导入及双窗口草稿保护。
 
+当前 `codex/mac-windows-sync` 开发源码还实现可选 Mac ↔ Windows Supabase 同步，未启用时保持原本的本机模式。实际用户项目尚未配置，双端联网与系统凭据库验收待完成；项目首页仍提供 `5dc3a23` 旧包，**该包不含同步**。接入前阅读 [Supabase 配置说明](../../docs/engineering/SUPABASE_SETUP.md) 与 [ADR-0009](../../docs/decisions/0009-optional-desktop-sync.md)。
+
 在「设置 → 界面风格」可即时切换纸笺、霜序、暖刊、极简；四套均支持独立浅深色。风格跨窗口同步，重启保留，旧任务不会重置。
 
 移入回收站保留任务 ID、DDL、完成状态和全部历史/未来计划；恢复后仍按原完成状态与计划展示。普通搜索与回收站搜索分开，删除/恢复及查看任务都遵守编辑草稿保护。首轮不提供永久删除、自动清空或批量删除。
@@ -28,7 +30,7 @@ npm ci
 npm run dev
 ```
 
-打开 <http://127.0.0.1:1420>。该命令会持续运行，按 Ctrl+C 停止。预览使用独立合成数据，不读取原生 SQLite，也不能验证系统窗口行为。
+打开 <http://127.0.0.1:1420>。该命令会持续运行，按 Ctrl+C 停止。预览使用独立合成数据，不读取原生 SQLite，也不能验证系统窗口行为。云同步仅在桌面版使用；浏览器不发起真实登录请求，UI 回归使用模拟 IPC，不连接用户项目。
 
 ### 原生开发
 
@@ -87,11 +89,14 @@ $smokeAppProcessId = [int](Read-Host '输入该隔离进程的 PID')
 | src/surfaces/edge-panel | 今日/DDL 双区、拖动/缩放入口、内部边缘把手 |
 | src/startup | 按surface加载控制台/小窗/把手，保持启动检查、Store与原生事件顺序；浏览器预览独立入口 |
 | src/components | 共享任务行、勾选、品牌、空状态、开关 |
+| src/features/sync / src/lib/sync.ts | 控制台同步配置、状态、冲突选择与受控 IPC；没有令牌或任务数据持久化 |
 | src/styles | app.css 基础/纸笺，variants.css 三套风格覆盖，style-picker.css 风格预览；明暗、响应尺寸与减少动态效果 |
 | src/lib | 类型、派生视图、Tauri 调用、统一 Store；另含浏览器演示适配器 |
 | src-tauri/src/domain | 独立 Task、计划引用、校验、revision 冲突 |
 | src-tauri/src/application | 事务用例与统一提交入口 |
-| src-tauri/src/infrastructure | SQLite Repository，schema6版本化snapshot及独立设备metadata、升级前安全备份与严格验证 |
+| src-tauri/src/infrastructure | SQLite Repository，schema7版本化 snapshot、设备 metadata 与独立 sync 记录、升级前安全备份与严格验证 |
+| src-tauri/src/sync | 账号数据投影、三方合并、版本比较传输、系统凭据库与同步运行态 |
+| ../../supabase/migrations | 用户自有 Supabase 项目的表、账号隔离与受控版本提交 RPC |
 | src-tauri/src/platform | 窗口协调、分平台坐标适配、实际矩形确认、拖动/尺寸会话、hover |
 | src-tauri/migrations | 实际数据库初始化 SQL |
 | tests | Vitest 业务与 Playwright UI 自动化 |
@@ -101,7 +106,9 @@ $smokeAppProcessId = [int](Read-Host '输入该隔离进程的 PID')
 
 ## 数据与安全检查
 
-设置页导出便携 v3 JSON 任务备份，包含回收站记录、全部计划及其顺序，以及全部任务/DDL 的独立手动顺序；导入接受合法 v1/v2/v3，预览显示回收站数量，恢复前自动保留完整 SQLite 安全备份。v1 不能携带非空删除时间；v1/v2 不能携带非空 taskOrder/deadlineOrder，缺失时按空顺序恢复。SQLite schema1–5 先生成 before-schema-6 备份，再事务升级到6，保留 snapshot / placement 原文。文件路径和损坏启动时的安全离线流程见 [恢复说明](../../docs/engineering/DATA_RECOVERY.md)。任务备份恢复保留本机设备设置和 DDL 排序模式。
+设置页导出便携 v3 JSON 任务备份，包含回收站记录、全部计划及其顺序，以及全部任务/DDL 的独立手动顺序；导入接受合法 v1/v2/v3，预览显示回收站数量，恢复前自动保留完整 SQLite 安全备份。v1 不能携带非空删除时间；v1/v2 不能携带非空 taskOrder/deadlineOrder，缺失时按空顺序恢复。SQLite schema1–6 先生成 before-schema-7 备份，再事务升级到7，保留 snapshot / placement 原文并初始化 sync。文件路径和损坏启动时的安全离线流程见 [恢复说明](../../docs/engineering/DATA_RECOVERY.md)。任务备份恢复保留本机设备设置和 DDL 排序模式；仍有同步绑定时先断开才能预览或恢复。
+
+云同步包含 tasks、plans 与三份手动顺序，Settings 和 placement 保持本机。sync 记录保存设备标识、项目/账号绑定、云版本及已同步基线，不存令牌；登录令牌由系统凭据库负责。便携 v3 不包含同步身份、基线或凭据。登录与冲突处理在控制台显式完成，未保存草稿不上传。无头测试验证交互和模拟 IPC，Rust 测试验证合并/事务/传输契约；这些不等同于已部署 Supabase 或真实 Mac ↔ Windows 同步通过。
 
 今日、全部任务与 DDL 的拖动排序复用同一虚拟列表；小窗提供今日与 DDL 两份排序。拖动松手提交一次完整活动集合及开始时的快照版本，DDL 成功重排同事务切为手动模式，不修改截止字段或 Task revision。把手支持 Alt+上下键，Esc 取消拖动，搜索结果不能局部重排。协议与迁移取舍见 [ADR-0008](../../docs/decisions/0008-independent-task-order.md)。
 

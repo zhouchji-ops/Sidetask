@@ -1,6 +1,6 @@
 # 数据模型与业务一致性
 
-状态：当前实现继续使用 SQLite 的 app_state JSON snapshot。schema 3 加入 Task.deletedAt；schema 4 为 placement.console 及字段合并建立兼容边界；schema 5 为 Settings.revealMode 建立边界；当前 schema 6 保存全部任务与 DDL 的独立手动顺序，便携备份为 v3。类型见 `apps/desktop/src/lib/types.ts` 与 Rust 平台几何类型，实际协议见本文末尾各扩展小节。下方实体关系与目标协议用于说明模型设计；实际存储格式为 `app_state` JSON 快照，版本控制使用 `Snapshot.revision` 和 `Task.revision`，具体格式以各“实际”协议小节为准。控制台与边缘小窗共享 Rust 服务和数据库。架构取舍见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md) 与 [ADR-0006](../decisions/0006-console-window-preferences.md)，实际完成度、测试数字与双平台验收见内部验证记录（本地保留，不随公开仓库分发）。
+状态：当前实现继续使用 SQLite 的 app_state JSON snapshot。schema 3 加入 Task.deletedAt；schema 4 为 placement.console 及字段合并建立兼容边界；schema 5 为 Settings.revealMode 建立边界；schema 6 保存全部任务与 DDL 的独立手动顺序；当前 schema 7 新增独立 sync 记录，便携备份仍为 v3。类型见 `apps/desktop/src/lib/types.ts` 与 Rust 平台几何类型，实际协议见本文末尾各扩展小节。下方实体关系与目标协议用于说明模型设计；实际存储格式为 `app_state` JSON 快照，版本控制使用 `Snapshot.revision` 和 `Task.revision`，具体格式以各“实际”协议小节为准。控制台与边缘小窗共享 Rust 服务和数据库。架构取舍见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md)、[ADR-0006](../decisions/0006-console-window-preferences.md) 与 [ADR-0009](../decisions/0009-optional-desktop-sync.md)。同步代码已实现，实际 Supabase 项目与 Mac ↔ Windows 联网验收待完成；既有验证范围不能因模型更新自动扩展。
 
 首版仅有独立的大任务。模型中不设 `parent_id`、子任务表、任务依赖、步骤清单、百分比进度或父子完成聚合；备注是普通文本，不支持可独立勾选的步骤。一次勾选表示整项任务完成，加入今日也不会创建一天的小任务或进度记录。见 [ADR-0002](../decisions/0002-console-and-edge-panel.md)。
 
@@ -42,7 +42,7 @@
 
 每个 `plan_date` 保存一个 `revision`，用于检查同一天计划引用与排序的并发修改。添加、移出或重排计划在同一事务更新引用及该日 revision；一天尚无安排时按初始 revision 处理。任务内容修改不必递增计划 revision，任务完成状态依然只在 Task 内存一份。
 
-当前 schema 6 延续 schema 3 的 Snapshot.revision，保护全部计划和列表排序操作，不新增每日 revision 字段。软删除/恢复另校验 Task.revision；同一服务内先验证版本，再保存并发布提交结果。
+当前 schema 7 延续 schema 3 的 Snapshot.revision，保护全部计划和列表排序操作，不新增每日 revision 字段。软删除/恢复另校验 Task.revision；同一服务内先验证版本，再保存并发布提交结果。云文档版本与这些本机修订号分别管理，见末节。
 
 ### DevicePreferences / PreferenceApplyState（目标）
 
@@ -171,19 +171,19 @@ schema1 原型时期已在 JSON Settings 增加 `uiStyle`。Rust serde 及浏览
 
 reorderToday 的精确集合只包括当天未删除、未完成任务；已删除及已完成计划的排序值不参与重排。追加今日计划仅稳定压缩当日未删除任务的计划，保留删除项原值。恢复不调整任何 Plan；排序值相同时沿用 Plan 数组的稳定顺序，因此其他任务重排后不保证恢复到删除前的绝对行号。跨日按原计划重新投影，不创建今天的新引用。
 
-生命周期阶段的 SQLite schema1/2→3 先对完整数据库做保留 WAL 的副本预检，再创建校验可读、已同步的一致性 `before-schema-3` 备份；迁移事务只更新版本/身份标记，保留 snapshot 与 placement 原字节，不重编码任务。当时识别 schema1/2/3，候选保留 `before-schema-2`、`before-schema-3` 与 `safety-backup`。后续 schema 4/5 与当前 schema 6 的版本及备份规则见末节。迁移失败不以空库或演示数据替代，首次新库仍写入空快照。
+生命周期阶段的 SQLite schema1/2→3 先对完整数据库做保留 WAL 的副本预检，再创建校验可读、已同步的一致性 `before-schema-3` 备份；迁移事务只更新版本/身份标记，保留 snapshot 与 placement 原字节，不重编码任务。当时识别 schema1/2/3，候选保留 `before-schema-2`、`before-schema-3` 与 `safety-backup`。后续 schema 4/5/6 与当前 schema 7 的版本及备份规则见末节。迁移失败不以空库或演示数据替代，首次新库仍写入空快照。
 
 便携 JSON 的 schemaVersion 与 SQLite 版本独立：生命周期阶段开始导出 v2、接受 v1/v2，均包含完整 tasks/plans；当前 v3 在末节补充顺序。v1 缺失或 null 的 deletedAt 作为未删除，v1 携带非空删除状态则拒绝。预览提供 taskCount、trashedTaskCount、planCount 和 exportedAt。整份恢复先备份当前库，再替换任务及回收站、保留设备设置，并将全局及所有导入任务 revision 提高到已见值以上；当前没有 dataset_epoch 字段。旧备份按备份时的完整集合恢复，不与现有回收站合并。回收站仍计入现有容量限制，元数据增长超限时保持原已提交状态并提示失败。
 
-本节任务规则在 schema 6 继续有效，不将自动化测试、文档同步或 Mac 证据写成双平台验收完成。来源与分阶段检查见 [TASK_LIFECYCLE](../research/TASK_LIFECYCLE.md)，当前验证范围与原始执行证据见内部验收记录（本地保留，未随公开仓库分发）。
+本节任务规则在 schema 7 继续有效，不将自动化测试、文档同步或 Mac 证据写成双平台验收完成。来源与分阶段检查见 [TASK_LIFECYCLE](../research/TASK_LIFECYCLE.md)，当前验证范围与原始执行证据见内部验收记录（本地保留，未随公开仓库分发）。
 
 ## 展开模式偏好（2026-09-25）
 
-Settings新增 `revealMode`（Rust `reveal_mode`），只接受 `click` / `hover`；新建与旧记录缺失时均默认 `click`。旧 `revealDelay` / `hideDelay` 保留读取和校验，悬停模式继续采用已保存值且仅该模式显示延迟设置。只读补默认不重写旧原文，下一次合法事务保存新字段；模式更新不改Task/Plan、几何或其他偏好。该阶段采用下述 schema5 兼容边界，现由 schema6 继承；当时便携v2和当前v3均不带设备偏好。Windows旧分支曾在schema4只读补默认，其原生/安装证据仍按旧SHA保留，不能据此省略整合版升级与降级拒绝验收。
+Settings新增 `revealMode`（Rust `reveal_mode`），只接受 `click` / `hover`；新建与旧记录缺失时均默认 `click`。旧 `revealDelay` / `hideDelay` 保留读取和校验，悬停模式继续采用已保存值且仅该模式显示延迟设置。只读补默认不重写旧原文，下一次合法事务保存新字段；模式更新不改Task/Plan、几何或其他偏好。该阶段采用下述 schema5 兼容边界，现由 schema7 继承；当时便携v2和当前v3均不带设备偏好。Windows旧分支曾在schema4只读补默认，其原生/安装证据仍按旧SHA保留，不能据此省略整合版升级与降级拒绝验收。
 
 ## 分区偏好的当前扩展
 
-Settings新增panelSplit（Rust panel_split:u8），缺省54，只接受30–70整数；属于本机偏好，便携任务备份不携带，整份任务恢复保留本机值。比例修改沿用统一设置事务，不改Task/Plan字段；同一设置冲突由版本及前端的初始比例核对处理。旧快照缺字段只读补默认，不重编码原文；正常提交后保存。分区比例单独落地时保持schema3，与uiStyle一样只支持新程序读旧库；旧schema3程序可能因未知设置字段拒绝读取。当时控制台placement扩展采用下述schema4备份迁移，后续schema5及当前schema6继承该规则，不支持降级继续编辑。分阶段记录见[窗口偏好计划](../research/WINDOW_PREFERENCES.md)。
+Settings新增panelSplit（Rust panel_split:u8），缺省54，只接受30–70整数；属于本机偏好，便携任务备份不携带，整份任务恢复保留本机值。比例修改沿用统一设置事务，不改Task/Plan字段；同一设置冲突由版本及前端的初始比例核对处理。旧快照缺字段只读补默认，不重编码原文；正常提交后保存。分区比例单独落地时保持schema3，与uiStyle一样只支持新程序读旧库；旧schema3程序可能因未知设置字段拒绝读取。当时控制台placement扩展采用下述schema4备份迁移，后续schema5/6及当前schema7继承该规则，不支持降级继续编辑。分阶段记录见[窗口偏好计划](../research/WINDOW_PREFERENCES.md)。
 
 ## schema 4 控制台设备元数据契约
 
@@ -229,7 +229,7 @@ schema1–4预检通过后先生成校验并同步的 `sidetask-before-schema-5-
 
 ## schema 6 三列表手动顺序与便携 v3
 
-当前 `PRAGMA user_version=6`。决定见 [ADR-0008](../decisions/0008-independent-task-order.md)。仍使用同一 `app_state` 快照，不新增任务副本、Task 排序字段或列表修订号。
+schema 6 阶段采用 `PRAGMA user_version=6`，当前 schema 7 继承本节排序契约。决定见 [ADR-0008](../decisions/0008-independent-task-order.md)。仍使用同一 `app_state` 快照，不新增任务副本、Task 排序字段或列表修订号。
 
 | 字段 | 当前协议 |
 | --- | --- |
@@ -246,8 +246,35 @@ schema1–4预检通过后先生成校验并同步的 `sidetask-before-schema-5-
 
 UI 投影先显示有排名的活动任务，再显示无排名任务：全部任务的后者沿用 tasks 数组顺序，DDL 后者使用默认 `(effectiveDue, createdAt, id)`。未记录过手动顺序时保持此前自然顺序。切换日期/重要程度不会清空 deadlineOrder；手动模式不改逾期计算或时间标签。排序数据属于共享列表，DDL 当前模式仍属于本机 Settings。
 
-schema1–5 经完整副本预检后，先创建校验并同步的 `sidetask-before-schema-6-<UUID>.sqlite3`，再在 IMMEDIATE 事务中更新版本；schema1 同时补既有 application_id。snapshot / placement 原文保持，备份内仍为升级前版本。备份失败零迁移写入，迁移失败回滚旧版本与数据。旧程序拒绝 schema6，不提供手工改版本降级；恢复候选继续接受 before-schema-2/3/4/5，新增 before-schema-6，并保留 safety-backup。
+在 schema6 阶段，schema1–5 经完整副本预检后，先创建校验并同步的 `sidetask-before-schema-6-<UUID>.sqlite3`，再在 IMMEDIATE 事务中更新版本；schema1 同时补既有 application_id。snapshot / placement 原文保持，备份内仍为升级前版本。备份失败零迁移写入，迁移失败回滚旧版本与数据。旧程序拒绝 schema6，不提供手工改版本降级；恢复候选继续接受 before-schema-2/3/4/5，新增 before-schema-6，并保留 safety-backup。
 
 便携 JSON 当前导出 `schemaVersion:3`，包含 tasks、plans、taskOrder、deadlineOrder 和 exportedAt；空顺序可省略，继续接受 v1/v2 缺失或空顺序。v1/v2 若携带非空 taskOrder/deadlineOrder 则拒绝，v1 的非空 deletedAt 限制继续有效。所有版本均校验顺序引用及任务/计划关系，旧客户端通过备份版本拒绝 v3，避免静默丢失新顺序。
 
 整份 JSON 恢复先备份，再替换任务、计划和两份顺序，保留当前 Settings 与 placement，并提高全局及任务修订号以使旧编辑失效。因此导入 DDL 手动顺序后，若本机仍使用日期/重要程度模式，需要选择手动才能显示该顺序；恢复旧 v1/v2 会清除现有两份自定义顺序，使用其默认值，不与现有排序合并。导出容量上限及“不能提交当前版本无法导出和恢复的数据”的保护包含新增顺序字段。
+
+## schema 7 可选双端同步
+
+当前 `PRAGMA user_version=7`。同一 `app_state` 表新增 `key='sync'` 的独立 JSON 记录，snapshot 与 placement 的任务和设备职责不变。决定见 [ADR-0009](../decisions/0009-optional-desktop-sync.md)，用户项目配置见 [Supabase 配置说明](SUPABASE_SETUP.md)。便携 JSON 格式仍为 v3，云端文档协议独立为 1。
+
+| SyncState 字段 | 保存内容 |
+| --- | --- |
+| deviceId | 本次安装的 UUID，用于定位系统凭据项 |
+| binding | 可空的 userId、email、config；config 只有 projectUrl 与公开 publishableKey |
+| enabled | 是否允许自动同步；清理凭据失败时可为 false 且仍保留 binding |
+| remoteRevision | 最近确认的云文档版本，与本机 Snapshot.revision 分开 |
+| baseline | 最近确认的 SyncData，用于三方比较，不是另一份可独立编辑的任务库 |
+| lastSyncedAt | 最近完成同步的时间，可空 |
+
+SyncState **不含密码、访问令牌或刷新令牌**。原生凭据存储将会话令牌保存在系统凭据库，WebView 只获得状态与可供选择的冲突值。当前配置只接受托管 `https://项目标识.supabase.co` 和公开 Publishable/anon key，不接受 secret/service_role key。绑定身份、配置、版本和基线均严格校验；坏同步记录不能被当成未配置而静默清空。
+
+`SyncData` 仅包含 tasks、plans、taskOrder、deadlineOrder。Plan.sortOrder 承载按日期保存的今日顺序；任务字段包含固定时区 DDL、完成与软删除状态，保留同一 Task ID。Settings、placement、未保存草稿、Snapshot.revision 不上传；云数据中的 Task.revision 归零，不把一台设备的并发版本号强加给另一台。
+
+合并以 baseline、本机已提交数据和云文档进行三方比较，不依赖墙上时间决定“最后写入者”。独立变更可自动合并；同一字段或相关字段组、同日计划顺序、全部任务顺序、DDL 顺序的冲突要求选择本机或云端。首次连接合并不同 ID 的任务；同 ID 的不同内容与共有顺序仍可形成冲突，不能直接取一端整份旧快照。任务不通过从云数组消失来物理删除，生命周期仍使用 deletedAt。
+
+云端以账号拥有的版本化文档保存，提交比较预期 remoteRevision，相同内容的重试不重复增加版本。下载后的数据再次执行领域、引用和容量检查。应用到本机保留 Settings 与 placement，更新受影响 Task.revision 与 Snapshot.revision；无内容变化时保留原本机版本。提交前检查读取时的本机快照版本，Repository 的 `save_with_sync` 在同一事务写 snapshot 与 sync，同时检查两者原有比较基线，事务失败不推进内存状态或成功通知。
+
+普通本机任务或设备设置保存保留 sync，使离线编辑继续与旧 baseline 比较。断开先关闭自动同步，再清理系统凭据及绑定/基线；清理失败留下可重试状态，本机任务保留。凭据失效后登录原账号保留已有比较基线；切换项目或账号须先断开。
+
+schema1–6 先对完整数据库副本预检，创建校验并同步落盘的 `sidetask-before-schema-7-<UUID>.sqlite3`，再在事务中初始化 sync 并升级版本；snapshot / placement 原文保持，旧备份内仍是原版本。失败回滚，旧客户端拒绝 schema7。恢复候选继续支持 before-schema-2/3/4/5/6，新增 before-schema-7。
+
+便携 v3 仅携带任务、计划与顺序，不携带 SyncState 或系统凭据。仍有 binding 或 enabled 时，任务备份预览和执行恢复都拒绝，必须先断开；重新连接时再明确合并。完整 SQLite 备份则包含当时的无令牌 sync 记录，恢复后是否能自动连接还取决于原设备系统凭据库，跨设备复制数据库不等于迁移登录会话。同步不是历史备份，实际恢复边界见 [数据恢复说明](DATA_RECOVERY.md)。

@@ -1,6 +1,9 @@
 pub mod recovery;
+#[cfg(test)]
+mod sync_tests;
 
 use crate::domain::Snapshot;
+use crate::sync::state::SyncState;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde_json::{Map, Value};
 use std::{
@@ -9,16 +12,25 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 const APPLICATION_ID: i64 = 0x5344544b;
 const MAX_SNAPSHOT_BYTES: i64 = 16 * 1024 * 1024;
 const MAX_PLACEMENT_BYTES: usize = 64 * 1024;
+const MAX_SYNC_BYTES: usize = 16 * 1024 * 1024;
 
 /// One shared database and one transaction per command. Older schemas are
-/// retained in a verified SQLite backup before the schema 6 marker upgrade.
+/// retained in a verified SQLite backup before the schema 7 upgrade.
 pub trait Repository: Send {
     fn load(&self) -> Result<Option<Snapshot>, String>;
     fn save(&mut self, snapshot: &Snapshot) -> Result<(), String>;
+    fn load_sync(&self) -> Result<Option<SyncState>, String> {
+        Ok(None)
+    }
+    /// Task data and acknowledged remote baseline must commit together.
+    /// Ordinary save/save_placement retain sync state so offline edits stay pending.
+    fn save_with_sync(&mut self, _snapshot: &Snapshot, _state: &SyncState) -> Result<(), String> {
+        Err("此存储不支持同步状态，任务未更改。".into())
+    }
     fn load_placement(&self) -> Result<Option<String>, String>;
     fn save_placement(&mut self, snapshot: &Snapshot, placement: &str) -> Result<(), String>;
     fn save_console_placement(&mut self, _console_json: &str) -> Result<(), String> {
@@ -38,6 +50,7 @@ pub struct SqliteRepository {
     connection: Connection,
     path: Option<PathBuf>,
     baseline: RefCell<String>,
+    sync_baseline: RefCell<Option<String>>,
 }
 
 fn storage_error(error: impl std::fmt::Display) -> String {
@@ -72,7 +85,7 @@ fn verify_schema(connection: &Connection) -> Result<i64, String> {
     let application: i64 = connection
         .query_row("PRAGMA application_id", [], |r| r.get(0))
         .map_err(storage_error)?;
-    if ![1, 2, 3, 4, 5, SCHEMA_VERSION].contains(&version) {
+    if ![1, 2, 3, 4, 5, 6, SCHEMA_VERSION].contains(&version) {
         return Err(format!(
             "数据库版本 {version} 不受此版本支持。原数据未覆盖。"
         ));
@@ -117,7 +130,7 @@ fn verify_schema(connection: &Connection) -> Result<i64, String> {
     {
         return Err("数据库字段或约束异常，原数据未覆盖。".into());
     }
-    let unknown: i64 = connection.query_row("SELECT count(*) FROM app_state WHERE key NOT IN ('snapshot','placement') OR typeof(key) != 'text' OR typeof(value) != 'text'", [], |r| r.get(0)).map_err(storage_error)?;
+    let unknown: i64 = connection.query_row("SELECT count(*) FROM app_state WHERE (key NOT IN ('snapshot','placement') AND NOT (?1 = 7 AND key = 'sync')) OR typeof(key) != 'text' OR typeof(value) != 'text'", [version], |r| r.get(0)).map_err(storage_error)?;
     if unknown != 0 {
         return Err("数据库含未知记录，原数据未覆盖。".into());
     }
@@ -161,7 +174,50 @@ fn read_snapshot(connection: &Connection) -> Result<(String, Snapshot), String> 
 fn verify_database(connection: &Connection) -> Result<i64, String> {
     let version = verify_schema(connection)?;
     read_snapshot(connection)?;
+    read_sync(connection)?;
     Ok(version)
+}
+fn encode_sync(state: &SyncState) -> Result<String, String> {
+    state.validate()?;
+    let json = serde_json::to_string(state).map_err(|error| error.to_string())?;
+    if json.len() > MAX_SYNC_BYTES {
+        return Err("同步基线过大，原数据未覆盖。".into());
+    }
+    Ok(json)
+}
+fn read_sync(connection: &Connection) -> Result<Option<(String, SyncState)>, String> {
+    let length: Option<i64> = connection
+        .query_row(
+            "SELECT length(CAST(value AS BLOB)) FROM app_state WHERE key='sync'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(storage_error)?;
+    match length {
+        None => return Ok(None),
+        Some(length) if length > MAX_SYNC_BYTES as i64 => {
+            return Err("同步基线过大，原数据未覆盖。".into())
+        }
+        _ => {}
+    }
+    let json: String = connection
+        .query_row("SELECT value FROM app_state WHERE key='sync'", [], |row| {
+            row.get(0)
+        })
+        .map_err(storage_error)?;
+    let state: SyncState = serde_json::from_str(&json).map_err(storage_error)?;
+    state.validate().map_err(storage_error)?;
+    Ok(Some((json, state)))
+}
+fn initialize_sync(connection: &Connection) -> Result<(), String> {
+    if read_sync(connection)?.is_none() {
+        let json = encode_sync(&SyncState::default())?;
+        connection
+            .execute("INSERT INTO app_state(key,value) VALUES('sync',?1)", [json])
+            .map_err(storage_error)?;
+    }
+    Ok(())
 }
 fn placement_object(json: &str) -> Result<Map<String, Value>, String> {
     if json.len() > MAX_PLACEMENT_BYTES {
@@ -289,6 +345,7 @@ fn migrate_schema(
         transaction
             .execute_batch(migration_sql)
             .map_err(storage_error)?;
+        initialize_sync(&transaction)?;
         if verify_database(&transaction)? != SCHEMA_VERSION {
             return Err("升级后的数据库版本无效。".into());
         }
@@ -351,6 +408,7 @@ impl SqliteRepository {
                 transaction
                     .pragma_update(None, "user_version", SCHEMA_VERSION)
                     .map_err(storage_error)?;
+                initialize_sync(&transaction)?;
                 transaction.commit().map_err(storage_error)?;
             } else {
                 let version = verify_database(&connection)?;
@@ -360,19 +418,29 @@ impl SqliteRepository {
                         path,
                         version,
                         if version == 1 {
-                            "PRAGMA application_id=1396986955; PRAGMA user_version=6;"
+                            "PRAGMA application_id=1396986955; PRAGMA user_version=7;"
                         } else {
-                            "PRAGMA user_version=6;"
+                            "PRAGMA user_version=7;"
                         },
                     )?;
                 }
             }
             verify_database(&connection)?;
+            // Missing metadata is initialized once without re-encoding task or placement bytes.
+            if read_sync(&connection)?.is_none() {
+                let transaction = connection
+                    .transaction_with_behavior(TransactionBehavior::Immediate)
+                    .map_err(storage_error)?;
+                initialize_sync(&transaction)?;
+                transaction.commit().map_err(storage_error)?;
+            }
             let (baseline, _) = read_snapshot(&connection)?;
+            let sync_baseline = read_sync(&connection)?.map(|(json, _)| json);
             Ok(Self {
                 connection,
                 path: (!in_memory).then(|| path.to_path_buf()),
                 baseline: RefCell::new(baseline),
+                sync_baseline: RefCell::new(sync_baseline),
             })
         })();
         if result.is_err() && is_new && !in_memory {
@@ -380,8 +448,14 @@ impl SqliteRepository {
         }
         result
     }
-    fn persist(&mut self, snapshot: &Snapshot, placement: Option<&str>) -> Result<(), String> {
+    fn persist(
+        &mut self,
+        snapshot: &Snapshot,
+        placement: Option<&str>,
+        sync: Option<&SyncState>,
+    ) -> Result<(), String> {
         let edge_patch = placement.map(placement_object).transpose()?;
+        let sync_json = sync.map(encode_sync).transpose()?;
         snapshot.validate()?;
         let json = serde_json::to_string(snapshot).map_err(|e| e.to_string())?;
         if json.len() > MAX_SNAPSHOT_BYTES as usize {
@@ -394,6 +468,15 @@ impl SqliteRepository {
         let (stored, _) = read_snapshot(&transaction)?;
         if stored != *self.baseline.borrow() {
             return Err("本地数据已被另一实例更新，未覆盖；请重新打开应用。".into());
+        }
+        if let Some(sync_json) = &sync_json {
+            let stored_sync = read_sync(&transaction)?.map(|(json, _)| json);
+            // A metadata-only commit need not change snapshot.revision, so it
+            // needs its own CAS baseline to reject an unseen account/cursor change.
+            if stored_sync != *self.sync_baseline.borrow() {
+                return Err("同步状态已被另一实例更新，未覆盖；请重新打开应用。".into());
+            }
+            transaction.execute("INSERT INTO app_state(key,value) VALUES('sync',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [sync_json]).map_err(|error| format!("无法保存同步状态：{error}"))?;
         }
         transaction
             .execute(
@@ -416,6 +499,9 @@ impl SqliteRepository {
             .commit()
             .map_err(|e| format!("无法保存任务：{e}"))?;
         *self.baseline.borrow_mut() = json;
+        if sync_json.is_some() {
+            *self.sync_baseline.borrow_mut() = sync_json;
+        }
         Ok(())
     }
 }
@@ -426,7 +512,15 @@ impl Repository for SqliteRepository {
         Ok(Some(snapshot))
     }
     fn save(&mut self, snapshot: &Snapshot) -> Result<(), String> {
-        self.persist(snapshot, None)
+        self.persist(snapshot, None, None)
+    }
+    fn load_sync(&self) -> Result<Option<SyncState>, String> {
+        let stored = read_sync(&self.connection)?;
+        *self.sync_baseline.borrow_mut() = stored.as_ref().map(|(json, _)| json.clone());
+        Ok(stored.map(|(_, state)| state))
+    }
+    fn save_with_sync(&mut self, snapshot: &Snapshot, state: &SyncState) -> Result<(), String> {
+        self.persist(snapshot, None, Some(state))
     }
     fn load_placement(&self) -> Result<Option<String>, String> {
         self.connection
@@ -439,7 +533,7 @@ impl Repository for SqliteRepository {
             .map_err(storage_error)
     }
     fn save_placement(&mut self, snapshot: &Snapshot, placement: &str) -> Result<(), String> {
-        self.persist(snapshot, Some(placement))
+        self.persist(snapshot, Some(placement), None)
     }
     fn save_console_placement(&mut self, console_json: &str) -> Result<(), String> {
         let console = placement_object(console_json)?;
@@ -563,12 +657,12 @@ mod tests {
             assert_eq!(loaded_json["plans"], original["plans"]);
         }
     }
-    struct TempDatabase {
-        directory: PathBuf,
-        path: PathBuf,
+    pub(super) struct TempDatabase {
+        pub(super) directory: PathBuf,
+        pub(super) path: PathBuf,
     }
     impl TempDatabase {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             let directory = std::env::temp_dir()
                 .join(format!("sidetask-storage-test-{}", uuid::Uuid::new_v4()));
             fs::create_dir(&directory).unwrap();
@@ -580,7 +674,7 @@ mod tests {
         fn legacy(&self) -> String {
             self.legacy_version(1)
         }
-        fn legacy_version(&self, version: i64) -> String {
+        pub(super) fn legacy_version(&self, version: i64) -> String {
             let connection = Connection::open(&self.path).unwrap();
             connection
                 .execute_batch(include_str!("../../migrations/0001_snapshot.sql"))
@@ -610,7 +704,7 @@ mod tests {
                 .unwrap();
             raw
         }
-        fn backups(&self) -> Vec<PathBuf> {
+        pub(super) fn backups(&self) -> Vec<PathBuf> {
             fs::read_dir(&self.directory)
                 .unwrap()
                 .map(|entry| entry.unwrap().path())
@@ -642,7 +736,7 @@ mod tests {
         assert!(temp.backups().is_empty());
     }
     #[test]
-    fn schema_five_upgrade_preserves_raw_content_and_creates_recoverable_schema_six_backup() {
+    fn schema_five_upgrade_preserves_raw_content_and_creates_recoverable_schema_seven_backup() {
         let temp = TempDatabase::new();
         let legacy = temp.legacy_version(5);
         let value: Value = serde_json::from_str(&legacy).unwrap();
@@ -660,7 +754,7 @@ mod tests {
             .unwrap();
         drop(connection);
         let repo = SqliteRepository::open(&temp.path).unwrap();
-        assert_eq!(verify_database(&repo.connection).unwrap(), 6);
+        assert_eq!(verify_database(&repo.connection).unwrap(), SCHEMA_VERSION);
         assert_eq!(read_snapshot(&repo.connection).unwrap().0, raw);
         assert_eq!(repo.load_placement().unwrap().as_deref(), Some(placement));
         let loaded = repo.load().unwrap().unwrap();
@@ -670,7 +764,7 @@ mod tests {
         assert_eq!(loaded.revision, 42);
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].kind, "before-schema-6");
+        assert_eq!(candidates[0].kind, "before-schema-7");
         assert_eq!(candidates[0].schema_version, 5);
         let backup = Connection::open_with_flags(
             temp.directory.join(&candidates[0].file_name),
@@ -704,20 +798,20 @@ mod tests {
             .join("missing-directory")
             .join("tasks.sqlite3");
         assert!(
-            migrate_schema(&mut connection, &unavailable, 5, "PRAGMA user_version=6;").is_err()
+            migrate_schema(&mut connection, &unavailable, 5, "PRAGMA user_version=7;").is_err()
         );
         assert_eq!(verify_database(&connection).unwrap(), 5);
         assert_eq!(read_snapshot(&connection).unwrap().0, raw);
         assert!(temp.backups().is_empty());
         let error = migrate_schema(&mut connection, &temp.path, 5,
-            "PRAGMA user_version=6; UPDATE app_state SET value='failed write'; SELECT missing_column FROM app_state;").unwrap_err();
+            "PRAGMA user_version=7; UPDATE app_state SET value='failed write'; SELECT missing_column FROM app_state;").unwrap_err();
         assert!(error.contains("安全备份"));
         assert_eq!(verify_database(&connection).unwrap(), 5);
         assert_eq!(read_snapshot(&connection).unwrap().0, raw);
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].schema_version, 5);
-        assert_eq!(candidates[0].kind, "before-schema-6");
+        assert_eq!(candidates[0].kind, "before-schema-7");
     }
     #[test]
     fn manual_orders_survive_sqlite_restart_and_portable_restore() {
@@ -785,7 +879,7 @@ mod tests {
             .file_name()
             .unwrap()
             .to_string_lossy()
-            .starts_with("sidetask-before-schema-6-"));
+            .starts_with("sidetask-before-schema-7-"));
         let backup =
             Connection::open_with_flags(&backups[0], OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         assert_eq!(verify_database(&backup).unwrap(), 1);
@@ -824,7 +918,7 @@ mod tests {
         assert_eq!(repo.load_placement().unwrap().as_deref(), Some(placement));
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].kind, "before-schema-6");
+        assert_eq!(candidates[0].kind, "before-schema-7");
         assert_eq!(candidates[0].schema_version, 2);
         let backup = Connection::open_with_flags(
             temp.directory.join(&candidates[0].file_name),
@@ -856,7 +950,7 @@ mod tests {
             &mut connection,
             &temp.path,
             2,
-            "PRAGMA user_version=6; SELECT missing_column FROM app_state;",
+            "PRAGMA user_version=7; SELECT missing_column FROM app_state;",
         )
         .unwrap_err();
         assert!(error.contains("安全备份"));
@@ -893,7 +987,7 @@ mod tests {
         assert_eq!(repo.load_placement().unwrap().as_deref(), Some(placement));
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].kind, "before-schema-6");
+        assert_eq!(candidates[0].kind, "before-schema-7");
         assert_eq!(candidates[0].schema_version, 3);
         let backup = Connection::open_with_flags(
             temp.directory.join(&candidates[0].file_name),
@@ -929,7 +1023,7 @@ mod tests {
             )
             .unwrap();
         let error = migrate_schema(&mut connection, &temp.path, 3,
-            "PRAGMA user_version=6; UPDATE app_state SET value='injected failed change'; SELECT missing_column FROM app_state;").unwrap_err();
+            "PRAGMA user_version=7; UPDATE app_state SET value='injected failed change'; SELECT missing_column FROM app_state;").unwrap_err();
         assert!(error.contains("安全备份"));
         assert_eq!(verify_database(&connection).unwrap(), 3);
         assert_eq!(read_snapshot(&connection).unwrap().0, raw);
@@ -943,7 +1037,7 @@ mod tests {
         assert_eq!(remaining, placement);
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].kind, "before-schema-6");
+        assert_eq!(candidates[0].kind, "before-schema-7");
         assert_eq!(candidates[0].schema_version, 3);
         let backup = Connection::open_with_flags(
             temp.directory.join(&candidates[0].file_name),
@@ -1005,7 +1099,7 @@ mod tests {
 
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].kind, "before-schema-6");
+        assert_eq!(candidates[0].kind, "before-schema-7");
         assert_eq!(candidates[0].schema_version, 4);
         let backup = Connection::open_with_flags(
             temp.directory.join(&candidates[0].file_name),
@@ -1029,7 +1123,7 @@ mod tests {
         assert_eq!(
             temp.backups().len(),
             1,
-            "opening schema 6 must not create another migration backup"
+            "opening schema 7 must not create another migration backup"
         );
     }
 
@@ -1047,7 +1141,7 @@ mod tests {
             )
             .unwrap();
         let reason = migrate_schema(&mut connection, &temp.path, 4,
-            "PRAGMA user_version=6; UPDATE app_state SET value='injected failed change'; SELECT missing_column FROM app_state;").unwrap_err();
+            "PRAGMA user_version=7; UPDATE app_state SET value='injected failed change'; SELECT missing_column FROM app_state;").unwrap_err();
         assert!(reason.contains("安全备份"));
         assert_eq!(verify_database(&connection).unwrap(), 4);
         assert_eq!(read_snapshot(&connection).unwrap().0, raw);
@@ -1061,7 +1155,7 @@ mod tests {
         assert_eq!(remaining, placement);
         let candidates = recovery::list_candidates(&temp.directory).unwrap();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].kind, "before-schema-6");
+        assert_eq!(candidates[0].kind, "before-schema-7");
         assert_eq!(candidates[0].schema_version, 4);
         let backup = Connection::open_with_flags(
             temp.directory.join(&candidates[0].file_name),
@@ -1090,7 +1184,7 @@ mod tests {
             .join("missing-directory")
             .join("tasks.sqlite3");
         assert!(
-            migrate_schema(&mut connection, &unavailable, 4, "PRAGMA user_version=6;").is_err()
+            migrate_schema(&mut connection, &unavailable, 4, "PRAGMA user_version=7;").is_err()
         );
         assert_eq!(verify_database(&connection).unwrap(), 4);
         assert_eq!(read_snapshot(&connection).unwrap().0, raw);
@@ -1249,7 +1343,7 @@ mod tests {
         let mut connection = Connection::open(&temp.path).unwrap();
         configure(&connection).unwrap();
         let error = migrate_schema(&mut connection,&temp.path,1,
-            "PRAGMA application_id=1396986955; PRAGMA user_version=6; SELECT missing_column FROM app_state;").unwrap_err();
+            "PRAGMA application_id=1396986955; PRAGMA user_version=7; SELECT missing_column FROM app_state;").unwrap_err();
         assert!(error.contains("安全备份"));
         assert_eq!(verify_database(&connection).unwrap(), 1);
         assert_eq!(read_snapshot(&connection).unwrap().0, raw);

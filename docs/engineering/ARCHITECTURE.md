@@ -1,6 +1,6 @@
 # 技术架构与实现边界
 
-状态：架构契约与当前实现说明。采用 Tauri 2 + React/TypeScript + Rust + SQLite，决策见 [ADR-0003](../decisions/0003-prototype-implementation.md)。当前存储为 SQLite 中的 JSON 快照；schema 3 加入任务回收站，schema 4 增加控制台设备偏好的兼容边界，schema 5 增加展开模式兼容边界，当前 schema 6 增加全部任务与 DDL 的独立手动顺序。按窗口 IPC、固定 DDL、备份与退出的设计见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md)，控制台位置见 [ADR-0006](../decisions/0006-console-window-preferences.md)，三列表顺序见 [ADR-0008](../decisions/0008-independent-task-order.md)，实际协议见 [数据模型](DATA_MODEL.md)。第一版同时支持两平台、只管理独立大任务、同时提供控制台和边缘小窗，已由用户明确。早期选型记录见 [ADR-0001](../decisions/0001-platform-and-reuse.md)；窗口职责和任务范围见 [ADR-0002](../decisions/0002-console-and-edge-panel.md)。
+状态：架构契约与当前实现说明。采用 Tauri 2 + React/TypeScript + Rust + SQLite，决策见 [ADR-0003](../decisions/0003-prototype-implementation.md)。当前存储为 SQLite 中的 JSON 快照；schema 3 加入任务回收站，schema 4 增加控制台设备偏好的兼容边界，schema 5 增加展开模式，schema 6 增加独立手动顺序，当前 schema 7 增加可选同步绑定与基线。按窗口 IPC、固定 DDL、备份与退出的设计见 [ADR-0004](../decisions/0004-data-safety-and-fixed-deadlines.md)，控制台位置见 [ADR-0006](../decisions/0006-console-window-preferences.md)，三列表顺序见 [ADR-0008](../decisions/0008-independent-task-order.md)，双端同步见 [ADR-0009](../decisions/0009-optional-desktop-sync.md)，实际协议见 [数据模型](DATA_MODEL.md)。同步实现尚待实际 Supabase 项目与 Mac ↔ Windows 联网验收，旧 `5dc3a23` 包不含此能力。第一版同时支持两平台、只管理独立大任务、同时提供控制台和边缘小窗，已由用户明确。早期选型记录见 [ADR-0001](../decisions/0001-platform-and-reuse.md)；窗口职责和任务范围见 [ADR-0002](../decisions/0002-console-and-edge-panel.md)。
 
 ## 技术选型
 
@@ -117,7 +117,7 @@ SQLite 是任务和持久化设置的事实来源，React 状态只是各窗口�
 
 UI 从同一快照派生普通列表与回收站。正常列表、全局搜索、小窗和计数排除已删除记录；回收站独立搜索并展示原完成状态。全量 Task 索引仍保留已删除记录，使另一窗口删除任务时，正在编辑的详情能够保留本地草稿并显示冲突。详情是否挂载不能只由当前列表成员资格决定；行内、详情或提示条恢复同一任务均不得丢弃草稿，保存前需显式重新确认最新版本。移入回收站前的“继续编辑 / 保存后移入 / 放弃修改并移入”与恢复后“查看任务”的导航保护遵循 [UX](../product/UX.md#回收站与任务恢复)。后台同步不主动抢焦点；显式查看才把焦点移到详情。
 
-生命周期阶段曾将数据库 schema 1 / 2 升到 3，控制台元数据和展开模式阶段分别升到4/5；当前识别1–6，旧1–5先对完整四文件检查副本验证、创建 `before-schema-6` 一致性备份，再事务升级到6，保留 snapshot / placement 原字节。启动时坏库恢复入口只在真实服务未建立时使用，与正常回收站恢复不同；不得以空服务伪装健康空库。可移植 JSON 导出 v3、读取 v1 / v2 / v3，包含回收站、全部计划及两份独立手动顺序；整份导入先备份，再替换任务/计划/顺序并保留本机设置及 console / edge 偏好。旧版 JSON 按整集合恢复，缺失的手动顺序默认空，不隐含合并。文件格式和旧版校验细节见数据模型。
+生命周期阶段曾将数据库 schema 1 / 2 升到 3，控制台元数据、展开模式与排序阶段分别升到4/5/6；当前识别1–7，旧1–6先对完整四文件检查副本验证、创建 `before-schema-7` 一致性备份，再事务升级到7，保留 snapshot / placement 原字节并初始化独立 sync 记录。启动时坏库恢复入口只在真实服务未建立时使用，与正常回收站恢复不同；不得以空服务伪装健康空库。可移植 JSON 导出 v3、读取 v1 / v2 / v3，包含回收站、全部计划及两份独立手动顺序，不包含同步身份、基线或凭据。绑定同步时拒绝整份导入预览和执行，须先断开；之后先备份，再替换任务/计划/顺序并保留本机设置及 console / edge 偏好。旧版 JSON 按整集合恢复，缺失的手动顺序默认空，不隐含合并。文件格式和旧版校验细节见数据模型。
 
 本轮只提供单任务软删除和恢复，不提供自动过期清空、永久删除或批量清空。方案来源与范围见 [生命周期计划](../research/TASK_LIFECYCLE.md)；当前验收范围见内部验证记录（本地保留，不随公开仓库分发），尤其不能从浏览器回归推断 Windows 或多屏通过。
 
@@ -193,6 +193,20 @@ P.bottom <= W.bottom - m
 - 托盘/菜单栏提供显式恢复入口。
 - 默认不请求与核心场景无关的权限；若 POC 发现某平台实现需要额外权限，记录原因并评估替代路径。
 - 普通桌面和最大化窗口是基础要求；全屏、macOS Spaces、Windows 虚拟桌面必须分别验证。Windows 的所有虚拟桌面可见能力不能由 Tauri 通用接口直接承诺。独占全屏/安全桌面等不作为首版保证场景，必须在兼容性说明中明示。
+
+## 可选 Mac 与 Windows 同步
+
+本机 SQLite 仍承担日常读写。`src-tauri/src/sync/` 分离纯数据投影与合并、Supabase 传输、系统凭据和同步运行态；React 的 `SyncSettings` 只负责配置、展示状态和用户选择，经 `src/lib/sync.ts` 调用受控 IPC。没有第二份 WebView 任务主库，也不把同步网络请求放入组件或窗口平台层。项目初始化见 [Supabase 配置说明](SUPABASE_SETUP.md)。
+
+云文档仅包含 tasks、plans、taskOrder、deadlineOrder；今日顺序随 Plan.sortOrder 同步。Settings、placement、使用说明标记、草稿和本机修订号不参与跨设备状态。客户端从上次基线、本机已提交数据、当前云文档进行三方合并；独立修改自动合并，冲突暂停上传并要求逐项选择。应用合并结果时保留本机偏好、提高受影响任务和快照的本机版本，既有编辑冲突保护继续生效。
+
+Supabase 以登录用户拥有的单份版本化文档保存数据。SQL 启用 RLS 并撤销客户端直接写表权限，RPC 从 `auth.uid()` 确定用户，不接受客户端任意指定所有者。提交携带预期云版本，相同内容重复提交保持幂等，版本竞争重新读取合并。Rust 在网络等待期间不持有本地任务写锁，提交回本机前再次核对本机版本；snapshot 与新的同步基线由同一 Repository 事务保存，失败不发布虚假成功。
+
+后台以短延迟合并本机更改，并定期检查云端版本；没有依赖 Supabase Realtime 来提供离线一致性。离线保留本机修改，恢复网络后继续尝试。`sync_status` / `sync_sign_in` / `sync_sign_out` / `sync_now` / `sync_resolve` 仅允许控制台调用，`sidetask:sync-changed` 只向控制台发布同步状态；普通任务变化仍沿用既有提交后通知更新大小窗。
+
+邮箱密码只用于本次登录。访问/刷新令牌由 Rust 保存在 macOS 钥匙串或 Windows 系统凭据库中，不返回 WebView、不进入 SQLite 或 JSON 备份；公开项目配置和账号绑定与无令牌基线存于 schema7 的独立 sync 记录。系统凭据库不可用会报错，不降级成明文文件。断开先停止自动上传，清理失败保留绑定并允许重试；清理完成后本机任务和云端文档仍保留。
+
+这些是当前源码协议，不是生产上线或双端实测结论。尚需实际项目初始化、账号隔离/版本竞争验证、两平台凭据库和 Mac ↔ Windows 断网重连验收；新同步包的构建与上传必须另有 CI 证据，不能沿用旧包结果。
 
 ## 可靠性与交付
 

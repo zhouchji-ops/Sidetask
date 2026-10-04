@@ -17,6 +17,11 @@ fn main() {
             "get_startup_recovery",
             "recover_startup_backup",
             "restart_after_recovery",
+            "sync_status",
+            "sync_sign_in",
+            "sync_sign_out",
+            "sync_now",
+            "sync_resolve",
         ]),
     ))
     .expect("failed to build SideTask command permissions")

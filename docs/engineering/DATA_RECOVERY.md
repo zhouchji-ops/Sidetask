@@ -1,6 +1,6 @@
 # SideTask 数据备份与故障恢复
 
-更新：2026-09-28。当前源码采用 SQLite schema6 / 便携 JSON v3；操作依据为当前 Rust Repository / TaskService、恢复界面与 `tauri.conf.json`。历史包的格式以相应构建为准。Windows 的路径规则已核对 Tauri 2.11.6 源码，历史分支已有原生恢复记录。普通使用入口见[完整使用说明书](../product/USER_GUIDE.md)。
+更新：2026-10-04。当前源码采用 SQLite schema7 / 便携 JSON v3；操作依据为当前 Rust Repository / TaskService、恢复界面与 `tauri.conf.json`。现有 `5dc3a23` 旧下载包仍为 schema6 且不含同步，新版的实际 Supabase 项目和 Mac ↔ Windows 联网验收尚未完成。Windows 的路径规则已核对 Tauri 2.11.6 源码，历史分支已有原生恢复记录。普通使用入口见[完整使用说明书](../product/USER_GUIDE.md)。
 
 ## 先区分两种文件
 
@@ -13,11 +13,14 @@
 | `sidetask-before-schema-4-<UUID>.sqlite3` | 历史控制台设备偏好版本升级前的完整 SQLite 副本 | 同上；继续支持读取 |
 | `sidetask-before-schema-5-<UUID>.sqlite3` | 从 schema1/2/3/4 升到展开模式版本前的完整 SQLite 副本 | 同上；副本内仍为升级前版本，snapshot / placement 原文保留 |
 | `sidetask-before-schema-6-<UUID>.sqlite3` | 从 schema1–5 升到独立任务顺序版本前的完整 SQLite 副本 | 同上；保留升级前版本及 snapshot / placement 原文 |
+| `sidetask-before-schema-7-<UUID>.sqlite3` | 从 schema1–6 升到可选同步版本前的完整 SQLite 副本 | 同上；保留升级前版本及 snapshot / placement 原文 |
 | `sidetask.sqlite3` | 正在使用的唯一任务数据库 | 不能被JSON直接替换，不在应用运行时复制它作为完整备份 |
 
 JSON 文件即使改名为 `.sqlite3` 也不是数据库。SQLite 安全副本也不能从 JSON 文件选择器导入。JSON 恢复保留当前本机设置，包括分区比例、小窗停靠和控制台位置；离线完整 SQLite 恢复会恢复该副本内的本机设置。
 
-当前 SQLite 为 schema6，识别旧 schema1/2/3/4/5。旧库先做保留 WAL 的完整副本预检，再生成经过校验并同步的 `before-schema-6` 一致性备份，然后在事务中升级版本（schema1 同时补应用身份）。备份内保持升级前版本，迁移不重新编码原 snapshot / placement；缺少 `deletedAt` 的旧任务仍按未删除读取，缺少 taskOrder/deadlineOrder 的快照使用空顺序。历史 `before-schema-2` / `before-schema-3` / `before-schema-4` / `before-schema-5` 副本继续支持。旧应用不支持 schema6，应保留新版和升级前副本，不通过手工改版本号来降级。任务 JSON 格式独立，导出v3、读v1/v2/v3，版本决定见 [ADR-0008](../decisions/0008-independent-task-order.md)。
+当前 SQLite 为 schema7，识别旧 schema1/2/3/4/5/6。旧库先做保留 WAL 的完整副本预检，再生成经过校验并同步的 `before-schema-7` 一致性备份，然后在事务中初始化独立 sync 记录并升级版本（schema1 同时补应用身份）。备份内保持升级前版本，迁移不重新编码原 snapshot / placement；缺少 `deletedAt` 的旧任务仍按未删除读取，缺少 taskOrder/deadlineOrder 的快照使用空顺序。历史 before-schema-2/3/4/5/6 副本继续支持。旧应用不支持 schema7，应保留新版和升级前副本，不通过手工改版本号来降级。任务 JSON 格式独立，导出v3、读v1/v2/v3，版本决定见 [ADR-0008](../decisions/0008-independent-task-order.md) 与 [ADR-0009](../decisions/0009-optional-desktop-sync.md)。
+
+schema7 的完整 SQLite 副本包含当时的项目/账号绑定、云版本与同步基线，**不含密码或登录令牌**；令牌留在系统凭据库，JSON 任务备份连账号与基线也不包含。若恢复一个曾启用同步的整库副本，原设备还保存凭据时可能重新开始同步。需要先检查旧任务而不联网合并时，应离线启动恢复后的应用，在设置中断开同步并核对内容，再决定是否重新连接。跨设备复制数据库不能当作登录会话迁移。配置与同步规则见 [Supabase 配置说明](SUPABASE_SETUP.md)。
 
 ## 数据目录
 
@@ -30,13 +33,13 @@ macOS Finder 的「前往文件夹」可输入上面的路径；Windows 文件�
 
 ## 应用可以正常打开：JSON 恢复
 
-1. 先保存或明确放弃所有草稿，包括小窗快速输入，等保存完成。控制台数据区在有未保存草稿或正在保存时不允许恢复。
+1. 先保存或明确放弃所有草稿，包括小窗快速输入，等保存完成。控制台数据区在有未保存草稿或正在保存时不允许恢复。若绑定了同步账号，先在“Mac 与 Windows 同步”中确认断开；即使凭据失效或同步已停止，仍须完成账号清理才能预览和恢复 JSON。
 2. 在设置的数据区导出当前任务备份，记下界面返回的完整路径。重要备份另复制到自己管理的安全位置。
 3. 选择需要恢复的 JSON，核对总任务数、其中回收站数量、计划数和导出时间。当前限制为 10 MiB / 10,000 任务 / 100,000 计划，回收站任务同样计入容量。
 4. 点击「备份当前数据并恢复」。应用先创建经过校验的完整 SQLite 安全副本，再一次事务替换任务、计划与顺序（包括回收站状态与全部历史/未来计划）；保留当前设备设置、DDL 排序模式、小窗停靠和控制台位置。备份或校验失败不恢复。
 5. 确认恢复成功及自动安全备份路径。核对今日 / 全部任务 / DDL，退出并重启检查。发生冲突先重新预览，不重复点击强行覆盖。
 
-普通导出产生的文件需要另行保管；现版本没有周期备份或云备份。
+普通导出产生的文件需要另行保管；现版本没有周期历史备份。云同步传播当前任务状态，不能替代这类备份。恢复后重新连接会按首次合并处理，不会以导入备份强行替换云端任务。
 
 v1 备份缺失或为 null 的删除标记按未删除处理，不能携带非空回收站状态；v2 明确保留 `deletedAt`；v3 增加 taskOrder/deadlineOrder。v1/v2 不允许携带非空的这两份排序，缺失时按空顺序恢复，不沿用当前自定义顺序。v3 恢复后的 DDL 沿用本机排序模式，选择“手动排序”才能按导入的手动顺序查看。所有版本的排序引用必须存在且不能重复。
 
@@ -60,7 +63,7 @@ v1 备份缺失或为 null 的删除标记按未删除处理，不能携带非�
 1. 明确退出 SideTask，并确认所有 SideTask 应用/开发进程已结束。仅关闭控制台窗口不等于退出。macOS 活动监视器或 Windows 任务管理器可确认；同时停下可能运行的 `tauri dev`。
 2. 找到上面的整个数据目录。保留原目录为一个新名字，例如 `com.changjin.sidetask.before-recovery-20260925-153000`；确保该备份名字不存在，不覆盖其他备份。目录内的 `sidetask.sqlite3`、`-wal`、`-shm`、`-journal` 及导出文件一起保留。只有进程全部停止后才能执行这步。
 3. 在原位置重新创建空的 `com.changjin.sidetask` 目录。从保留下来的文件中**复制**一份确认过时间与内容的 `sidetask-…-<UUID>.sqlite3` 安全备份到新目录，复制后的名字为 `sidetask.sqlite3`。保留源安全备份不动。新目录不要放旧库的 WAL/SHM/journal；这些文件与旧数据库配套，不能混到恢复副本中。
-4. 启动当前 SideTask。应用先校验库版本、身份、结构、SQLite完整性和业务字段，失败则停止，不以空任务或示例数据覆盖。schema1/2/3/4/5安全副本通过后会再做一次带备份的schema6升级。
+4. 启动当前 SideTask。应用先校验库版本、身份、结构、SQLite完整性和业务字段，失败则停止，不以空任务或示例数据覆盖。schema1/2/3/4/5/6安全副本通过后会再做一次带备份的schema7升级。schema7副本可能含旧同步绑定，需要检查内容后再联网时先离线启动并断开同步。
 5. 若启动成功，先核对任务和计划，再核对停靠屏幕/尺寸等设备设置；完整SQLite副本含创建时的本机配置。确认前继续保留原目录和安全副本。
 6. 若仍失败，退出所有进程，保留这次尝试目录为另一个新名字，再把步骤2的原目录恢复原名。不要把多份库或WAL文件混在一起，不删除唯一原始损坏数据。由维护者用副本进一步分析。
 
@@ -72,7 +75,7 @@ v1 备份缺失或为 null 的删除标记按未删除处理，不能携带非�
 sqlite3 -readonly "所选安全备份的绝对路径.sqlite3" "PRAGMA integrity_check; PRAGMA user_version; PRAGMA application_id;"
 ```
 
-预期 integrity_check 为 `ok`；schema1 的 application_id 为0，schema2/3/4/5/6为1396986955。此命令只检查SQLite层，不能替代应用对任务/计划/排序引用/时区/字段的完整校验。不要执行 `.recover`、`VACUUM` 或手工写 SQL 到唯一原库。
+预期 integrity_check 为 `ok`；schema1 的 application_id 为0，schema2/3/4/5/6/7为1396986955。此命令只检查SQLite层，不能替代应用对任务/计划/排序引用/时区/同步基线/字段的完整校验。不要执行 `.recover`、`VACUUM` 或手工写 SQL 到唯一原库。
 
 ## 只有控制台位置提示失败
 
@@ -86,7 +89,7 @@ sqlite3 -readonly "所选安全备份的绝对路径.sqlite3" "PRAGMA integrity_
 
 ## 附录：启动恢复的文件与实现边界
 
-- 候选名称仅接受 `sidetask-before-schema-2-<UUID>.sqlite3` / `sidetask-before-schema-3-<UUID>.sqlite3` / `sidetask-before-schema-4-<UUID>.sqlite3` / `sidetask-before-schema-5-<UUID>.sqlite3` / `sidetask-before-schema-6-<UUID>.sqlite3` / `sidetask-safety-backup-<UUID>.sqlite3`，UUID 为标准小写格式；不接受用户路径、链接、JSON 改名或带 WAL/SHM/journal 的备份。候选限 32 MiB，原库与日志证据合计限 1 GiB。
+- 候选名称仅接受 `sidetask-before-schema-2-<UUID>.sqlite3` / `sidetask-before-schema-3-<UUID>.sqlite3` / `sidetask-before-schema-4-<UUID>.sqlite3` / `sidetask-before-schema-5-<UUID>.sqlite3` / `sidetask-before-schema-6-<UUID>.sqlite3` / `sidetask-before-schema-7-<UUID>.sqlite3` / `sidetask-safety-backup-<UUID>.sqlite3`，UUID 为标准小写格式；不接受用户路径、链接、JSON 改名或带 WAL/SHM/journal 的备份。候选限 64 MiB（容纳快照与同步基线），原库与日志证据合计限 1 GiB。
 - 候选 ID 包含校验时的 SHA-256；确认后再次校验，文件变更必须重新预览。SHA-256 用于变化检测和复制校验，不代替数据来源可信判断。
 - `sidetask-recovery-evidence-<UUID>/manifest.json` 记录原始四文件的存在情况、长度、摘要；证据不会用于普通候选扫描。Unix 证据目录权限 0700，新文件 0600。
 - `sidetask-recovery-pending.json` 以已完整同步的临时记录通过同目录硬链接发布，先于任何主库/日志移动。重试沿用已验证的原始证据，避免把上次恢复一半的文件当原件。
