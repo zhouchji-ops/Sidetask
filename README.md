@@ -24,14 +24,14 @@
 
 ## 下载与安装
 
-最新安装包已发布到 [GitHub Release：0.1.0 试用版](https://github.com/zhouchji-ops/Sidetask/releases/tag/v0.1.0-preview.20261007)。安装包来自 [CI 37221920357](https://github.com/zhouchji-ops/Sidetask/actions/runs/37221920357)，对应产品代码 [c922fea](https://github.com/zhouchji-ops/Sidetask/commit/c922fea31d02bc6550d34f3c6de24130965f0060)，包含可选同步。两平台检查、包构建与上传均已通过，Release 文件摘要已与 CI 记录核对一致。
+最新安装包已发布到 [GitHub Release：v0.1.0 Beta 1](https://github.com/zhouchji-ops/Sidetask/releases/tag/v0.1.0-beta.1)。安装包来自 [CI 37221920357](https://github.com/zhouchji-ops/Sidetask/actions/runs/37221920357)，对应产品代码 [c922fea](https://github.com/zhouchji-ops/Sidetask/commit/c922fea31d02bc6550d34f3c6de24130965f0060)，包含可选同步。两平台检查、包构建与上传均已通过，Release 文件摘要已与 CI 记录核对一致。
 
 | 平台 | 下载 | 文件 |
 | --- | --- | --- |
-| Mac · Apple Silicon / arm64 | [下载 Mac 试用包](https://github.com/zhouchji-ops/Sidetask/releases/download/v0.1.0-preview.20261007/SideTask-macos.zip) | `SideTask-macos.zip` 内的 `SideTask.app` |
-| Windows · x64 | [下载 Windows 安装包](https://github.com/zhouchji-ops/Sidetask/releases/download/v0.1.0-preview.20261007/SideTask_0.1.0_x64-setup.exe) | `SideTask_0.1.0_x64-setup.exe`（4,684,220 字节） |
+| Mac · Apple Silicon / arm64 | [下载 Mac 试用包](https://github.com/zhouchji-ops/Sidetask/releases/download/v0.1.0-beta.1/SideTask-macos.zip) | `SideTask-macos.zip` 内的 `SideTask.app` |
+| Windows · x64 | [下载 Windows 安装包](https://github.com/zhouchji-ops/Sidetask/releases/download/v0.1.0-beta.1/SideTask_0.1.0_x64-setup.exe) | `SideTask_0.1.0_x64-setup.exe`（4,684,220 字节） |
 
-Mac 下载后解压得到 App；Windows 直接运行下载的安装器。Release 中提供 [SHA256SUMS.txt](https://github.com/zhouchji-ops/Sidetask/releases/download/v0.1.0-preview.20261007/SHA256SUMS.txt) 校验文件。完整步骤、包摘要、更新和首次启动见[使用说明书：安装与更新](docs/product/USER_GUIDE.md#安装与更新)。
+Mac 下载后解压得到 App；Windows 直接运行下载的安装器。Release 中提供 [SHA256SUMS.txt](https://github.com/zhouchji-ops/Sidetask/releases/download/v0.1.0-beta.1/SHA256SUMS.txt) 校验文件。完整步骤、包摘要、更新和首次启动见[使用说明书：安装与更新](docs/product/USER_GUIDE.md#安装与更新)。
 
 当前 Release 标记为试用版（Pre-release）；Mac 包为临时签名、未公证，Windows 包未签名。Release 附件不受 CI 产物的 14 天保留期限制；本批原始 CI 产物仍于 **2026-10-18 UTC** 到期。请下载上表附件，Release 自动生成的 Source code ZIP 是源码，不是安装包。
 

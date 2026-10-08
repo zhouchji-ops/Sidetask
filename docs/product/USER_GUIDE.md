@@ -1,6 +1,6 @@
 # 侧笺 · SideTask 使用说明书
 
-适用版本：**0.1.0 试用版**，构建 `c922fea`，Release 标签 `v0.1.0-preview.20261007`。更新：2026-10-07。本轮构建包含三列表拖动排序与可选 Mac ↔ Windows 同步；各平台下载状态见下方。真实 Supabase、系统凭据库及双端原生联网验收仍待完成。
+适用版本：**0.1.0 试用版**，构建 `c922fea`，Release 标签 `v0.1.0-beta.1`。更新：2026-10-07。本轮构建包含三列表拖动排序与可选 Mac ↔ Windows 同步；各平台下载状态见下方。真实 Supabase、系统凭据库及双端原生联网验收仍待完成。
 
 侧笺有两个界面：**小窗用于随手查看、添加和勾选，大窗用于集中管理和设置**。两者共用本机任务数据，核心使用无需注册账号。可选连接自己的 Supabase 项目以同步 Mac 与 Windows；不连接时各设备独立保存数据。
 
@@ -27,12 +27,12 @@
 
 ### 获取内部试用包
 
-本轮试用包已发布到 [GitHub Release](https://github.com/zhouchji-ops/Sidetask/releases/tag/v0.1.0-preview.20261007)，来自 [CI 37221920357](https://github.com/zhouchji-ops/Sidetask/actions/runs/37221920357)，对应完整提交 `c922fea31d02bc6550d34f3c6de24130965f0060`，包含可选同步。两平台检查、包构建与上传均已通过；Release 中文件大小和 SHA-256 已与 CI 核对一致，没有重新打包。安装包与自动生成的 Source code 压缩包不同。
+本轮试用包已发布到 [GitHub Release](https://github.com/zhouchji-ops/Sidetask/releases/tag/v0.1.0-beta.1)，来自 [CI 37221920357](https://github.com/zhouchji-ops/Sidetask/actions/runs/37221920357)，对应完整提交 `c922fea31d02bc6550d34f3c6de24130965f0060`，包含可选同步。两平台检查、包构建与上传均已通过；Release 中文件大小和 SHA-256 已与 CI 核对一致，没有重新打包。安装包与自动生成的 Source code 压缩包不同。
 
 | 平台 | 下载入口 | 解压后要使用的文件 |
 | --- | --- | --- |
-| Mac，Apple Silicon / arm64 | [Mac 试用包](https://github.com/zhouchji-ops/Sidetask/releases/download/v0.1.0-preview.20261007/SideTask-macos.zip) | `SideTask-macos.zip` 内的 `SideTask.app` |
-| Windows，x64 | [Windows 安装包](https://github.com/zhouchji-ops/Sidetask/releases/download/v0.1.0-preview.20261007/SideTask_0.1.0_x64-setup.exe) | 直接运行 `SideTask_0.1.0_x64-setup.exe` |
+| Mac，Apple Silicon / arm64 | [Mac 试用包](https://github.com/zhouchji-ops/Sidetask/releases/download/v0.1.0-beta.1/SideTask-macos.zip) | `SideTask-macos.zip` 内的 `SideTask.app` |
+| Windows，x64 | [Windows 安装包](https://github.com/zhouchji-ops/Sidetask/releases/download/v0.1.0-beta.1/SideTask_0.1.0_x64-setup.exe) | 直接运行 `SideTask_0.1.0_x64-setup.exe` |
 
 从上表或 Release 的 Assets 下载：Mac 解压 `SideTask-macos.zip`，Windows 直接运行 `.exe`。Release 附件不受 CI 产物的 14 天保留期限制。若从原始 CI 页面下载，可能多一层 ZIP，需先解压；原始 CI 产物仍于 **2026-10-18 UTC** 到期。后续版本请查看 [项目首页](../../README.md#下载与安装)的最新下载入口。
 
@@ -63,7 +63,7 @@
 
 新版会校验已有数据库，必要时先备份再升级。不要靠清空数据目录解决更新问题，也不要手工修改数据库版本来降级。重装应用不能替代备份；跨版本安装和全部故障情况仍在持续验收。
 
-如需核对本批文件，下载 Release 的 [SHA256SUMS.txt](https://github.com/zhouchji-ops/Sidetask/releases/download/v0.1.0-preview.20261007/SHA256SUMS.txt)。以下 SHA-256 指 Release 的两个实际包；若从原始 CI 下载，则指内层包，**不是 CI 产物的外层 ZIP**：
+如需核对本批文件，下载 Release 的 [SHA256SUMS.txt](https://github.com/zhouchji-ops/Sidetask/releases/download/v0.1.0-beta.1/SHA256SUMS.txt)。以下 SHA-256 指 Release 的两个实际包；若从原始 CI 下载，则指内层包，**不是 CI 产物的外层 ZIP**：
 
 | 文件 | SHA-256 |
 | --- | --- |
