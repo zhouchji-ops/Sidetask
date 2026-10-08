@@ -1,6 +1,6 @@
 # 侧笺 · SideTask 使用说明书
 
-适用版本：**0.1.0 内部试用版**，构建 `c922fea`。更新：2026-10-04。本轮构建包含三列表拖动排序与可选 Mac ↔ Windows 同步；各平台下载状态见下方。真实 Supabase、系统凭据库及双端原生联网验收仍待完成。
+适用版本：**0.1.0 试用版**，构建 `c922fea`，Release 标签 `v0.1.0-preview.20261007`。更新：2026-10-07。本轮构建包含三列表拖动排序与可选 Mac ↔ Windows 同步；各平台下载状态见下方。真实 Supabase、系统凭据库及双端原生联网验收仍待完成。
 
 侧笺有两个界面：**小窗用于随手查看、添加和勾选，大窗用于集中管理和设置**。两者共用本机任务数据，核心使用无需注册账号。可选连接自己的 Supabase 项目以同步 Mac 与 Windows；不连接时各设备独立保存数据。
 
@@ -27,14 +27,14 @@
 
 ### 获取内部试用包
 
-本轮试用包来自 [CI 37221920357](https://github.com/zhouchji-ops/Sidetask/actions/runs/37221920357)，对应完整提交 `c922fea31d02bc6550d34f3c6de24130965f0060`，包含可选同步。两平台检查、内部包构建与上传均已通过。安装包与源码压缩包不同。
+本轮试用包已发布到 [GitHub Release](https://github.com/zhouchji-ops/Sidetask/releases/tag/v0.1.0-preview.20261007)，来自 [CI 37221920357](https://github.com/zhouchji-ops/Sidetask/actions/runs/37221920357)，对应完整提交 `c922fea31d02bc6550d34f3c6de24130965f0060`，包含可选同步。两平台检查、包构建与上传均已通过；Release 中文件大小和 SHA-256 已与 CI 核对一致，没有重新打包。安装包与自动生成的 Source code 压缩包不同。
 
 | 平台 | 下载入口 | 解压后要使用的文件 |
 | --- | --- | --- |
-| Mac，Apple Silicon / arm64 | [Mac 试用包](https://github.com/zhouchji-ops/Sidetask/actions/runs/37221920357/artifacts/11310721217) | `SideTask-macos.zip` 内的 `SideTask.app` |
-| Windows，x64 | [Windows 安装包](https://github.com/zhouchji-ops/Sidetask/actions/runs/37221920357/artifacts/11311672093) | 解压目录下 `src-tauri/target/release/bundle/nsis/SideTask_0.1.0_x64-setup.exe` |
+| Mac，Apple Silicon / arm64 | [Mac 试用包](https://github.com/zhouchji-ops/Sidetask/releases/download/v0.1.0-preview.20261007/SideTask-macos.zip) | `SideTask-macos.zip` 内的 `SideTask.app` |
+| Windows，x64 | [Windows 安装包](https://github.com/zhouchji-ops/Sidetask/releases/download/v0.1.0-preview.20261007/SideTask_0.1.0_x64-setup.exe) | 直接运行 `SideTask_0.1.0_x64-setup.exe` |
 
-GitHub 下载的产物可能还有一层 ZIP，先解压外层；Mac 再解压里面的 `SideTask-macos.zip`。若 GitHub 要求登录，先登录后下载。此批产物保留 14 天，到期日为 **2026-10-18 UTC**；Mac 产物具体到期时间为 `2026-10-18T17:57:31Z`，Windows 为 `2026-10-18T18:37:34Z`。失效后查看 [项目首页](../../README.md#下载与安装)的最新下载入口，或联系维护者获取新包。当前没有正式 Release 下载渠道。
+从上表或 Release 的 Assets 下载：Mac 解压 `SideTask-macos.zip`，Windows 直接运行 `.exe`。Release 附件不受 CI 产物的 14 天保留期限制。若从原始 CI 页面下载，可能多一层 ZIP，需先解压；原始 CI 产物仍于 **2026-10-18 UTC** 到期。后续版本请查看 [项目首页](../../README.md#下载与安装)的最新下载入口。
 
 本批没有 Intel Mac 或 Windows ARM 原生包。Mac 构建配置的最低版本为 macOS 12.0，但最低系统与完整兼容范围仍在验收，不等于所有符合版本号的设备均已验证。
 
@@ -48,7 +48,7 @@ GitHub 下载的产物可能还有一层 ZIP，先解压外层；Mac 再解压�
 
 ### Windows
 
-1. 解压 GitHub 产物，运行 `SideTask_0.1.0_x64-setup.exe`。
+1. 从 Release 下载并运行 `SideTask_0.1.0_x64-setup.exe`；若从原始 CI 产物下载，先解压外层 ZIP。
 2. 按安装向导完成安装，打开 SideTask。安装器支持简体中文和英文。
 3. 若安装器提示缺少运行组件或安装失败，保留完整错误内容，按提示处理或联系维护者。
 
@@ -63,7 +63,7 @@ GitHub 下载的产物可能还有一层 ZIP，先解压外层；Mac 再解压�
 
 新版会校验已有数据库，必要时先备份再升级。不要靠清空数据目录解决更新问题，也不要手工修改数据库版本来降级。重装应用不能替代备份；跨版本安装和全部故障情况仍在持续验收。
 
-如需核对本批文件，以下 SHA-256 指内层实际包，**不是 GitHub 下载的外层 ZIP**：
+如需核对本批文件，下载 Release 的 [SHA256SUMS.txt](https://github.com/zhouchji-ops/Sidetask/releases/download/v0.1.0-preview.20261007/SHA256SUMS.txt)。以下 SHA-256 指 Release 的两个实际包；若从原始 CI 下载，则指内层包，**不是 CI 产物的外层 ZIP**：
 
 | 文件 | SHA-256 |
 | --- | --- |
