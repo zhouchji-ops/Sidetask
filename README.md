@@ -33,7 +33,7 @@
 
 Mac 下载后解压得到 App；Windows 直接运行下载的安装器。Release 中提供 [SHA256SUMS.txt](https://github.com/zhouchji-ops/Sidetask/releases/download/v0.1.0-beta.1/SHA256SUMS.txt) 校验文件。完整步骤、包摘要、更新和首次启动见[使用说明书：安装与更新](docs/product/USER_GUIDE.md#安装与更新)。
 
-当前 Release 标记为试用版（Pre-release）；Mac 包为临时签名、未公证，Windows 包未签名。Release 附件不受 CI 产物的 14 天保留期限制；本批原始 CI 产物仍于 **2026-10-18 UTC** 到期。请下载上表附件，Release 自动生成的 Source code ZIP 是源码，不是安装包。
+当前下载为 Beta 试用版；Mac 包为临时签名、未公证，Windows 包未签名。Release 附件不受 CI 产物的 14 天保留期限制；本批原始 CI 产物仍于 **2026-10-18 UTC** 到期。请下载上表附件，Release 自动生成的 Source code ZIP 是源码，不是安装包。
 
 ## 第一次使用
 
